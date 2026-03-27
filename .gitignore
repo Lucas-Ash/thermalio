@@ -15,10 +15,7 @@ env/
 htmlcov/
 
 # Outputs / Generated Data
-test_plots/
 qa_regression/
-*.png
-*.csv
 
 # OS generated files
 .DS_Store

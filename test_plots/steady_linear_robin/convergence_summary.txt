@@ -1,0 +1,3 @@
+Empirical convergence summary.
+This checks observed error trends; it does not constitute a mathematical guarantee of convergence.
+
