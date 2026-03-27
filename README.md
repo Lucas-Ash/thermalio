@@ -4,11 +4,11 @@
 
 The core model is the transient heat equation with volumetric sources:
 
-\[
-\frac{\partial u}{\partial t} - \nabla \cdot (\boldsymbol{\alpha} \nabla u) = Q(\mathbf{x}, t),
-\]
+$$
+\frac{\partial u}{\partial t} - \nabla \cdot (\boldsymbol{\alpha} \nabla u) = Q(\mathbf{x}, t)
+$$
 
-with **Dirichlet**, **Neumann**, **Robin**, and **nonlinear radiative** boundary data where supported. Extensions include **anisotropic** diffusivity \(\boldsymbol{\alpha}\), **temperature-dependent** \(\alpha(u)\), and **phase change** via an **apparent heat capacity** formulation.
+with **Dirichlet**, **Neumann**, **Robin**, and **nonlinear radiative** boundary data where supported. Extensions include **anisotropic** diffusivity $\boldsymbol{\alpha}$, **temperature-dependent** $\alpha(u)$, and **phase change** via an **apparent heat capacity** formulation.
 
 ---
 
@@ -31,7 +31,7 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 </p>
 <p align="center">
   <img src="test_plots/anisotropic_heat_kernel/level_05_superfine/square_polygonal.png" alt="Square polygonal mesh verification" width="32%" />
-  <img src="test_plots/anisotropic_heat_kernel/level_05_superfine/nonorthogonal_tiled_polygonal.png" alt="Non-orthogonal tiled polygonal verification" width="32%" />
+  <img src="test_plots/anisotropic_heat_kernel/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Non-orthogonal tiled polygonal verification" width="32%" />
 </p>
 
 *Left-to-right, top: curvilinear, hexagonal polygonal, Delaunay; bottom: square polygonal, non-orthogonal tiled polygonal.*
@@ -40,7 +40,7 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 
 ## Physics & modeling highlights
 
-**Linear diffusion & sources** — Fundamental solutions (Gaussian / heat kernel), eigenmodes, harmonics, and **prescribed sources** \(Q\) matched to closed-form \(u\).
+**Linear diffusion & sources** — Fundamental solutions (Gaussian / heat kernel), eigenmodes, harmonics, and **prescribed sources** $Q$ matched to closed-form $u$.
 
 <p align="center">
   <img src="test_plots/heat_kernel/level_05_superfine/curvilinear.png" alt="Heat kernel on curvilinear mesh" width="48%" />
@@ -50,16 +50,16 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 **Stiff spatial features** — Discontinuous initial data (convolved block), **rotated plane waves**, and **high-frequency** modes probe resolution limits and orientation dependence.
 
 <p align="center">
-  <img src="test_plots/nyquist_oscillations/level_05_superfine/nonorthogonal_tiled_polygonal.png" alt="Nyquist oscillations on tiled mesh" width="70%" />
+  <img src="test_plots/nyquist_oscillations/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Nyquist oscillations on tiled mesh" width="70%" />
 </p>
 
-**Anisotropic diffusion** — \(\boldsymbol{\alpha}\) a full \(2\times2\) tensor (elliptic kernels, rotated principal directions).
+**Anisotropic diffusion** — $\boldsymbol{\alpha}$ a full $2\times2$ tensor (elliptic kernels, rotated principal directions).
 
-**Nonlinear material response** — **Temperature-dependent diffusivity** \(\alpha = \alpha(x,u)\) with iterative solves; solutions and sources are manufactured for strict consistency.
+**Nonlinear material response** — **Temperature-dependent diffusivity** $\alpha = \alpha(x,u)$ with iterative solves; solutions and sources are manufactured for strict consistency.
 
 <p align="center">
   <img src="test_plots/temperature_dependent_diffusivity/level_05_superfine/square_polygonal.png" alt="Temperature-dependent diffusivity verification" width="48%" />
-  <img src="test_plots/temperature_dependent_diffusivity/level_05_superfine/nonorthogonal_tiled_polygonal.png" alt="Temperature-dependent diffusivity on tiled mesh" width="48%" />
+  <img src="test_plots/temperature_dependent_diffusivity/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Temperature-dependent diffusivity on tiled mesh" width="48%" />
 </p>
 
 **Phase change** — **Apparent heat capacity** model (latent heat smeared across a mushy interval) with manufactured **Stefan-type** traveling-interface temperature fields.
@@ -72,7 +72,7 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 
 <p align="center">
   <img src="test_plots/radiative_manufactured/level_05_superfine/square_polygonal.png" alt="Radiative BC manufactured solution" width="48%" />
-  <img src="test_plots/radiative_manufactured/level_05_superfine/nonorthogonal_tiled_polygonal.png" alt="Radiative BC on non-orthogonal tiled mesh" width="48%" />
+  <img src="test_plots/radiative_manufactured/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Radiative BC on non-orthogonal tiled mesh" width="48%" />
 </p>
 
 ---
@@ -100,6 +100,12 @@ MPLCONFIGDIR=/tmp/matplotlib python tests.py
 **Boundary-condition spot checks** (polygonal Neumann / Robin): `test_polygonal_boundary_conditions.py`.
 
 Dependencies are the usual scientific Python stack (**NumPy**, **SciPy**, **Matplotlib**). Use a virtual environment and install those packages if they are not already present.
+
+---
+
+## Math in this README
+
+Equations use **GitHub-style** delimiters: `$…$` for inline math and `$$…$$` on their own lines for display math (this matches [GitHub’s math syntax](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions)). If the **Markdown preview** in VS Code or Cursor shows raw `$` text, turn on **Settings → Markdown: Math** (`markdown.math.enabled`).
 
 ---
 
