@@ -38,6 +38,20 @@ def test_get_analytical_case_steady_linear_neumann():
     bc_val = boundary(1.0, 0.5, 1.0, nx, ny)
     assert np.isclose(bc_val, 0.75)
 
+
+def test_get_analytical_case_stefan_apparent_capacity():
+    case = get_analytical_case("stefan_apparent_capacity", alpha=0.08, t_end=0.05)
+    assert case["name"] == "Stefan Apparent Capacity"
+    assert "phase_change_model" in case
+    assert case["phase_change_model"] is not None
+    x = np.array([-0.5, 0.0, 0.5])
+    y = np.zeros_like(x)
+    u = case["solution"](x, y, 0.02)
+    q = case["source"](x, y, 0.02)
+    assert u.shape == x.shape
+    assert q.shape == x.shape
+
+
 def test_get_analytical_case_unknown():
     with pytest.raises(ValueError, match="Unknown analytical case"):
         get_analytical_case("unknown_case_name")

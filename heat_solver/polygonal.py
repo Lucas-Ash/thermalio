@@ -5,6 +5,7 @@ from scipy.sparse import diags, lil_matrix
 from scipy.sparse.linalg import bicgstab, cg, spsolve
 
 from .geometry import polygon_area_and_centroid
+from .phase_change import ApparentHeatCapacityModel
 
 
 def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None):
@@ -87,6 +88,8 @@ class PolygonalHeatSolver:
         time_scheme="backward_euler",
         flux_scheme="tpfa",
         flux_discretization="tpfa",
+        phase_change_model=None,
+        phase_change_options=None,
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -116,6 +119,16 @@ class PolygonalHeatSolver:
             raise ValueError("flux_discretization must be 'tpfa' or 'reconstructed'.")
         if self.flux_scheme == "mpfa" and self.flux_discretization == "reconstructed":
             raise ValueError("flux_discretization='reconstructed' is only supported with flux_scheme='tpfa'.")
+        if phase_change_model is not None and not isinstance(phase_change_model, ApparentHeatCapacityModel):
+            raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
+        self.phase_change_model = phase_change_model
+        self.phase_change_options = {
+            "max_iters": 30,
+            "tol": 1e-9,
+            "relaxation": 1.0,
+        }
+        if phase_change_options is not None:
+            self.phase_change_options.update(dict(phase_change_options))
         self.M = len(self.polygons)
         self.cell_centers = self._compute_cell_centers()
         self.cell_areas = self._compute_cell_areas()
@@ -135,6 +148,17 @@ class PolygonalHeatSolver:
         )
         self.gradient_coeffs = self._build_gradient_reconstruction() if need_tpfa_gradients else None
         self.u = np.zeros(self.M)
+
+    def _effective_heat_capacity(self, temperature):
+        if self.phase_change_model is None:
+            return np.ones_like(temperature, dtype=float)
+        return np.broadcast_to(
+            np.asarray(self.phase_change_model.effective_heat_capacity(temperature), dtype=float),
+            temperature.shape,
+        )
+
+    def _build_mass_matrix(self, heat_capacity):
+        return diags(self.cell_areas * heat_capacity, format="csr")
 
     def _compute_cell_centers(self):
         return np.array([polygon_area_and_centroid(self.vertices[poly])[1] for poly in self.polygons])
@@ -491,7 +515,7 @@ class PolygonalHeatSolver:
                 np.asarray(self.source_func(cx, cy, t_next), dtype=float),
                 (self.M,),
             )
-            if self.time_scheme == "backward_euler":
+            if self.time_scheme == "backward_euler" and self.phase_change_model is None:
                 rhs = self.M_diag @ u + dt_eff * (self.cell_areas * source_next)
                 if self.bc_type == "dirichlet":
                     bc_vals = self.bc_func(cx, cy, t_next)
@@ -505,7 +529,7 @@ class PolygonalHeatSolver:
                     boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
                     lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
                     rhs = rhs + dt_eff * boundary_rhs
-            else:
+            elif self.phase_change_model is None:
                 # Crank–Nicolson: (M + 0.5*dt*K) u^{n+1} = (M - 0.5*dt*K) u^n + 0.5*dt*(f^{n+1}+f^n)
                 # with K = A + boundary part; Dirichlet rows are identity with u^{n+1} = g^{n+1}.
                 source_prev = np.broadcast_to(
@@ -531,6 +555,80 @@ class PolygonalHeatSolver:
                     rhs = (self.M_diag - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
                     rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
                     lhs = self.M_diag + 0.5 * dt_eff * k_next
+            else:
+                max_iters = int(self.phase_change_options["max_iters"])
+                tol = float(self.phase_change_options["tol"])
+                relaxation = float(self.phase_change_options["relaxation"])
+                u_iter = u.copy()
+                if self.bc_type != "dirichlet" and self.time_scheme == "crank_nicolson":
+                    b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
+                    b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
+                    k_prev = self.A + b_mat_prev
+                    k_next = self.A + b_mat_next
+                else:
+                    b_rhs_prev = b_rhs_next = None
+                    k_prev = k_next = None
+                source_prev = None
+                if self.time_scheme == "crank_nicolson":
+                    source_prev = np.broadcast_to(
+                        np.asarray(self.source_func(cx, cy, t), dtype=float),
+                        (self.M,),
+                    )
+                    src_avg = self.cell_areas * (source_next + source_prev)
+                for _ in range(max_iters):
+                    cp_eff = self._effective_heat_capacity(u_iter)
+                    mass_matrix = self._build_mass_matrix(cp_eff)
+                    if self.time_scheme == "backward_euler":
+                        rhs = mass_matrix @ u + dt_eff * (self.cell_areas * source_next)
+                        if self.bc_type == "dirichlet":
+                            bc_vals = self.bc_func(cx, cy, t_next)
+                            lhs = (mass_matrix + dt_eff * self.A).copy().tolil()
+                            for i in np.where(self.is_boundary)[0]:
+                                lhs.rows[i] = [i]
+                                lhs.data[i] = [1.0]
+                                rhs[i] = bc_vals[i]
+                            lhs = lhs.tocsr()
+                        else:
+                            boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
+                            lhs = mass_matrix + dt_eff * (self.A + boundary_matrix)
+                            rhs = rhs + dt_eff * boundary_rhs
+                    elif self.bc_type == "dirichlet":
+                        rhs = (mass_matrix - 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * src_avg
+                        bc_vals = self.bc_func(cx, cy, t_next)
+                        for i in np.where(self.is_boundary)[0]:
+                            rhs[i] = bc_vals[i]
+                        lhs = (mass_matrix + 0.5 * dt_eff * self.A).copy().tolil()
+                        for i in np.where(self.is_boundary)[0]:
+                            lhs.rows[i] = [i]
+                            lhs.data[i] = [1.0]
+                        lhs = lhs.tocsr()
+                    else:
+                        rhs = (mass_matrix - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
+                        rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
+                        lhs = mass_matrix + 0.5 * dt_eff * k_next
+                    x0 = u_iter if self.linear_solver != "direct" else None
+                    u_next = _solve_sparse_linear_system(
+                        lhs,
+                        rhs,
+                        self.linear_solver,
+                        self.linear_solver_options,
+                        x0=x0,
+                    )
+                    if relaxation != 1.0:
+                        u_next = relaxation * u_next + (1.0 - relaxation) * u_iter
+                    err = np.max(np.abs(u_next - u_iter))
+                    scale = max(1.0, np.max(np.abs(u_next)))
+                    u_iter = u_next
+                    if err <= tol * scale:
+                        break
+                else:
+                    raise RuntimeError(
+                        "Phase-change nonlinear solve did not converge. "
+                        "Try smaller dt or larger phase_change_options['max_iters']."
+                    )
+                u = u_iter
+                t = t_next
+                continue
             x0 = u if self.linear_solver != "direct" else None
             u = _solve_sparse_linear_system(
                 lhs,

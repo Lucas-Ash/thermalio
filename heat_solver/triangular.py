@@ -3,6 +3,7 @@ from scipy.sparse import csr_matrix, diags
 from scipy.sparse.linalg import spsolve
 
 from .geometry import polygon_area_and_centroid
+from .phase_change import ApparentHeatCapacityModel
 
 
 class NonUniformHeatSolver:
@@ -11,7 +12,18 @@ class NonUniformHeatSolver:
     Vertex-centered unknowns with median dual control volumes.
     """
 
-    def __init__(self, points, tris, alpha, dt, bc_type="dirichlet", bc_func=None, source_func=None):
+    def __init__(
+        self,
+        points,
+        tris,
+        alpha,
+        dt,
+        bc_type="dirichlet",
+        bc_func=None,
+        source_func=None,
+        phase_change_model=None,
+        phase_change_options=None,
+    ):
         self.points = np.asarray(points, dtype=float)
         self.tris = np.asarray(tris, dtype=int)
         self.N = self.points.shape[0]
@@ -20,6 +32,12 @@ class NonUniformHeatSolver:
         self.bc_type = bc_type
         self.bc_func = bc_func if bc_func is not None else (lambda x, y, t: 0.0)
         self.source_func = source_func if source_func is not None else (lambda x, y, t: 0.0)
+        if phase_change_model is not None and not isinstance(phase_change_model, ApparentHeatCapacityModel):
+            raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
+        self.phase_change_model = phase_change_model
+        self.phase_change_options = {"max_iters": 30, "tol": 1e-9, "relaxation": 1.0}
+        if phase_change_options is not None:
+            self.phase_change_options.update(dict(phase_change_options))
         self._build_topology()
         self._build_dual_geometry()
         self._assemble_diffusion_matrix()
@@ -185,6 +203,14 @@ class NonUniformHeatSolver:
         self.M_over_dt = diags(self.cv_area / self.dt, format="csr")
         self.LHS_base = (self.M_over_dt + self.A).tocsr()
 
+    def _effective_heat_capacity(self, temperature):
+        if self.phase_change_model is None:
+            return np.ones_like(temperature, dtype=float)
+        return np.broadcast_to(
+            np.asarray(self.phase_change_model.effective_heat_capacity(temperature), dtype=float),
+            temperature.shape,
+        )
+
     def apply_dirichlet(self, A, rhs, t, fixed=None):
         if fixed is None:
             mask = self.is_boundary
@@ -198,25 +224,52 @@ class NonUniformHeatSolver:
             A_mod.data[i] = [1.0]
         return A_mod.tocsr(), rhs
 
-    def step(self, u, t):
-        rhs = (self.M_over_dt @ u).copy()
+    def step(self, u, t, dt_step):
         source_vals = np.broadcast_to(
-            np.asarray(self.source_func(self.points[:, 0], self.points[:, 1], t + self.dt), dtype=float),
+            np.asarray(self.source_func(self.points[:, 0], self.points[:, 1], t + dt_step), dtype=float),
             (self.N,),
         )
-        rhs = rhs + self.cv_area * source_vals
-        A = self.LHS_base.copy()
-        if self.bc_type.lower() == "dirichlet":
-            A, rhs = self.apply_dirichlet(A, rhs, t + self.dt)
-        return spsolve(A, rhs)
+        if self.phase_change_model is None:
+            mass_over_dt = diags(self.cv_area / dt_step, format="csr")
+            rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
+            lhs = (mass_over_dt + self.A).tocsr()
+            if self.bc_type.lower() == "dirichlet":
+                lhs, rhs = self.apply_dirichlet(lhs, rhs, t + dt_step)
+            return spsolve(lhs, rhs)
+
+        max_iters = int(self.phase_change_options["max_iters"])
+        tol = float(self.phase_change_options["tol"])
+        relaxation = float(self.phase_change_options["relaxation"])
+        u_iter = u.copy()
+        for _ in range(max_iters):
+            cp_eff = self._effective_heat_capacity(u_iter)
+            mass_over_dt = diags((self.cv_area * cp_eff) / dt_step, format="csr")
+            rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
+            lhs = (mass_over_dt + self.A).tocsr()
+            if self.bc_type.lower() == "dirichlet":
+                lhs, rhs = self.apply_dirichlet(lhs, rhs, t + dt_step)
+            u_next = spsolve(lhs, rhs)
+            if relaxation != 1.0:
+                u_next = relaxation * u_next + (1.0 - relaxation) * u_iter
+            err = np.max(np.abs(u_next - u_iter))
+            scale = max(1.0, np.max(np.abs(u_next)))
+            u_iter = u_next
+            if err <= tol * scale:
+                return u_iter
+        raise RuntimeError(
+            "Phase-change nonlinear solve did not converge. "
+            "Try smaller dt or larger phase_change_options['max_iters']."
+        )
 
     def solve(self, u0, t0, t_end, callback=None):
         self.u = np.asarray(u0, dtype=float).copy()
         self.t = float(t0)
         nsteps = int(np.ceil((t_end - t0) / self.dt))
         for k in range(nsteps):
-            self.u = self.step(self.u, self.t)
-            self.t += self.dt
+            t_next = min(self.t + self.dt, t_end)
+            dt_step = t_next - self.t
+            self.u = self.step(self.u, self.t, dt_step)
+            self.t = t_next
             if callback is not None:
                 callback(k + 1, self.t, self.u)
         return self.t, self.u

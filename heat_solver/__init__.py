@@ -28,12 +28,14 @@ from .meshes import (
     generate_square_polygonal_mesh,
 )
 from .plotting import create_delaunay_figure, create_polygonal_figure, create_curvilinear_figure, visualize_polygonal_mesh
+from .phase_change import ApparentHeatCapacityModel
 from .polygonal import PolygonalHeatSolver
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
+    "ApparentHeatCapacityModel",
     "build_error_report",
     "create_delaunay_figure",
     "create_polygonal_figure",

@@ -239,3 +239,114 @@ def test_polygonal_iterative_matches_direct_high_resolution_analytical():
         **kwargs,
     )
     assert np.allclose(u_direct, u_iter, rtol=1e-8, atol=1e-9)
+
+
+def test_polygonal_stefan_apparent_capacity_reduces_error():
+    from heat_solver.cases import get_analytical_case
+    from heat_solver.meshes import generate_square_polygonal_mesh
+
+    alpha = 0.08
+    dt = 1e-3
+    t_init = 0.0
+    t_end = 0.05
+    case = get_analytical_case("stefan_apparent_capacity", alpha=alpha, t_end=t_end)
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=20, ny=20, bbox=case["bbox"])
+    centers = np.array([np.mean(vertices[np.asarray(poly, dtype=int)], axis=0) for poly in polygons])
+    u0 = case["solution"](centers[:, 0], centers[:, 1], t_init)
+    u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+
+    solver_no_phase = PolygonalHeatSolver(
+        vertices,
+        polygons,
+        alpha=alpha,
+        dt=dt,
+        bc_type="dirichlet",
+        bc_func=case["solution"],
+        source_func=case["source"],
+    )
+    _, u_no_phase = solver_no_phase.solve(u0, t_init, t_end)
+    err_no_phase = np.sqrt(np.mean((u_no_phase - u_exact) ** 2))
+
+    solver_phase = PolygonalHeatSolver(
+        vertices,
+        polygons,
+        alpha=alpha,
+        dt=dt,
+        bc_type="dirichlet",
+        bc_func=case["solution"],
+        source_func=case["source"],
+        phase_change_model=case["phase_change_model"],
+        phase_change_options=case["phase_change_options"],
+    )
+    _, u_phase = solver_phase.solve(u0, t_init, t_end)
+    err_phase = np.sqrt(np.mean((u_phase - u_exact) ** 2))
+
+    assert err_phase < 0.4 * err_no_phase
+
+
+def test_polygonal_stefan_crank_nicolson_has_higher_time_order_than_backward_euler():
+    from heat_solver.geometry import polygon_area_and_centroid
+    from heat_solver.meshes import generate_square_polygonal_mesh
+
+    alpha = 0.08
+    case = "stefan_apparent_capacity"
+    t_init = 0.0
+    t_end = 0.02
+    bbox = (-1.0, 1.0, -1.0, 1.0)
+    nx = ny = 12
+    dts = np.array([0.01, 0.005, 0.0025], dtype=float)
+    phase_opts = {"max_iters": 80, "tol": 1e-10, "relaxation": 0.7}
+
+    verts, polys, _centers, u_ref, _, _, _ = run_square_polygonal_test(
+        case=case,
+        alpha=alpha,
+        dt=6.25e-4,
+        t_init=t_init,
+        t_end=t_end,
+        nx=nx,
+        ny=ny,
+        bbox=bbox,
+        nonorthogonal_correction=True,
+        time_scheme="crank_nicolson",
+        phase_change_options=phase_opts,
+    )
+    areas = np.array([polygon_area_and_centroid(verts[p])[0] for p in polys], dtype=float)
+    ref_norm = np.sqrt(np.sum(areas * u_ref**2)) + 1e-16
+
+    err_be = []
+    err_cn = []
+    for dt in dts:
+        *_, u_be, _, _, _ = run_square_polygonal_test(
+            case=case,
+            alpha=alpha,
+            dt=float(dt),
+            t_init=t_init,
+            t_end=t_end,
+            nx=nx,
+            ny=ny,
+            bbox=bbox,
+            nonorthogonal_correction=True,
+            time_scheme="backward_euler",
+            phase_change_options=phase_opts,
+        )
+        *_, u_cn, _, _, _ = run_square_polygonal_test(
+            case=case,
+            alpha=alpha,
+            dt=float(dt),
+            t_init=t_init,
+            t_end=t_end,
+            nx=nx,
+            ny=ny,
+            bbox=bbox,
+            nonorthogonal_correction=True,
+            time_scheme="crank_nicolson",
+            phase_change_options=phase_opts,
+        )
+        err_be.append(np.sqrt(np.sum(areas * (u_be - u_ref) ** 2)) / ref_norm)
+        err_cn.append(np.sqrt(np.sum(areas * (u_cn - u_ref) ** 2)) / ref_norm)
+
+    slope_be = np.polyfit(np.log(dts), np.log(np.asarray(err_be)), 1)[0]
+    slope_cn = np.polyfit(np.log(dts), np.log(np.asarray(err_cn)), 1)[0]
+    assert slope_be > 0.7
+    assert slope_cn > 1.4
+    assert slope_cn > slope_be + 0.4

@@ -31,6 +31,8 @@ def run_curvilinear_test(
     bc_func=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
+    if case_info.get("phase_change_model") is not None:
+        raise ValueError("Curvilinear solver does not yet support phase_change_model.")
     if bc_type is None:
         bc_type = case_info.get("bc_type", "dirichlet")
     if bc_type != "dirichlet":
@@ -96,6 +98,8 @@ def run_polygonal_mesh_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -111,6 +115,10 @@ def run_polygonal_mesh_test(
         bc_type = case_info.get("bc_type", "dirichlet")
     if bc_func is None:
         bc_func = case_info.get("boundary", exact_solution)
+    if phase_change_model is None:
+        phase_change_model = case_info.get("phase_change_model")
+    if phase_change_options is None:
+        phase_change_options = case_info.get("phase_change_options")
 
     solver = PolygonalHeatSolver(
         vertices,
@@ -126,6 +134,8 @@ def run_polygonal_mesh_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
     u0 = exact_solution(centers[:, 0], centers[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
@@ -164,6 +174,8 @@ def run_polygonal_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -186,6 +198,8 @@ def run_polygonal_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
 
 
@@ -206,6 +220,8 @@ def run_mixed_polygonal_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -225,6 +241,8 @@ def run_mixed_polygonal_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
 
 
@@ -245,6 +263,8 @@ def run_square_polygonal_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -264,6 +284,8 @@ def run_square_polygonal_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
 
 
@@ -285,6 +307,8 @@ def run_nonorthogonal_polygonal_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     vertices, polygons, _ = generate_nonorthogonal_polygonal_mesh(nx=nx, ny=ny, bbox=bbox, skew=skew)
     return run_polygonal_mesh_test(
@@ -304,6 +328,8 @@ def run_nonorthogonal_polygonal_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
 
 
@@ -325,6 +351,8 @@ def run_nonorthogonal_tiled_polygonal_test(
     time_scheme="backward_euler",
     flux_scheme="tpfa",
     flux_discretization="tpfa",
+    phase_change_model=None,
+    phase_change_options=None,
 ):
     vertices, polygons, _ = generate_nonorthogonal_tiled_polygonal_mesh(
         nx_tiles=nx_tiles,
@@ -349,10 +377,27 @@ def run_nonorthogonal_tiled_polygonal_test(
         time_scheme=time_scheme,
         flux_scheme=flux_scheme,
         flux_discretization=flux_discretization,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
     )
 
 
-def run_test(alpha=0.1, nx=40, ny=40, jitter=0.2, dt=5e-3, t_init=0.05, t_end=0.15, seed=2, mesh_type="delaunay", hex_spacing=0.2, case="heat_kernel", bbox=None):
+def run_test(
+    alpha=0.1,
+    nx=40,
+    ny=40,
+    jitter=0.2,
+    dt=5e-3,
+    t_init=0.05,
+    t_end=0.15,
+    seed=2,
+    mesh_type="delaunay",
+    hex_spacing=0.2,
+    case="heat_kernel",
+    bbox=None,
+    phase_change_model=None,
+    phase_change_options=None,
+):
     if mesh_type != "delaunay":
         raise ValueError("run_test supports only 'delaunay'. Use polygonal test drivers for polygonal meshes.")
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
@@ -366,11 +411,25 @@ def run_test(alpha=0.1, nx=40, ny=40, jitter=0.2, dt=5e-3, t_init=0.05, t_end=0.
     points, tris = generate_nonuniform_delaunay(nx=nx, ny=ny, jitter=jitter, bbox=bbox, seed=seed)
     exact_solution = case_info["solution"]
     source_func = case_info.get("source", lambda x, y, t: 0.0)
+    if phase_change_model is None:
+        phase_change_model = case_info.get("phase_change_model")
+    if phase_change_options is None:
+        phase_change_options = case_info.get("phase_change_options")
 
     def g(x, y, t):
         return exact_solution(x, y, t)
 
-    solver = NonUniformHeatSolver(points, tris, alpha=alpha, dt=dt, bc_type="dirichlet", bc_func=g, source_func=source_func)
+    solver = NonUniformHeatSolver(
+        points,
+        tris,
+        alpha=alpha,
+        dt=dt,
+        bc_type="dirichlet",
+        bc_func=g,
+        source_func=source_func,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
+    )
     u0 = exact_solution(points[:, 0], points[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
     u_exact = exact_solution(points[:, 0], points[:, 1], t_final)

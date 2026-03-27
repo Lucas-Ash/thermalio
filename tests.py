@@ -111,6 +111,12 @@ CASE_SETTINGS = {
         "t_init": 0.01,
         "t_end": 0.05,
     },
+    "stefan_apparent_capacity": {
+        "alpha": 0.08,
+        "dt": 1e-3,
+        "t_init": 0.0,
+        "t_end": 0.05,
+    },
 }
 
 RESOLUTION_LEVELS = [
@@ -399,6 +405,8 @@ def iter_test_jobs():
         case_info = get_analytical_case(case, settings["alpha"], settings["t_end"])
         if case_info.get("bc_type", "dirichlet") != "dirichlet":
             continue
+        if case_info.get("phase_change_model") is not None:
+            continue
         for level in RESOLUTION_LEVELS:
             yield {
                 "case": case,
@@ -456,6 +464,16 @@ def _mesh_jobs(case, settings, level, level_dir):
     jobs = []
     
     case_info = get_analytical_case(case, settings["alpha"], settings["t_end"])
+    if case == "stefan_apparent_capacity":
+        jobs.append(
+            (
+                "square_polygonal",
+                _square_config(case, settings, level),
+                _save_square_case,
+                level_dir / "square_polygonal.png",
+            )
+        )
+        return tuple(jobs)
     bc_type = case_info.get("bc_type", "dirichlet")
     if bc_type == "dirichlet":
         jobs.append((

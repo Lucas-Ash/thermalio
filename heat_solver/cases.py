@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.special import erf
 
+from .phase_change import ApparentHeatCapacityModel
+
 
 def heat_kernel(x, y, t, alpha):
     return (1.0 / (4.0 * np.pi * alpha * t)) * np.exp(-(x * x + y * y) / (4.0 * alpha * t))
@@ -150,6 +152,27 @@ def green_function_source_source(alpha, epsilon=0.01):
     return source
 
 
+def stefan_apparent_capacity_solution(x, y, t, amplitude=0.8, interface_width=0.18, speed=0.55, x0=-0.35):
+    del y
+    z = (x - x0 - speed * t) / interface_width
+    return amplitude * np.tanh(z)
+
+
+def stefan_apparent_capacity_source(alpha, phase_change_model, amplitude=0.8, interface_width=0.18, speed=0.55, x0=-0.35):
+    def source(x, y, t):
+        del y
+        z = (x - x0 - speed * t) / interface_width
+        tanh_z = np.tanh(z)
+        sech2_z = 1.0 - tanh_z**2
+        temperature = amplitude * tanh_z
+        dT_dt = -(amplitude * speed / interface_width) * sech2_z
+        d2T_dx2 = -(2.0 * amplitude / (interface_width**2)) * tanh_z * sech2_z
+        capacity = phase_change_model.effective_heat_capacity(temperature)
+        return capacity * dT_dt - alpha * d2T_dx2
+
+    return source
+
+
 def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
     if case == "heat_kernel":
         L = 4.0 * np.sqrt(4.0 * alpha * t_end)
@@ -247,12 +270,27 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "bbox": (-L, L, -L, L),
             "solution": anisotropic_heat_kernel_solution(alpha),
         }
+    elif case == "stefan_apparent_capacity":
+        phase_change_model = ApparentHeatCapacityModel(
+            solidus_temperature=-0.05,
+            liquidus_temperature=0.05,
+            latent_heat=6.0,
+            specific_heat=1.0,
+        )
+        return {
+            "name": "Stefan Apparent Capacity",
+            "bbox": (-1.0, 1.0, -1.0, 1.0),
+            "solution": lambda x, y, t: stefan_apparent_capacity_solution(x, y, t),
+            "source": stefan_apparent_capacity_source(alpha, phase_change_model),
+            "phase_change_model": phase_change_model,
+            "phase_change_options": {"max_iters": 40, "tol": 1e-10, "relaxation": 1.0},
+        }
     raise ValueError(
         "Unknown analytical case "
         f"'{case}'. Available cases: heat_kernel, sine_mode, harmonic_polynomial, "
         "source_driven_sine, steady_linear_neumann, steady_linear_robin, "
         "linear_patch, hot_block, off_axis_wave, nyquist_oscillations, point_source, "
-        "green_function_source, laplace_equation"
+        "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity"
     )
 
 
