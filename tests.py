@@ -117,6 +117,18 @@ CASE_SETTINGS = {
         "t_init": 0.0,
         "t_end": 0.05,
     },
+    "temperature_dependent_diffusivity": {
+        "alpha": 0.12,
+        "dt": 1e-3,
+        "t_init": 0.0,
+        "t_end": 0.05,
+    },
+    "radiative_manufactured": {
+        "alpha": 0.1,
+        "dt": 1e-3,
+        "t_init": 0.0,
+        "t_end": 0.03,
+    },
 }
 
 RESOLUTION_LEVELS = [
@@ -403,6 +415,8 @@ def _save_curvilinear_case(case, output_path, config):
 def iter_test_jobs():
     for case, settings in CASE_SETTINGS.items():
         case_info = get_analytical_case(case, settings["alpha"], settings["t_end"])
+        if case_info.get("polygonal_only", False):
+            continue
         if case_info.get("bc_type", "dirichlet") != "dirichlet":
             continue
         if case_info.get("phase_change_model") is not None:
@@ -471,6 +485,24 @@ def _mesh_jobs(case, settings, level, level_dir):
                 _square_config(case, settings, level),
                 _save_square_case,
                 level_dir / "square_polygonal.png",
+            )
+        )
+        return tuple(jobs)
+    if case in {"temperature_dependent_diffusivity", "radiative_manufactured"}:
+        jobs.append(
+            (
+                "square_polygonal",
+                _square_config(case, settings, level),
+                _save_square_case,
+                level_dir / "square_polygonal.png",
+            )
+        )
+        jobs.append(
+            (
+                "nonorthogonal_tiled_polygonal",
+                _nonorthogonal_tiled_config(case, settings, level),
+                _save_nonorthogonal_tiled_case,
+                level_dir / "nonorthogonal_tiled_polygonal.png",
             )
         )
         return tuple(jobs)

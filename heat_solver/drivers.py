@@ -100,6 +100,8 @@ def run_polygonal_mesh_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -119,6 +121,11 @@ def run_polygonal_mesh_test(
         phase_change_model = case_info.get("phase_change_model")
     if phase_change_options is None:
         phase_change_options = case_info.get("phase_change_options")
+    if temperature_dependent_diffusivity is None:
+        temperature_dependent_diffusivity = case_info.get("temperature_dependent_diffusivity")
+    if nonlinear_options is None:
+        nonlinear_options = case_info.get("nonlinear_options")
+    alpha = case_info.get("alpha", alpha)
 
     solver = PolygonalHeatSolver(
         vertices,
@@ -136,6 +143,8 @@ def run_polygonal_mesh_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
     u0 = exact_solution(centers[:, 0], centers[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
@@ -176,6 +185,8 @@ def run_polygonal_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -200,6 +211,8 @@ def run_polygonal_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
 
 
@@ -222,6 +235,8 @@ def run_mixed_polygonal_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -243,6 +258,8 @@ def run_mixed_polygonal_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
 
 
@@ -265,6 +282,8 @@ def run_square_polygonal_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -286,6 +305,8 @@ def run_square_polygonal_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
 
 
@@ -309,6 +330,8 @@ def run_nonorthogonal_polygonal_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     vertices, polygons, _ = generate_nonorthogonal_polygonal_mesh(nx=nx, ny=ny, bbox=bbox, skew=skew)
     return run_polygonal_mesh_test(
@@ -330,6 +353,8 @@ def run_nonorthogonal_polygonal_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
 
 
@@ -353,6 +378,8 @@ def run_nonorthogonal_tiled_polygonal_test(
     flux_discretization="tpfa",
     phase_change_model=None,
     phase_change_options=None,
+    temperature_dependent_diffusivity=None,
+    nonlinear_options=None,
 ):
     vertices, polygons, _ = generate_nonorthogonal_tiled_polygonal_mesh(
         nx_tiles=nx_tiles,
@@ -379,6 +406,8 @@ def run_nonorthogonal_tiled_polygonal_test(
         flux_discretization=flux_discretization,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        temperature_dependent_diffusivity=temperature_dependent_diffusivity,
+        nonlinear_options=nonlinear_options,
     )
 
 

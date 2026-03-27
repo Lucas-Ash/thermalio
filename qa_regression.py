@@ -25,6 +25,55 @@ RUNNERS = {
 }
 
 
+def _is_numeric_array_like(value):
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        arr = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return arr.ndim > 0
+
+
+def _compare_result_numeric_array(name, current, baseline, warn_tol, error_tol):
+    current_arr = np.asarray(current, dtype=float)
+    baseline_arr = np.asarray(baseline, dtype=float)
+    if current_arr.shape != baseline_arr.shape:
+        return {
+            "name": name,
+            "passed": False,
+            "severity": "error",
+            "reason": f"shape mismatch: current={current_arr.shape}, baseline={baseline_arr.shape}",
+            "max_abs_diff": math.inf,
+        }
+
+    diff = current_arr - baseline_arr
+    max_abs_diff = float(np.max(np.abs(diff))) if diff.size else 0.0
+    if max_abs_diff >= error_tol:
+        return {
+            "name": name,
+            "passed": False,
+            "severity": "error",
+            "reason": f"max_abs_diff={max_abs_diff:.6e} >= error_tol={error_tol:.6e}",
+            "max_abs_diff": max_abs_diff,
+        }
+    if max_abs_diff >= warn_tol:
+        return {
+            "name": name,
+            "passed": True,
+            "severity": "warning",
+            "reason": f"max_abs_diff={max_abs_diff:.6e} >= warn_tol={warn_tol:.6e}",
+            "max_abs_diff": max_abs_diff,
+        }
+    return {
+        "name": name,
+        "passed": True,
+        "severity": "ok",
+        "reason": "",
+        "max_abs_diff": max_abs_diff,
+    }
+
+
 def _to_builtin(value):
     if isinstance(value, dict):
         return {str(key): _to_builtin(item) for key, item in value.items()}
@@ -124,7 +173,7 @@ def _compare_numeric(name, current, baseline, atol, rtol):
     }
 
 
-def _compare_dataset(current, baseline, atol, rtol):
+def _compare_dataset(current, baseline, atol, rtol, result_warn_tol, result_error_tol):
     checks = []
 
     if current["polygons"] != baseline["polygons"]:
@@ -149,6 +198,16 @@ def _compare_dataset(current, baseline, atol, rtol):
         baseline_value = baseline["results"][key]
         if isinstance(current_value, (int, float)) and isinstance(baseline_value, (int, float)):
             checks.append(_compare_numeric(f"results.{key}", current_value, baseline_value, atol=atol, rtol=rtol))
+        elif _is_numeric_array_like(current_value) and _is_numeric_array_like(baseline_value):
+            checks.append(
+                _compare_result_numeric_array(
+                    f"results.{key}",
+                    current_value,
+                    baseline_value,
+                    warn_tol=result_warn_tol,
+                    error_tol=result_error_tol,
+                )
+            )
         elif current_value != baseline_value:
             checks.append({"name": f"results.{key}", "passed": False, "reason": "value changed"})
         else:
@@ -168,6 +227,15 @@ def _print_failures(relpath, comparison):
             print(f"  {check['name']}: {check['reason']}")
 
 
+def _print_warnings(relpath, comparison):
+    warning_checks = [check for check in comparison["checks"] if check.get("severity") == "warning"]
+    if not warning_checks:
+        return
+    print(f"WARN   {relpath}")
+    for check in warning_checks:
+        print(f"  {check['name']}: {check['reason']}")
+
+
 def _write_report(report, target_path):
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with target_path.open("w", encoding="utf-8") as handle:
@@ -185,7 +253,11 @@ def main():
     parser.add_argument("--latest-root", type=Path, default=LATEST_DIR)
     parser.add_argument("--atol", type=float, default=1e-10)
     parser.add_argument("--rtol", type=float, default=1e-8)
+    parser.add_argument("--result-warning-threshold", type=float, default=1e-13)
+    parser.add_argument("--result-error-threshold", type=float, default=1e-12)
     args = parser.parse_args()
+    if args.result_warning_threshold >= args.result_error_threshold:
+        raise ValueError("result-warning-threshold must be smaller than result-error-threshold.")
 
     args.baseline_root.mkdir(parents=True, exist_ok=True)
     args.latest_root.mkdir(parents=True, exist_ok=True)
@@ -195,11 +267,14 @@ def main():
         "latest_root": str(args.latest_root),
         "atol": args.atol,
         "rtol": args.rtol,
+        "result_warning_threshold": args.result_warning_threshold,
+        "result_error_threshold": args.result_error_threshold,
         "jobs": [],
     }
     failures = 0
     created = 0
     passed = 0
+    warnings = 0
 
     for job in tests.iter_test_jobs():
         relpath = _job_relpath(job)
@@ -220,8 +295,16 @@ def main():
             continue
 
         baseline = _load_dataset(args.baseline_root, job)
-        comparison = _compare_dataset(current, baseline, atol=args.atol, rtol=args.rtol)
-        status = "passed" if comparison["passed"] else "failed"
+        comparison = _compare_dataset(
+            current,
+            baseline,
+            atol=args.atol,
+            rtol=args.rtol,
+            result_warn_tol=args.result_warning_threshold,
+            result_error_tol=args.result_error_threshold,
+        )
+        has_warning = any(check.get("severity") == "warning" for check in comparison["checks"])
+        status = "failed" if not comparison["passed"] else ("warning" if has_warning else "passed")
         report["jobs"].append(
             {
                 "job": str(relpath),
@@ -229,23 +312,28 @@ def main():
                 "comparison": comparison,
             }
         )
-        if comparison["passed"]:
-            passed += 1
-            print(f"PASS   {relpath}")
-        else:
+        if not comparison["passed"]:
             failures += 1
             _print_failures(relpath, comparison)
+        elif has_warning:
+            passed += 1
+            warnings += 1
+            _print_warnings(relpath, comparison)
+        else:
+            passed += 1
+            print(f"PASS   {relpath}")
 
     report["summary"] = {
         "created": created,
         "passed": passed,
+        "warnings": warnings,
         "failed": failures,
     }
     _write_report(report, args.latest_root / "regression_report.json")
 
     print(
         "Summary: "
-        f"created={created}, passed={passed}, failed={failures}, "
+        f"created={created}, passed={passed}, warnings={warnings}, failed={failures}, "
         f"report={args.latest_root / 'regression_report.json'}"
     )
 

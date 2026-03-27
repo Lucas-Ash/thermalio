@@ -173,6 +173,57 @@ def stefan_apparent_capacity_source(alpha, phase_change_model, amplitude=0.8, in
     return source
 
 
+def temp_dependent_diffusivity_solution(x, y, t):
+    del y
+    return np.exp(-t) * (1.0 + 0.25 * x)
+
+
+def temp_dependent_diffusivity_alpha(x, y, temperature):
+    del y
+    base = 0.12
+    beta = 0.6
+    gamma = 0.35
+    return base * (1.0 + gamma * x) * (1.0 + beta * temperature)
+
+
+def temp_dependent_diffusivity_source(x, y, t):
+    del y
+    temperature = temp_dependent_diffusivity_solution(x, 0.0, t)
+    tx = 0.25 * np.exp(-t) * np.ones_like(x, dtype=float)
+    alpha = temp_dependent_diffusivity_alpha(x, 0.0, temperature)
+    base = 0.12
+    beta = 0.6
+    gamma = 0.35
+    dalpha_dx = base * (gamma * (1.0 + beta * temperature) + (1.0 + gamma * x) * beta * tx)
+    div_flux = dalpha_dx * tx
+    return -temperature - div_flux
+
+
+def radiative_manufactured_solution(x, y, t):
+    amplitude = 0.25 * np.exp(-t)
+    return 1.5 + amplitude * np.sin(np.pi * x) * np.sin(np.pi * y)
+
+
+def radiative_manufactured_source(x, y, t, alpha):
+    amp = 0.25 * np.exp(-t)
+    spatial = np.sin(np.pi * x) * np.sin(np.pi * y)
+    dT_dt = -amp * spatial
+    laplacian = -2.0 * (np.pi**2) * amp * spatial
+    return dT_dt - alpha * laplacian
+
+
+def radiative_manufactured_bc(x, y, t, nx, ny, alpha):
+    epsilon = np.ones_like(x, dtype=float)
+    sigma = 5.0 * np.ones_like(x, dtype=float)
+    temperature = radiative_manufactured_solution(x, y, t)
+    grad_x = 0.25 * np.exp(-t) * np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+    grad_y = 0.25 * np.exp(-t) * np.pi * np.sin(np.pi * x) * np.cos(np.pi * y)
+    dT_dn = grad_x * nx + grad_y * ny
+    t_inf_pow4 = np.maximum(temperature**4 + (alpha / sigma) * dT_dn, 1e-12)
+    t_inf = t_inf_pow4 ** 0.25
+    return {"epsilon": epsilon, "sigma": sigma, "t_inf": t_inf}
+
+
 def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
     if case == "heat_kernel":
         L = 4.0 * np.sqrt(4.0 * alpha * t_end)
@@ -284,13 +335,37 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "source": stefan_apparent_capacity_source(alpha, phase_change_model),
             "phase_change_model": phase_change_model,
             "phase_change_options": {"max_iters": 40, "tol": 1e-10, "relaxation": 1.0},
+            "polygonal_only": True,
+        }
+    elif case == "temperature_dependent_diffusivity":
+        return {
+            "name": "Temperature-Dependent Diffusivity",
+            "bbox": (0.0, 1.0, 0.0, 1.0),
+            "solution": temp_dependent_diffusivity_solution,
+            "source": temp_dependent_diffusivity_source,
+            "alpha": temp_dependent_diffusivity_alpha,
+            "temperature_dependent_diffusivity": True,
+            "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9},
+            "polygonal_only": True,
+        }
+    elif case == "radiative_manufactured":
+        return {
+            "name": "Radiative Manufactured",
+            "bbox": (0.0, 1.0, 0.0, 1.0),
+            "solution": radiative_manufactured_solution,
+            "source": lambda x, y, t: radiative_manufactured_source(x, y, t, alpha),
+            "bc_type": "radiative",
+            "boundary": lambda x, y, t, nx, ny: radiative_manufactured_bc(x, y, t, nx, ny, alpha),
+            "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9},
+            "polygonal_only": True,
         }
     raise ValueError(
         "Unknown analytical case "
         f"'{case}'. Available cases: heat_kernel, sine_mode, harmonic_polynomial, "
         "source_driven_sine, steady_linear_neumann, steady_linear_robin, "
         "linear_patch, hot_block, off_axis_wave, nyquist_oscillations, point_source, "
-        "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity"
+        "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity, "
+        "temperature_dependent_diffusivity, radiative_manufactured"
     )
 
 

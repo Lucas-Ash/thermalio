@@ -350,3 +350,54 @@ def test_polygonal_stefan_crank_nicolson_has_higher_time_order_than_backward_eul
     assert slope_be > 0.7
     assert slope_cn > 1.4
     assert slope_cn > slope_be + 0.4
+
+
+def test_polygonal_temperature_dependent_diffusivity_manufactured_accuracy():
+    *_, results = run_square_polygonal_test(
+        case="temperature_dependent_diffusivity",
+        alpha=0.12,
+        dt=1e-3,
+        t_init=0.0,
+        t_end=0.05,
+        nx=36,
+        ny=36,
+        bbox=(0.0, 1.0, 0.0, 1.0),
+        nonorthogonal_correction=True,
+    )
+    assert float(results["L2_rel"]) < 1.5e-2
+    assert float(results["Linf_rel"]) < 2.5e-2
+
+
+def test_polygonal_radiative_manufactured_accuracy():
+    *_, results = run_square_polygonal_test(
+        case="radiative_manufactured",
+        alpha=0.1,
+        dt=1e-3,
+        t_init=0.0,
+        t_end=0.03,
+        nx=32,
+        ny=32,
+        bbox=(0.0, 1.0, 0.0, 1.0),
+        nonorthogonal_correction=True,
+    )
+    assert float(results["L2_rel"]) < 5e-2
+    assert float(results["Linf_rel"]) < 8e-2
+
+
+def test_polygonal_temperature_dependent_diffusivity_disallows_mpfa():
+    vertices = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    polygons = [[0, 1, 2, 3]]
+
+    def alpha_temp(x, y, T):
+        del x, y
+        return 0.1 * (1.0 + 0.2 * T)
+
+    with pytest.raises(ValueError, match="temperature-dependent diffusivity"):
+        PolygonalHeatSolver(
+            vertices,
+            polygons,
+            alpha=alpha_temp,
+            dt=0.1,
+            bc_type="dirichlet",
+            flux_scheme="mpfa",
+        )

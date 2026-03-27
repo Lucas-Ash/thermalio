@@ -1,6 +1,7 @@
 import numpy as np
 
-def process_alpha(alpha, x, y):
+
+def process_alpha(alpha, x, y, temperature=None):
     """
     Evaluates alpha (scalar, array, callable) at coordinates (x, y).
     Returns an array of shape (..., 2, 2) representing the tensor field,
@@ -11,7 +12,13 @@ def process_alpha(alpha, x, y):
     shape = x.shape
     
     if callable(alpha):
-        a_val = alpha(x, y)
+        if temperature is not None:
+            try:
+                a_val = alpha(x, y, temperature)
+            except TypeError:
+                a_val = alpha(x, y)
+        else:
+            a_val = alpha(x, y)
     else:
         a_val = alpha
         

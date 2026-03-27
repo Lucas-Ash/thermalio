@@ -52,6 +52,33 @@ def test_get_analytical_case_stefan_apparent_capacity():
     assert q.shape == x.shape
 
 
+def test_get_analytical_case_temperature_dependent_diffusivity():
+    case = get_analytical_case("temperature_dependent_diffusivity", alpha=0.12, t_end=0.05)
+    assert case["name"] == "Temperature-Dependent Diffusivity"
+    assert case["temperature_dependent_diffusivity"] is True
+    x = np.array([0.0, 0.5, 1.0])
+    y = np.array([0.2, 0.2, 0.2])
+    u = case["solution"](x, y, 0.02)
+    q = case["source"](x, y, 0.02)
+    k = case["alpha"](x, y, u)
+    assert u.shape == x.shape
+    assert q.shape == x.shape
+    assert np.all(k > 0.0)
+
+
+def test_get_analytical_case_radiative_manufactured():
+    case = get_analytical_case("radiative_manufactured", alpha=0.1, t_end=0.03)
+    assert case["bc_type"] == "radiative"
+    x = np.array([0.0, 1.0])
+    y = np.array([0.3, 0.7])
+    nx = np.array([-1.0, 1.0])
+    ny = np.array([0.0, 0.0])
+    bc = case["boundary"](x, y, 0.01, nx, ny)
+    assert "epsilon" in bc
+    assert "sigma" in bc
+    assert "t_inf" in bc
+
+
 def test_get_analytical_case_unknown():
     with pytest.raises(ValueError, match="Unknown analytical case"):
         get_analytical_case("unknown_case_name")
