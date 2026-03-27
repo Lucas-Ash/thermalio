@@ -1,5 +1,9 @@
 import numpy as np
-from heat_solver.polygonal import PolygonalHeatSolver
+import pytest
+from scipy.sparse import eye, random as sparse_random
+
+from heat_solver.drivers import run_square_polygonal_test
+from heat_solver.polygonal import PolygonalHeatSolver, _solve_sparse_linear_system
 
 def test_polygonal_heat_solver_initialization():
     vertices = np.array([
@@ -94,3 +98,144 @@ def test_polygonal_boundary_geometry_invariants():
     # Boundary normals out of the single cell should sum to [0, 0] by the divergence theorem
     normals = solver.boundary_faces["normals"]
     assert np.allclose(np.sum(normals, axis=0), [0.0, 0.0])
+
+
+def test_polygonal_invalid_time_scheme_raises():
+    vertices = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    polygons = [[0, 1, 2, 3]]
+    with pytest.raises(ValueError, match="time_scheme"):
+        PolygonalHeatSolver(vertices, polygons, 1.0, 0.1, time_scheme="rk4")
+
+
+def test_polygonal_crank_nicolson_matches_manual_one_step():
+    """CN step must match explicit (M ± 0.5*dt*A) assembly (same as solver)."""
+    from scipy.sparse.linalg import spsolve
+
+    from heat_solver.cases import get_analytical_case
+    from heat_solver.meshes import generate_square_polygonal_mesh
+
+    alpha = 0.1
+    case = "source_driven_sine"
+    bbox = (0.0, 1.0, 0.0, 1.0)
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=4, ny=4, bbox=bbox)
+    info = get_analytical_case(case, alpha=alpha, t_end=0.02)
+    bc = info.get("boundary", info["solution"])
+    src = info.get("source", lambda x, y, t: 0.0)
+    sol = info["solution"]
+
+    solver = PolygonalHeatSolver(
+        vertices,
+        polygons,
+        alpha,
+        dt=0.02,
+        bc_type="dirichlet",
+        bc_func=bc,
+        source_func=src,
+        nonorthogonal_correction=True,
+        time_scheme="crank_nicolson",
+    )
+    solver._assemble_system()
+    M, A = solver.M_diag, solver.A
+    cx, cy = solver.cell_centers[:, 0], solver.cell_centers[:, 1]
+    t0, t1 = 0.0, 0.02
+    u = np.asarray(sol(cx, cy, t0), dtype=float)
+    dt = 0.02
+    sn = np.asarray(src(cx, cy, t1), dtype=float)
+    sp = np.asarray(src(cx, cy, t0), dtype=float)
+    src_avg = solver.cell_areas * (sn + sp)
+    rhs = (M - 0.5 * dt * A) @ u + 0.5 * dt * src_avg
+    bc_vals = bc(cx, cy, t1)
+    for i in np.where(solver.is_boundary)[0]:
+        rhs[i] = bc_vals[i]
+    lhs = (M + 0.5 * dt * A).tolil()
+    for i in np.where(solver.is_boundary)[0]:
+        lhs.rows[i] = [i]
+        lhs.data[i] = [1.0]
+    lhs = lhs.tocsr()
+    u_manual = spsolve(lhs, rhs)
+
+    _, u_solv = solver.solve(u, t0, t1)
+    assert np.max(np.abs(u_manual - u_solv)) < 1e-12
+
+
+def test_polygonal_crank_nicolson_matches_backward_euler_small_dt():
+    kwargs = dict(
+        case="sine_mode",
+        alpha=0.1,
+        dt=1e-4,
+        t_init=0.0,
+        t_end=2e-4,
+        nx=6,
+        ny=6,
+        bbox=(-1.0, 1.0, -1.0, 1.0),
+        nonorthogonal_correction=True,
+    )
+    *_, u_be, _, _, _ = run_square_polygonal_test(time_scheme="backward_euler", **kwargs)
+    *_, u_cn, _, _, _ = run_square_polygonal_test(time_scheme="crank_nicolson", **kwargs)
+    assert np.allclose(u_be, u_cn, rtol=1e-5, atol=1e-7)
+
+
+def test_polygonal_invalid_linear_solver_raises():
+    vertices = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    polygons = [[0, 1, 2, 3]]
+    with pytest.raises(ValueError, match="linear_solver"):
+        PolygonalHeatSolver(vertices, polygons, 1.0, 0.1, linear_solver="gmres")
+
+
+def test_sparse_linear_solver_helper_matches_direct():
+    rng = np.random.default_rng(0)
+    n = 32
+    R = sparse_random(n, n, density=0.08, random_state=rng, dtype=float)
+    A = (R + R.T) * 0.5 + 2.0 * eye(n, format="csr")
+    x_true = rng.standard_normal(n)
+    b = A @ x_true
+    x_dir = _solve_sparse_linear_system(A, b, "direct", {}, x0=None)
+    x_bc = _solve_sparse_linear_system(
+        A, b, "bicgstab", {"rtol": 1e-12, "maxiter": 10_000}, x0=x_true.copy()
+    )
+    assert np.allclose(x_dir, x_bc, rtol=1e-8, atol=1e-9)
+    x_cg = _solve_sparse_linear_system(A, b, "cg", {"rtol": 1e-12, "maxiter": 10_000}, x0=x_true.copy())
+    assert np.allclose(x_dir, x_cg, rtol=1e-8, atol=1e-9)
+
+
+def test_polygonal_bicgstab_matches_direct_small_mesh():
+    kwargs = dict(
+        case="sine_mode",
+        alpha=0.1,
+        dt=5e-3,
+        t_init=0.0,
+        t_end=0.02,
+        nx=8,
+        ny=8,
+        bbox=(-1.0, 1.0, -1.0, 1.0),
+        nonorthogonal_correction=True,
+    )
+    *_, u_direct, _, _, _ = run_square_polygonal_test(linear_solver="direct", **kwargs)
+    *_, u_iter, _, _, _ = run_square_polygonal_test(
+        linear_solver="bicgstab",
+        linear_solver_options={"rtol": 1e-12, "atol": 0.0},
+        **kwargs,
+    )
+    assert np.allclose(u_direct, u_iter, rtol=1e-9, atol=1e-10)
+
+
+def test_polygonal_iterative_matches_direct_high_resolution_analytical():
+    """BiCGSTAB implicit steps agree with the direct sparse solve on a fine square mesh."""
+    kwargs = dict(
+        case="source_driven_sine",
+        alpha=0.1,
+        dt=2e-3,
+        t_init=0.0,
+        t_end=0.05,
+        nx=48,
+        ny=48,
+        bbox=(0.0, 1.0, 0.0, 1.0),
+        nonorthogonal_correction=True,
+    )
+    *_, u_direct, _, _, _ = run_square_polygonal_test(linear_solver="direct", **kwargs)
+    *_, u_iter, _, _, _ = run_square_polygonal_test(
+        linear_solver="bicgstab",
+        linear_solver_options={"rtol": 1e-11, "maxiter": 50_000},
+        **kwargs,
+    )
+    assert np.allclose(u_direct, u_iter, rtol=1e-8, atol=1e-9)

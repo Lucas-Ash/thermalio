@@ -92,6 +92,9 @@ def run_polygonal_mesh_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -117,6 +120,9 @@ def run_polygonal_mesh_test(
         bc_func=bc_func,
         source_func=source_func,
         nonorthogonal_correction=nonorthogonal_correction,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
     u0 = exact_solution(centers[:, 0], centers[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
@@ -150,6 +156,9 @@ def run_polygonal_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -167,6 +176,9 @@ def run_polygonal_test(
         nonorthogonal_correction=nonorthogonal_correction,
         bc_type=bc_type,
         bc_func=bc_func,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
 
 
@@ -182,6 +194,9 @@ def run_mixed_polygonal_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -196,6 +211,9 @@ def run_mixed_polygonal_test(
         nonorthogonal_correction=nonorthogonal_correction,
         bc_type=bc_type,
         bc_func=bc_func,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
 
 
@@ -211,6 +229,9 @@ def run_square_polygonal_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -225,6 +246,9 @@ def run_square_polygonal_test(
         nonorthogonal_correction=nonorthogonal_correction,
         bc_type=bc_type,
         bc_func=bc_func,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
 
 
@@ -241,6 +265,9 @@ def run_nonorthogonal_polygonal_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     vertices, polygons, _ = generate_nonorthogonal_polygonal_mesh(nx=nx, ny=ny, bbox=bbox, skew=skew)
     return run_polygonal_mesh_test(
@@ -255,6 +282,9 @@ def run_nonorthogonal_polygonal_test(
         nonorthogonal_correction=nonorthogonal_correction,
         bc_type=bc_type,
         bc_func=bc_func,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
 
 
@@ -271,6 +301,9 @@ def run_nonorthogonal_tiled_polygonal_test(
     nonorthogonal_correction=True,
     bc_type=None,
     bc_func=None,
+    linear_solver="direct",
+    linear_solver_options=None,
+    time_scheme="backward_euler",
 ):
     vertices, polygons, _ = generate_nonorthogonal_tiled_polygonal_mesh(
         nx_tiles=nx_tiles,
@@ -290,6 +323,9 @@ def run_nonorthogonal_tiled_polygonal_test(
         nonorthogonal_correction=nonorthogonal_correction,
         bc_type=bc_type,
         bc_func=bc_func,
+        linear_solver=linear_solver,
+        linear_solver_options=linear_solver_options,
+        time_scheme=time_scheme,
     )
 
 

@@ -2,15 +2,61 @@ import inspect
 
 import numpy as np
 from scipy.sparse import diags, lil_matrix
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import bicgstab, cg, spsolve
 
 from .geometry import polygon_area_and_centroid
+
+
+def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None):
+    """
+    Solve ``lhs @ x = rhs`` with either a sparse direct factorization or an iterative Krylov method.
+
+    Parameters
+    ----------
+    lhs : scipy.sparse matrix
+    rhs : ndarray
+    method : str
+        ``"direct"``, ``"bicgstab"``, or ``"cg"``.
+    options : dict
+        Optional keys: ``rtol``, ``atol``, ``maxiter``.
+    x0 : ndarray, optional
+        Initial guess for iterative methods (defaults to zeros in SciPy if None).
+    """
+    if method == "direct":
+        return spsolve(lhs, rhs)
+
+    opts = options or {}
+    rtol = float(opts.get("rtol", 1e-12))
+    atol = float(opts.get("atol", 0.0))
+    maxiter = opts.get("maxiter", None)
+    if maxiter is not None:
+        maxiter = int(maxiter)
+
+    if method == "bicgstab":
+        x, info = bicgstab(lhs, rhs, x0=x0, rtol=rtol, atol=atol, maxiter=maxiter)
+    elif method == "cg":
+        x, info = cg(lhs, rhs, x0=x0, rtol=rtol, atol=atol, maxiter=maxiter)
+    else:
+        raise ValueError(f"Unknown linear solver method: {method!r}")
+
+    if info != 0:
+        raise RuntimeError(
+            f"Iterative linear solver {method!r} failed (SciPy info code {info}). "
+            "Try tightening rtol/atol, increasing maxiter, or using linear_solver='direct'."
+        )
+    return x
 
 
 class PolygonalHeatSolver:
     """
     Finite Volume heat equation solver on a conforming polygonal mesh.
-    Cell-centered unknowns with implicit Euler time integration.
+    Cell-centered unknowns with implicit time integration.
+
+    ``time_scheme='backward_euler'`` (default) is first-order accurate in time. ``time_scheme='crank_nicolson'``
+    uses the Crank–Nicolson (θ=1/2) trapezoidal step for the semi-discrete system ``M u' + A u = M Q``,
+    which is second-order accurate in time for smooth data (spatial accuracy is unchanged).
+
+    Each step solves a sparse linear system; use ``linear_solver='bicgstab'`` or ``'cg'`` for iterative solves.
     """
 
     def __init__(
@@ -23,6 +69,9 @@ class PolygonalHeatSolver:
         bc_func=None,
         source_func=None,
         nonorthogonal_correction=True,
+        linear_solver="direct",
+        linear_solver_options=None,
+        time_scheme="backward_euler",
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -34,6 +83,16 @@ class PolygonalHeatSolver:
         if self.bc_type not in {"dirichlet", "neumann", "robin"}:
             raise ValueError("bc_type must be one of: dirichlet, neumann, robin")
         self.nonorthogonal_correction = bool(nonorthogonal_correction)
+        self.linear_solver = str(linear_solver).lower().strip()
+        if self.linear_solver not in {"direct", "bicgstab", "cg"}:
+            raise ValueError(
+                "linear_solver must be one of: 'direct', 'bicgstab', 'cg' "
+                "(use 'bicgstab' for general meshes; 'cg' only if the assembled system is symmetric positive definite)."
+            )
+        self.linear_solver_options = dict(linear_solver_options) if linear_solver_options else {}
+        self.time_scheme = str(time_scheme).lower().strip()
+        if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
+            raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
         self.M = len(self.polygons)
         self.cell_centers = self._compute_cell_centers()
         self.cell_areas = self._compute_cell_areas()
@@ -299,24 +358,59 @@ class PolygonalHeatSolver:
         for _ in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = t_next - t
-            rhs = self.M_diag @ u
-            source_vals = np.broadcast_to(
-                np.asarray(self.source_func(self.cell_centers[:, 0], self.cell_centers[:, 1], t_next), dtype=float),
+            cx = self.cell_centers[:, 0]
+            cy = self.cell_centers[:, 1]
+            source_next = np.broadcast_to(
+                np.asarray(self.source_func(cx, cy, t_next), dtype=float),
                 (self.M,),
             )
-            rhs = rhs + dt_eff * (self.cell_areas * source_vals)
-            if self.bc_type == "dirichlet":
-                bc_vals = self.bc_func(self.cell_centers[:, 0], self.cell_centers[:, 1], t_next)
-                lhs = (self.M_diag + dt_eff * self.A).copy().tolil()
-                for i in np.where(self.is_boundary)[0]:
-                    lhs.rows[i] = [i]
-                    lhs.data[i] = [1.0]
-                    rhs[i] = bc_vals[i]
-                lhs = lhs.tocsr()
+            if self.time_scheme == "backward_euler":
+                rhs = self.M_diag @ u + dt_eff * (self.cell_areas * source_next)
+                if self.bc_type == "dirichlet":
+                    bc_vals = self.bc_func(cx, cy, t_next)
+                    lhs = (self.M_diag + dt_eff * self.A).copy().tolil()
+                    for i in np.where(self.is_boundary)[0]:
+                        lhs.rows[i] = [i]
+                        lhs.data[i] = [1.0]
+                        rhs[i] = bc_vals[i]
+                    lhs = lhs.tocsr()
+                else:
+                    boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
+                    lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
+                    rhs = rhs + dt_eff * boundary_rhs
             else:
-                boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
-                lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
-                rhs = rhs + dt_eff * boundary_rhs
-            u = spsolve(lhs, rhs)
+                # Crank–Nicolson: (M + 0.5*dt*K) u^{n+1} = (M - 0.5*dt*K) u^n + 0.5*dt*(f^{n+1}+f^n)
+                # with K = A + boundary part; Dirichlet rows are identity with u^{n+1} = g^{n+1}.
+                source_prev = np.broadcast_to(
+                    np.asarray(self.source_func(cx, cy, t), dtype=float),
+                    (self.M,),
+                )
+                src_avg = self.cell_areas * (source_next + source_prev)
+                if self.bc_type == "dirichlet":
+                    rhs = (self.M_diag - 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * src_avg
+                    bc_vals = self.bc_func(cx, cy, t_next)
+                    for i in np.where(self.is_boundary)[0]:
+                        rhs[i] = bc_vals[i]
+                    lhs = (self.M_diag + 0.5 * dt_eff * self.A).copy().tolil()
+                    for i in np.where(self.is_boundary)[0]:
+                        lhs.rows[i] = [i]
+                        lhs.data[i] = [1.0]
+                    lhs = lhs.tocsr()
+                else:
+                    b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
+                    b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
+                    k_prev = self.A + b_mat_prev
+                    k_next = self.A + b_mat_next
+                    rhs = (self.M_diag - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
+                    rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
+                    lhs = self.M_diag + 0.5 * dt_eff * k_next
+            x0 = u if self.linear_solver != "direct" else None
+            u = _solve_sparse_linear_system(
+                lhs,
+                rhs,
+                self.linear_solver,
+                self.linear_solver_options,
+                x0=x0,
+            )
             t = t_next
         return t, u
