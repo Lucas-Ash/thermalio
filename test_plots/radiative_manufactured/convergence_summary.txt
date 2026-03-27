@@ -4,11 +4,18 @@ This checks observed error trends; it does not constitute a mathematical guarant
 square_polygonal
   L2 monotone decrease: True
   Linf monotone decrease: True
-  level_03_fine: h=8.333333e-02, L2_rel=8.316339e-03, Linf_rel=1.783210e-02, L2_rate=, Linf_rate=
-  level_05_superfine: h=4.166667e-02, L2_rel=3.373775e-03, Linf_rel=8.955942e-03, L2_rate=1.301585, Linf_rate=0.993559
+  level_01_coarse: h=6.666667e-02, L2_rel=6.144663e-03, Linf_rel=1.435333e-02, L2_rate=, Linf_rate=
+  level_02_medium: h=2.564103e-02, L2_rel=1.896281e-03, Linf_rel=5.520212e-03, L2_rate=1.230429, Linf_rate=1.000057
+  level_03_fine: h=1.612903e-02, L2_rel=1.125920e-03, Linf_rel=3.471745e-03, L2_rate=1.124515, Linf_rate=1.000402
+  level_04_finer: h=1.162791e-02, L2_rel=7.888744e-04, Linf_rel=2.503212e-03, L2_rate=1.087208, Linf_rate=0.999602
+  level_05_superfine: h=9.090909e-03, L2_rel=6.066789e-04, Linf_rel=1.957167e-03, L2_rate=1.066933, Linf_rate=0.999772
 
 nonorthogonal_tiled_polygonal
   L2 monotone decrease: True
   Linf monotone decrease: True
-  level_03_fine: h=5.555556e-02, L2_rel=5.820500e-03, Linf_rel=2.218840e-02, L2_rate=, Linf_rate=
+  level_01_coarse: h=4.166667e-02, L2_rel=4.054515e-03, Linf_rel=1.653659e-02, L2_rate=, Linf_rate=
+  level_02_medium: h=1.666667e-02, L2_rel=1.350326e-03, Linf_rel=6.308343e-03, L2_rate=1.199930, Linf_rate=1.051743
+  level_03_fine: h=1.075269e-02, L2_rel=8.211696e-04, Linf_rel=3.945282e-03, L2_rate=1.134891, Linf_rate=1.070958
+  level_04_finer: h=7.751938e-03, L2_rel=5.710116e-04, Linf_rel=2.776626e-03, L2_rate=1.110348, Linf_rate=1.073564
+  level_05_superfine: h=6.060606e-03, L2_rel=4.359868e-04, Linf_rel=2.130546e-03, L2_rate=1.096145, Linf_rate=1.076077
 

@@ -113,9 +113,30 @@ CASE_SETTINGS = {
     },
     "stefan_apparent_capacity": {
         "alpha": 0.08,
+        "dt": 1e-4,
+        "t_init": 0.0,
+        "t_end": 0.05,
+    },
+    "temperature_dependent_diffusivity": {
+        "alpha": 0.12,
         "dt": 1e-3,
         "t_init": 0.0,
         "t_end": 0.05,
+    },
+    "radiative_manufactured": {
+        "alpha": 0.1,
+        "dt": 1e-3,
+        "t_init": 0.0,
+        "t_end": 0.03,
+    },
+}
+
+CASE_SETTINGS_MINI = {
+    "stefan_apparent_capacity": {
+        "alpha": 0.08,
+        "dt": 1e-5,
+        "t_init": 0.0,
+        "t_end": 0.001,
     },
     "temperature_dependent_diffusivity": {
         "alpha": 0.12,
@@ -134,53 +155,53 @@ CASE_SETTINGS = {
 RESOLUTION_LEVELS = [
     {
         "name": "level_01_coarse",
-        "nonorthogonal_tiled_tiles": 2,
-        "polygonal_spacing": 0.5,
-        "mixed_tiles": 2,
-        "square_nx": 4,
-        "nonorthogonal_nx": 4,
-        "delaunay_nx": 4,
-        "curvilinear_nx": 4,
+        "nonorthogonal_tiled_tiles": 8,
+        "polygonal_nx": 15,
+        "mixed_tiles": 8,
+        "square_nx": 15,
+        "nonorthogonal_nx": 15,
+        "delaunay_nx": 30,
+        "curvilinear_nx": 15,
     },
     {
         "name": "level_02_medium",
-        "nonorthogonal_tiled_tiles": 4,
-        "polygonal_spacing": 0.25,
-        "mixed_tiles": 4,
-        "square_nx": 8,
-        "nonorthogonal_nx": 8,
-        "delaunay_nx": 8,
-        "curvilinear_nx": 8,
+        "nonorthogonal_tiled_tiles": 20,
+        "polygonal_nx": 39,
+        "mixed_tiles": 20,
+        "square_nx": 39,
+        "nonorthogonal_nx": 39,
+        "delaunay_nx": 50,
+        "curvilinear_nx": 39,
     },
     {
         "name": "level_03_fine",
-        "nonorthogonal_tiled_tiles": 6,
-        "polygonal_spacing": 0.1666666,
-        "mixed_tiles": 6,
-        "square_nx": 12,
-        "nonorthogonal_nx": 12,
-        "delaunay_nx": 12,
-        "curvilinear_nx": 12,
+        "nonorthogonal_tiled_tiles": 31,
+        "polygonal_nx": 62,
+        "mixed_tiles": 31,
+        "square_nx": 62,
+        "nonorthogonal_nx": 62,
+        "delaunay_nx": 70,
+        "curvilinear_nx": 62,
     },
     {
         "name": "level_04_finer",
-        "nonorthogonal_tiled_tiles": 8,
-        "polygonal_spacing": 0.125,
-        "mixed_tiles": 8,
-        "square_nx": 16,
-        "nonorthogonal_nx": 16,
-        "delaunay_nx": 16,
-        "curvilinear_nx": 16,
+        "nonorthogonal_tiled_tiles": 43,
+        "polygonal_nx": 86,
+        "mixed_tiles": 43,
+        "square_nx": 86,
+        "nonorthogonal_nx": 86,
+        "delaunay_nx": 90,
+        "curvilinear_nx": 86,
     },
     {
         "name": "level_05_superfine",
-        "nonorthogonal_tiled_tiles": 12,
-        "polygonal_spacing": 0.0833333,
-        "mixed_tiles": 12,
-        "square_nx": 24,
-        "nonorthogonal_nx": 24,
-        "delaunay_nx": 24,
-        "curvilinear_nx": 24,
+        "nonorthogonal_tiled_tiles": 55,
+        "polygonal_nx": 110,
+        "mixed_tiles": 55,
+        "square_nx": 110,
+        "nonorthogonal_nx": 110,
+        "delaunay_nx": 130,
+        "curvilinear_nx": 110,
     },
 ]
 
@@ -206,7 +227,8 @@ def _bbox_width_height(bbox):
 def _polygonal_config(case, settings, level):
     bbox = _case_bbox(case, settings)
     width, height = _bbox_width_height(bbox)
-    spacing = level["polygonal_spacing"]
+    nx = level["polygonal_nx"]
+    spacing = min(width, height) / float(nx)
     return {
         **settings,
         "bbox": bbox,
@@ -561,7 +583,7 @@ def main():
 
     print("Generating empirical convergence plots. This can verify observed trends but cannot guarantee convergence from finite tests alone.")
 
-    for case, settings in CASE_SETTINGS.items():
+    for case, settings in CASE_SETTINGS_MINI.items():
         case_dir = OUTPUT_DIR / case
         case_dir.mkdir(exist_ok=True)
         summary_rows = []

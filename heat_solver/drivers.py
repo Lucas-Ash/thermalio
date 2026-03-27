@@ -57,7 +57,16 @@ def run_curvilinear_test(
     def g(x, y, t):
         return bc_func(x, y, t)
         
-    solver = CurvilinearHeatSolver(X, Y, alpha=alpha, dt=dt, bc_type=bc_type, bc_func=g, source_func=source_func)
+    solver = CurvilinearHeatSolver(
+        X,
+        Y,
+        alpha=alpha,
+        dt=dt,
+        bc_type=bc_type,
+        bc_func=g,
+        source_func=source_func,
+        reuse_linear_lhs=True,
+    )
     u0 = exact_solution(X, Y, t_init)
     t_final, u_num_grid = solver.solve(u0=u0, t0=t_init, t_end=t_end)
     
@@ -102,6 +111,7 @@ def run_polygonal_mesh_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    reuse_linear_lhs=True,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -145,6 +155,7 @@ def run_polygonal_mesh_test(
         phase_change_options=phase_change_options,
         temperature_dependent_diffusivity=temperature_dependent_diffusivity,
         nonlinear_options=nonlinear_options,
+        reuse_linear_lhs=reuse_linear_lhs,
     )
     u0 = exact_solution(centers[:, 0], centers[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
@@ -458,6 +469,7 @@ def run_test(
         source_func=source_func,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
+        reuse_linear_lhs=True,
     )
     u0 = exact_solution(points[:, 0], points[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)

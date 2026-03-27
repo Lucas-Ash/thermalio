@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse import diags, lil_matrix
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import factorized, spsolve
 
 
 class CurvilinearHeatSolver:
@@ -10,7 +10,17 @@ class CurvilinearHeatSolver:
     Uses conservative mapped finite differences.
     """
 
-    def __init__(self, X, Y, alpha, dt, bc_type="dirichlet", bc_func=None, source_func=None):
+    def __init__(
+        self,
+        X,
+        Y,
+        alpha,
+        dt,
+        bc_type="dirichlet",
+        bc_func=None,
+        source_func=None,
+        reuse_linear_lhs=True,
+    ):
         self.X = np.asarray(X, dtype=float)
         self.Y = np.asarray(Y, dtype=float)
         if self.X.shape != self.Y.shape:
@@ -27,6 +37,18 @@ class CurvilinearHeatSolver:
         self.N = self.nx * self.ny
         self.J = np.ones((self.ny, self.nx), dtype=float)
         self.M_diag, self.A = self._build_matrices()
+        self.reuse_linear_lhs = bool(reuse_linear_lhs)
+
+    @staticmethod
+    def _dt_schedule(t0, t_end, dt):
+        t = t0
+        nsteps = int(np.ceil((t_end - t0) / dt))
+        schedule = []
+        for _ in range(nsteps):
+            t_next = min(t + dt, t_end)
+            schedule.append(float(t_next - t))
+            t = t_next
+        return schedule
 
     def _idx(self, j, i):
         return j * self.nx + i
@@ -149,39 +171,53 @@ class CurvilinearHeatSolver:
         
         return M_diag, A.tocsr()
 
+    def _dirichlet_lhs_csr(self, dt_eff, is_boundary_flat):
+        lhs = (self.M_diag - dt_eff * self.A).copy().tolil()
+        for i in np.where(is_boundary_flat)[0]:
+            lhs.rows[i] = [i]
+            lhs.data[i] = [1.0]
+        return lhs.tocsr()
+
     def solve(self, u0, t0, t_end):
         u = np.asarray(u0, dtype=float).flatten()
         t = t0
-        nsteps = int(np.ceil((t_end - t0) / self.dt))
-        
+        dts = self._dt_schedule(t0, t_end, self.dt)
+        nsteps = len(dts)
+
         X_flat = self.X.flatten()
         Y_flat = self.Y.flatten()
-        
-        # Identify boundary nodes
+
         is_boundary = np.zeros((self.ny, self.nx), dtype=bool)
         is_boundary[0, :] = True
         is_boundary[-1, :] = True
         is_boundary[:, 0] = True
         is_boundary[:, -1] = True
         is_boundary_flat = is_boundary.flatten()
-        
-        for _ in range(nsteps):
+
+        factor_by_dt = {}
+        if self.reuse_linear_lhs:
+            for key in sorted({round(float(d), 12) for d in dts}):
+                factor_by_dt[key] = factorized(self._dirichlet_lhs_csr(key, is_boundary_flat))
+
+        for k in range(nsteps):
             t_next = min(t + self.dt, t_end)
-            dt_eff = t_next - t
+            dt_eff = dts[k]
             rhs = self.M_diag @ u
             source_vals = np.asarray(self.source_func(X_flat, Y_flat, t_next), dtype=float)
             rhs = rhs + dt_eff * source_vals
-            
-            lhs = (self.M_diag - dt_eff * self.A).copy().tolil()
             bc_vals = self.bc_func(X_flat, Y_flat, t_next)
-            
-            # Enforce Dirichlet boundaries
-            for i in np.where(is_boundary_flat)[0]:
-                lhs.rows[i] = [i]
-                lhs.data[i] = [1.0]
-                rhs[i] = bc_vals[i]
-                
-            u = spsolve(lhs.tocsr(), rhs)
+            if self.reuse_linear_lhs:
+                dt_key = round(float(dt_eff), 12)
+                for i in np.where(is_boundary_flat)[0]:
+                    rhs[i] = bc_vals[i]
+                u = factor_by_dt[dt_key](rhs)
+            else:
+                lhs = (self.M_diag - dt_eff * self.A).copy().tolil()
+                for i in np.where(is_boundary_flat)[0]:
+                    lhs.rows[i] = [i]
+                    lhs.data[i] = [1.0]
+                    rhs[i] = bc_vals[i]
+                u = spsolve(lhs.tocsr(), rhs)
             t = t_next
-            
+
         return t, u.reshape((self.ny, self.nx))

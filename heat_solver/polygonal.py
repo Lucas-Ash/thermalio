@@ -1,14 +1,14 @@
 import inspect
 
 import numpy as np
-from scipy.sparse import diags, lil_matrix
-from scipy.sparse.linalg import bicgstab, cg, spsolve
+from scipy.sparse import coo_matrix, diags, lil_matrix
+from scipy.sparse.linalg import bicgstab, cg, factorized, spsolve
 
 from .geometry import polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
 
 
-def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None):
+def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None, direct_factor=None):
     """
     Solve ``lhs @ x = rhs`` with either a sparse direct factorization or an iterative Krylov method.
 
@@ -22,8 +22,13 @@ def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None):
         Optional keys: ``rtol``, ``atol``, ``maxiter``.
     x0 : ndarray, optional
         Initial guess for iterative methods (defaults to zeros in SciPy if None).
+    direct_factor : callable, optional
+        If ``method == "direct"``, optional ``factorized(lhs)`` from SciPy to reuse the numeric
+        factorization when the matrix is fixed across steps.
     """
     if method == "direct":
+        if direct_factor is not None:
+            return direct_factor(rhs)
         return spsolve(lhs, rhs)
 
     opts = options or {}
@@ -46,6 +51,63 @@ def _solve_sparse_linear_system(lhs, rhs, method, options, x0=None):
             "Try tightening rtol/atol, increasing maxiter, or using linear_solver='direct'."
         )
     return x
+
+
+class _AndersonAccelerator:
+    """Anderson acceleration (type-I) for fixed-point iterations.
+
+    Stores a sliding window of iterates and their fixed-point residuals,
+    then computes an optimized linear combination via least-squares
+    to accelerate convergence of the Picard map.
+    """
+
+    __slots__ = ("_depth", "_g_hist", "_f_hist")
+
+    def __init__(self, depth):
+        self._depth = max(int(depth), 1)
+        self._g_hist = []
+        self._f_hist = []
+
+    def step(self, x_k, g_k):
+        """Return accelerated iterate.  *x_k* is the current guess,
+        *g_k* = G(x_k) is the unaccelerated fixed-point evaluation."""
+        f_k = g_k - x_k
+        self._g_hist.append(g_k.copy())
+        self._f_hist.append(f_k.copy())
+        k = len(self._f_hist)
+        if k < 2:
+            return g_k.copy()
+        m_k = min(k - 1, self._depth)
+        dF = np.empty((f_k.size, m_k))
+        dG = np.empty((f_k.size, m_k))
+        for j in range(m_k):
+            idx = k - 1 - j
+            dF[:, j] = self._f_hist[idx] - self._f_hist[idx - 1]
+            dG[:, j] = self._g_hist[idx] - self._g_hist[idx - 1]
+        gamma, _, _, _ = np.linalg.lstsq(dF, f_k, rcond=None)
+        x_new = g_k - dG @ gamma
+        excess = k - (self._depth + 1)
+        if excess > 0:
+            del self._g_hist[:excess]
+            del self._f_hist[:excess]
+        return x_new
+
+    def reset(self):
+        self._g_hist.clear()
+        self._f_hist.clear()
+
+
+def _apply_dirichlet_rows_csr(K, boundary_indices):
+    """Zero boundary rows in a CSR matrix and set their diagonal to 1.0 (in-place)."""
+    indptr = K.indptr
+    indices = K.indices
+    data = K.data
+    for i in boundary_indices:
+        start = indptr[i]
+        end = indptr[i + 1]
+        data[start:end] = 0.0
+        pos = start + np.searchsorted(indices[start:end], i)
+        data[pos] = 1.0
 
 
 class PolygonalHeatSolver:
@@ -92,6 +154,7 @@ class PolygonalHeatSolver:
         phase_change_options=None,
         temperature_dependent_diffusivity=None,
         nonlinear_options=None,
+        reuse_linear_lhs=True,
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -164,6 +227,15 @@ class PolygonalHeatSolver:
         self.M_diag = None
         self.A = None
         self.u = np.zeros(self.M)
+        self.reuse_linear_lhs = bool(reuse_linear_lhs)
+        self._vec_assembly = None
+        self._boundary_idx = np.where(self.is_boundary)[0]
+        if (
+            self.temperature_dependent_diffusivity
+            and self.flux_scheme == "tpfa"
+            and self.flux_discretization == "tpfa"
+        ):
+            self._precompute_vectorized_assembly()
 
     def _effective_heat_capacity(self, temperature):
         if self.phase_change_model is None:
@@ -518,6 +590,9 @@ class PolygonalHeatSolver:
         self.A = diffusion.tocsr()
 
     def _assemble_system(self, temperature=None):
+        if temperature is not None and self._vec_assembly is not None:
+            self._assemble_diffusion_vectorized(temperature)
+            return
         mass = diags(self.cell_areas, format="csr")
         # MPFA condensed FEM is only used with Dirichlet: Neumann/Robin need a flux closure
         # consistent with unprescribed boundary values; use the same TPFA two-point stencil as
@@ -594,10 +669,182 @@ class PolygonalHeatSolver:
         self.M_diag = mass
         self.A = diffusion.tocsr()
 
+    def _precompute_vectorized_assembly(self):
+        """Pre-compute edge topology and COO structure for vectorized diffusion assembly.
+
+        For temperature-dependent *isotropic* (scalar) diffusivity the diffusion
+        matrix has the form ``A = sum_edges alpha_e * G_e`` where ``G_e`` depends
+        only on mesh geometry.  This method pre-computes ``G_e`` (as COO weights)
+        so that each subsequent assembly is a single vectorised alpha evaluation
+        followed by a weighted COO scatter -- no Python edge loop required.
+        """
+        cells_i_list, cells_j_list, v0_list, v1_list = [], [], [], []
+        for edge, cells in self.edge_to_cells.items():
+            if len(cells) != 2:
+                continue
+            i, j = cells
+            if j < i:
+                i, j = j, i
+            cells_i_list.append(i)
+            cells_j_list.append(j)
+            v0_list.append(self.vertices[edge[0]])
+            v1_list.append(self.vertices[edge[1]])
+
+        if not cells_i_list:
+            return
+
+        cells_i = np.array(cells_i_list, dtype=np.intp)
+        cells_j = np.array(cells_j_list, dtype=np.intp)
+        v0 = np.asarray(v0_list, dtype=float)
+        v1 = np.asarray(v1_list, dtype=float)
+
+        edge_vecs = v1 - v0
+        edge_lens = np.linalg.norm(edge_vecs, axis=1)
+
+        valid = edge_lens > 0
+        cells_i = cells_i[valid]
+        cells_j = cells_j[valid]
+        v0 = v0[valid]
+        v1 = v1[valid]
+        edge_vecs = edge_vecs[valid]
+        edge_lens = edge_lens[valid]
+        n_edges = cells_i.shape[0]
+
+        tangents = edge_vecs / edge_lens[:, None]
+        normals = np.column_stack([-tangents[:, 1], tangents[:, 0]])
+        midpoints = 0.5 * (v0 + v1)
+        d_vecs = self.cell_centers[cells_j] - self.cell_centers[cells_i]
+        dn = np.einsum("ij,ij->i", d_vecs, normals)
+
+        flip = dn < 0
+        normals[flip] *= -1
+        dn[flip] *= -1
+        small = dn <= 1e-12
+        dn[small] = np.maximum(np.linalg.norm(d_vecs[small], axis=1), 1e-12)
+
+        # Verify the alpha callable returns isotropic scalars.
+        n_test = min(3, n_edges)
+        try:
+            _tv = np.asarray(
+                self.alpha(midpoints[:n_test, 0], midpoints[:n_test, 1], np.ones(n_test)),
+                dtype=float,
+            )
+            if _tv.ndim > 1 or _tv.shape != (n_test,):
+                return
+        except Exception:
+            return
+
+        tpfa_trans = edge_lens / dn
+
+        base_rows = np.concatenate([cells_i, cells_i, cells_j, cells_j])
+        base_cols = np.concatenate([cells_i, cells_j, cells_i, cells_j])
+        base_edge_map = np.tile(np.arange(n_edges), 4)
+        base_geom = np.concatenate([tpfa_trans, -tpfa_trans, -tpfa_trans, tpfa_trans])
+
+        cr, cc, cg, ce = [], [], [], []
+        if self.nonorthogonal_correction and self.gradient_coeffs is not None:
+            corr_unit = normals - d_vecs / dn[:, None]
+            corr_norms = np.linalg.norm(corr_unit, axis=1)
+            for e in range(n_edges):
+                if corr_norms[e] <= 1e-14:
+                    continue
+                cu = corr_unit[e]
+                L = edge_lens[e]
+                i_cell, j_cell = int(cells_i[e]), int(cells_j[e])
+                fc = {}
+                for cell in (i_cell, j_cell):
+                    for idx, gc in self.gradient_coeffs[cell].items():
+                        fc[idx] = fc.get(idx, 0.0) + 0.5 * float(np.dot(cu, gc))
+                for idx, c in fc.items():
+                    if abs(c) <= 1e-30:
+                        continue
+                    cr.extend([i_cell, j_cell])
+                    cc.extend([idx, idx])
+                    cg.extend([-L * c, L * c])
+                    ce.extend([e, e])
+
+        if cr:
+            all_rows = np.concatenate([base_rows, np.array(cr, dtype=np.intp)])
+            all_cols = np.concatenate([base_cols, np.array(cc, dtype=np.intp)])
+            all_geom = np.concatenate([base_geom, np.array(cg, dtype=float)])
+            all_emap = np.concatenate([base_edge_map, np.array(ce, dtype=np.intp)])
+        else:
+            all_rows = base_rows
+            all_cols = base_cols
+            all_geom = base_geom
+            all_emap = base_edge_map
+
+        self.M_diag = diags(self.cell_areas, format="csr")
+        self._vec_assembly = {
+            "n_edges": n_edges,
+            "cells_i": cells_i,
+            "cells_j": cells_j,
+            "midpoints": midpoints,
+            "all_rows": all_rows,
+            "all_cols": all_cols,
+            "all_geom": all_geom,
+            "all_emap": all_emap,
+        }
+
+    def _assemble_diffusion_vectorized(self, temperature):
+        """Build diffusion matrix from pre-computed COO structure (isotropic scalar alpha)."""
+        va = self._vec_assembly
+        face_temps = 0.5 * (temperature[va["cells_i"]] + temperature[va["cells_j"]])
+        alpha_vals = np.asarray(
+            self.alpha(va["midpoints"][:, 0], va["midpoints"][:, 1], face_temps),
+            dtype=float,
+        ).ravel()
+        data = alpha_vals[va["all_emap"]] * va["all_geom"]
+        self.A = coo_matrix(
+            (data, (va["all_rows"], va["all_cols"])), shape=(self.M, self.M)
+        ).tocsr()
+
+    @staticmethod
+    def _dt_schedule(t0, t_end, dt):
+        t = t0
+        nsteps = int(np.ceil((t_end - t0) / dt))
+        schedule = []
+        for _ in range(nsteps):
+            t_next = min(t + dt, t_end)
+            schedule.append(float(t_next - t))
+            t = t_next
+        return schedule
+
+    def _linear_operator_reusable(self):
+        """True when the assembled linear system matrix is independent of time step index."""
+        if self.phase_change_model is not None:
+            return False
+        if self.temperature_dependent_diffusivity:
+            return False
+        if self.bc_type == "radiative":
+            return False
+        if self.bc_type == "robin":
+            return False
+        return True
+
+    def _apply_dirichlet_identity_rows(self, K_csr):
+        lil = K_csr.tolil()
+        for i in np.where(self.is_boundary)[0]:
+            lil.rows[i] = [i]
+            lil.data[i] = [1.0]
+        return lil.tocsr()
+
+    def _build_linear_lhs_csr(self, dt_eff):
+        """LHS for linear Dirichlet/Neumann problems (Robin excluded)."""
+        if self.time_scheme == "backward_euler":
+            theta = 1.0
+        else:
+            theta = 0.5
+        K = self.M_diag + (theta * dt_eff) * self.A
+        if self.bc_type == "dirichlet":
+            return self._apply_dirichlet_identity_rows(K)
+        return K.tocsr()
+
     def solve(self, u0, t0, t_end):
         u = np.array(u0, dtype=float)
         t = t0
-        nsteps = int(np.ceil((t_end - t0) / self.dt))
+        dts = self._dt_schedule(t0, t_end, self.dt)
+        nsteps = len(dts)
         has_temp_dependent_diffusion = bool(self.temperature_dependent_diffusivity)
         has_nonlinear_radiation = self.bc_type == "radiative"
         requires_nonlinear = (
@@ -609,9 +856,62 @@ class PolygonalHeatSolver:
         if not has_temp_dependent_diffusion:
             self._assemble_system()
 
-        for _ in range(nsteps):
+        _pc_fast = (
+            self.phase_change_model is not None
+            and not has_temp_dependent_diffusion
+            and not has_nonlinear_radiation
+            and self.bc_type == "dirichlet"
+            and self.time_scheme == "backward_euler"
+        )
+        _pc_lhs = None
+        _pc_diag_pos = None
+        _pc_a2l = None
+        _pc_A_data = None
+        if _pc_fast:
+            _pc_A_csr = self.A.tocsr()
+            _pc_lhs = (diags(self.cell_areas, format="csr") + _pc_A_csr).tocsr()
+            _pc_lhs_indptr = _pc_lhs.indptr
+            _pc_lhs_indices = _pc_lhs.indices
+            _pc_diag_pos = np.empty(self.M, dtype=np.intp)
+            for _i in range(self.M):
+                _s = _pc_lhs_indptr[_i]
+                _pc_diag_pos[_i] = _s + np.searchsorted(
+                    _pc_lhs_indices[_s:_pc_lhs_indptr[_i + 1]], _i
+                )
+            _pc_a2l = np.empty(_pc_A_csr.nnz, dtype=np.intp)
+            for _i in range(self.M):
+                _as = _pc_A_csr.indptr[_i]
+                _ae = _pc_A_csr.indptr[_i + 1]
+                _ls = _pc_lhs_indptr[_i]
+                _pc_a2l[_as:_ae] = _ls + np.searchsorted(
+                    _pc_lhs_indices[_ls:_pc_lhs_indptr[_i + 1]],
+                    _pc_A_csr.indices[_as:_ae],
+                )
+            _pc_A_data = _pc_A_csr.data
+            _pc_A_cols = _pc_A_csr.indices.copy()
+
+        use_linear_cache = (
+            self.reuse_linear_lhs
+            and (not requires_nonlinear)
+            and self._linear_operator_reusable()
+        )
+        lhs_by_dt = None
+        factor_by_dt = None
+        if use_linear_cache:
+            uniq_dt = []
+            seen = set()
+            for d in dts:
+                key = round(float(d), 12)
+                if key not in seen:
+                    seen.add(key)
+                    uniq_dt.append(key)
+            lhs_by_dt = {key: self._build_linear_lhs_csr(key) for key in uniq_dt}
+            if self.linear_solver == "direct":
+                factor_by_dt = {key: factorized(lhs_by_dt[key]) for key in uniq_dt}
+
+        for step_idx in range(nsteps):
             t_next = min(t + self.dt, t_end)
-            dt_eff = t_next - t
+            dt_eff = dts[step_idx]
             cx = self.cell_centers[:, 0]
             cy = self.cell_centers[:, 1]
             source_next = np.broadcast_to(
@@ -620,20 +920,30 @@ class PolygonalHeatSolver:
             )
 
             if not requires_nonlinear:
+                dt_key = round(float(dt_eff), 12)
                 if self.time_scheme == "backward_euler":
                     rhs = self.M_diag @ u + dt_eff * (self.cell_areas * source_next)
                     if self.bc_type == "dirichlet":
                         bc_vals = self.bc_func(cx, cy, t_next)
-                        lhs = (self.M_diag + dt_eff * self.A).copy().tolil()
-                        for i in np.where(self.is_boundary)[0]:
-                            lhs.rows[i] = [i]
-                            lhs.data[i] = [1.0]
-                            rhs[i] = bc_vals[i]
-                        lhs = lhs.tocsr()
+                        if use_linear_cache:
+                            lhs = lhs_by_dt[dt_key]
+                            for i in np.where(self.is_boundary)[0]:
+                                rhs[i] = bc_vals[i]
+                        else:
+                            lhs = (self.M_diag + dt_eff * self.A).copy().tolil()
+                            for i in np.where(self.is_boundary)[0]:
+                                lhs.rows[i] = [i]
+                                lhs.data[i] = [1.0]
+                            for i in np.where(self.is_boundary)[0]:
+                                rhs[i] = bc_vals[i]
+                            lhs = lhs.tocsr()
                     else:
                         boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
-                        lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
                         rhs = rhs + dt_eff * boundary_rhs
+                        if use_linear_cache:
+                            lhs = lhs_by_dt[dt_key]
+                        else:
+                            lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
                 else:
                     source_prev = np.broadcast_to(
                         np.asarray(self.source_func(cx, cy, t), dtype=float),
@@ -645,11 +955,14 @@ class PolygonalHeatSolver:
                         bc_vals = self.bc_func(cx, cy, t_next)
                         for i in np.where(self.is_boundary)[0]:
                             rhs[i] = bc_vals[i]
-                        lhs = (self.M_diag + 0.5 * dt_eff * self.A).copy().tolil()
-                        for i in np.where(self.is_boundary)[0]:
-                            lhs.rows[i] = [i]
-                            lhs.data[i] = [1.0]
-                        lhs = lhs.tocsr()
+                        if use_linear_cache:
+                            lhs = lhs_by_dt[dt_key]
+                        else:
+                            lhs = (self.M_diag + 0.5 * dt_eff * self.A).copy().tolil()
+                            for i in np.where(self.is_boundary)[0]:
+                                lhs.rows[i] = [i]
+                                lhs.data[i] = [1.0]
+                            lhs = lhs.tocsr()
                     else:
                         b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
                         b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
@@ -657,15 +970,20 @@ class PolygonalHeatSolver:
                         k_next = self.A + b_mat_next
                         rhs = (self.M_diag - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
-                        lhs = self.M_diag + 0.5 * dt_eff * k_next
+                        if use_linear_cache:
+                            lhs = lhs_by_dt[dt_key]
+                        else:
+                            lhs = self.M_diag + 0.5 * dt_eff * k_next
 
                 x0 = u if self.linear_solver != "direct" else None
+                direct_factor = factor_by_dt[dt_key] if factor_by_dt is not None else None
                 u = _solve_sparse_linear_system(
                     lhs,
                     rhs,
                     self.linear_solver,
                     self.linear_solver_options,
                     x0=x0,
+                    direct_factor=direct_factor,
                 )
                 t = t_next
                 continue
@@ -674,6 +992,132 @@ class PolygonalHeatSolver:
             tol = float(self.nonlinear_options["tol"])
             relaxation = float(self.nonlinear_options["relaxation"])
             u_iter = u.copy()
+
+            # ---- Fast vectorized path for temp-dependent scalar diffusivity ----
+            _use_fast = (
+                has_temp_dependent_diffusion
+                and self._vec_assembly is not None
+                and self.phase_change_model is None
+                and self.bc_type == "dirichlet"
+                and self.time_scheme == "backward_euler"
+            )
+            if _use_fast:
+                anderson_depth = int(self.nonlinear_options.get("anderson_depth", 0))
+                accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
+                bc_vals = np.broadcast_to(
+                    np.asarray(self.bc_func(cx, cy, t_next), dtype=float), (self.M,)
+                )
+                rhs_base = self.M_diag @ u + dt_eff * np.asarray(
+                    self.cell_areas * source_next, dtype=float
+                )
+                bidx = self._boundary_idx
+                rhs_base[bidx] = bc_vals[bidx]
+
+                for _ in range(max_iters):
+                    self._assemble_diffusion_vectorized(u_iter)
+                    lhs = self.M_diag + dt_eff * self.A
+                    _apply_dirichlet_rows_csr(lhs, bidx)
+                    u_raw = spsolve(lhs, rhs_base)
+
+                    if accel is not None:
+                        u_next = accel.step(u_iter, u_raw)
+                        if not np.all(np.isfinite(u_next)):
+                            u_next = u_raw
+                            accel.reset()
+                    elif relaxation != 1.0:
+                        u_next = relaxation * u_raw + (1.0 - relaxation) * u_iter
+                    else:
+                        u_next = u_raw
+
+                    err = np.max(np.abs(u_next - u_iter))
+                    scale = max(1.0, np.max(np.abs(u_next)))
+                    u_iter = u_next
+                    if err <= tol * scale:
+                        break
+                else:
+                    raise RuntimeError(
+                        "Nonlinear solve did not converge. "
+                        "Try a smaller dt or larger nonlinear_options['max_iters']."
+                    )
+                u = u_iter
+                t = t_next
+                continue
+            # ---- End fast path ----
+
+            # ---- Fast path for phase-change with constant diffusivity ----
+            if _pc_fast:
+                bc_vals = np.broadcast_to(
+                    np.asarray(self.bc_func(cx, cy, t_next), dtype=float), (self.M,)
+                )
+                dt_area_src = dt_eff * np.asarray(
+                    self.cell_areas * source_next, dtype=float
+                )
+                bidx = self._boundary_idx
+                linearize_cp = bool(self.nonlinear_options.get("linearize_cp", False))
+
+                if linearize_cp:
+                    pcm = self.phase_change_model
+                    cp_eff = self._effective_heat_capacity(u)
+                    inv_cp = 1.0 / cp_eff
+                    H_n = np.asarray(pcm.enthalpy(u), dtype=float)
+
+                    _pc_lhs.data[:] = 0.0
+                    _pc_lhs.data[_pc_a2l] = (
+                        dt_eff * _pc_A_data * inv_cp[_pc_A_cols]
+                    )
+                    _pc_lhs.data[_pc_diag_pos] += self.cell_areas
+
+                    rhs = dt_area_src - dt_eff * (self.A @ u)
+                    H_bc = np.asarray(pcm.enthalpy(bc_vals), dtype=float)
+                    rhs[bidx] = H_bc[bidx] - H_n[bidx]
+                    _apply_dirichlet_rows_csr(_pc_lhs, bidx)
+
+                    dH = spsolve(_pc_lhs, rhs)
+                    u = np.asarray(
+                        pcm.temperature_from_enthalpy(H_n + dH), dtype=float
+                    )
+                    t = t_next
+                    continue
+
+                anderson_depth = int(self.nonlinear_options.get("anderson_depth", 0))
+                accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
+
+                for _ in range(max_iters):
+                    cp_eff = self._effective_heat_capacity(u_iter)
+                    rhs = self.cell_areas * cp_eff * u + dt_area_src
+                    rhs[bidx] = bc_vals[bidx]
+
+                    _pc_lhs.data[:] = 0.0
+                    _pc_lhs.data[_pc_a2l] = dt_eff * _pc_A_data
+                    _pc_lhs.data[_pc_diag_pos] += self.cell_areas * cp_eff
+                    _apply_dirichlet_rows_csr(_pc_lhs, bidx)
+
+                    u_raw = spsolve(_pc_lhs, rhs)
+
+                    if accel is not None:
+                        u_next = accel.step(u_iter, u_raw)
+                        if not np.all(np.isfinite(u_next)):
+                            u_next = u_raw
+                            accel.reset()
+                    elif relaxation != 1.0:
+                        u_next = relaxation * u_raw + (1.0 - relaxation) * u_iter
+                    else:
+                        u_next = u_raw
+
+                    err = np.max(np.abs(u_next - u_iter))
+                    scale = max(1.0, np.max(np.abs(u_next)))
+                    u_iter = u_next
+                    if err <= tol * scale:
+                        break
+                else:
+                    raise RuntimeError(
+                        "Nonlinear solve did not converge. "
+                        "Try a smaller dt or larger nonlinear_options['max_iters']."
+                    )
+                u = u_iter
+                t = t_next
+                continue
+            # ---- End fast phase-change path ----
 
             source_prev = None
             src_avg = None

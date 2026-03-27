@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse import csr_matrix, diags
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import factorized, spsolve
 
 from .geometry import polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
@@ -23,6 +23,7 @@ class NonUniformHeatSolver:
         source_func=None,
         phase_change_model=None,
         phase_change_options=None,
+        reuse_linear_lhs=True,
     ):
         self.points = np.asarray(points, dtype=float)
         self.tris = np.asarray(tris, dtype=int)
@@ -44,6 +45,7 @@ class NonUniformHeatSolver:
         self._build_mass_matrix()
         self.t = 0.0
         self.u = np.zeros(self.N)
+        self.reuse_linear_lhs = bool(reuse_linear_lhs)
 
     def _build_topology(self):
         edges = {}
@@ -224,6 +226,29 @@ class NonUniformHeatSolver:
             A_mod.data[i] = [1.0]
         return A_mod.tocsr(), rhs
 
+    def _apply_dirichlet_matrix_only(self, A_csr, fixed=None):
+        if fixed is None:
+            mask = self.is_boundary
+        else:
+            mask = np.zeros(self.N, dtype=bool)
+            mask[np.asarray(fixed, dtype=int)] = True
+        A_mod = A_csr.tolil()
+        for i in np.where(mask)[0]:
+            A_mod.rows[i] = [i]
+            A_mod.data[i] = [1.0]
+        return A_mod.tocsr()
+
+    @staticmethod
+    def _dt_schedule(t0, t_end, dt):
+        t = t0
+        nsteps = int(np.ceil((t_end - t0) / dt))
+        schedule = []
+        for _ in range(nsteps):
+            t_next = min(t + dt, t_end)
+            schedule.append(float(t_next - t))
+            t = t_next
+        return schedule
+
     def step(self, u, t, dt_step):
         source_vals = np.broadcast_to(
             np.asarray(self.source_func(self.points[:, 0], self.points[:, 1], t + dt_step), dtype=float),
@@ -264,11 +289,41 @@ class NonUniformHeatSolver:
     def solve(self, u0, t0, t_end, callback=None):
         self.u = np.asarray(u0, dtype=float).copy()
         self.t = float(t0)
-        nsteps = int(np.ceil((t_end - t0) / self.dt))
+        dts = self._dt_schedule(t0, t_end, self.dt)
+        nsteps = len(dts)
+        use_cache = (
+            self.reuse_linear_lhs
+            and self.phase_change_model is None
+            and str(self.bc_type).lower() == "dirichlet"
+        )
+        lhs_by_dt = {}
+        factor_by_dt = {}
+        if use_cache:
+            for key in sorted({round(float(d), 12) for d in dts}):
+                mass_over_dt = diags(self.cv_area / key, format="csr")
+                lhs = (mass_over_dt + self.A).tocsr()
+                lhs_by_dt[key] = self._apply_dirichlet_matrix_only(lhs)
+                factor_by_dt[key] = factorized(lhs_by_dt[key])
+
         for k in range(nsteps):
             t_next = min(self.t + self.dt, t_end)
-            dt_step = t_next - self.t
-            self.u = self.step(self.u, self.t, dt_step)
+            dt_step = dts[k]
+            if use_cache:
+                dt_key = round(float(dt_step), 12)
+                source_vals = np.broadcast_to(
+                    np.asarray(
+                        self.source_func(self.points[:, 0], self.points[:, 1], t_next),
+                        dtype=float,
+                    ),
+                    (self.N,),
+                )
+                mass_over_dt = diags(self.cv_area / dt_step, format="csr")
+                rhs = (mass_over_dt @ self.u).copy() + self.cv_area * source_vals
+                for i in np.where(self.is_boundary)[0]:
+                    rhs[i] = self.bc_func(*self.points[i], t_next)
+                self.u = factor_by_dt[dt_key](rhs)
+            else:
+                self.u = self.step(self.u, self.t, dt_step)
             self.t = t_next
             if callback is not None:
                 callback(k + 1, self.t, self.u)

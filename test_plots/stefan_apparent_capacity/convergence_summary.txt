@@ -1,0 +1,12 @@
+Empirical convergence summary.
+This checks observed error trends; it does not constitute a mathematical guarantee of convergence.
+
+square_polygonal
+  L2 monotone decrease: True
+  Linf monotone decrease: True
+  level_01_coarse: h=1.333333e-01, L2_rel=1.348080e-04, Linf_rel=3.790715e-04, L2_rate=, Linf_rate=
+  level_02_medium: h=5.128205e-02, L2_rel=2.136473e-05, Linf_rel=6.272908e-05, L2_rate=1.927879, Linf_rate=1.882656
+  level_03_fine: h=3.225806e-02, L2_rel=9.027673e-06, Linf_rel=2.614532e-05, L2_rate=1.858277, Linf_rate=1.887848
+  level_04_finer: h=2.325581e-02, L2_rel=4.534275e-06, Linf_rel=1.368745e-05, L2_rate=2.104530, Linf_rate=1.977890
+  level_05_superfine: h=1.818182e-02, L2_rel=2.787877e-06, Linf_rel=8.394879e-06, L2_rate=1.976105, Linf_rate=1.986150
+

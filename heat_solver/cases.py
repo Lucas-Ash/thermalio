@@ -334,7 +334,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "solution": lambda x, y, t: stefan_apparent_capacity_solution(x, y, t),
             "source": stefan_apparent_capacity_source(alpha, phase_change_model),
             "phase_change_model": phase_change_model,
-            "phase_change_options": {"max_iters": 40, "tol": 1e-10, "relaxation": 1.0},
+            "phase_change_options": {"max_iters": 100, "tol": 1e-9, "relaxation": 0.95, "anderson_depth": 5, "linearize_cp": True},
             "polygonal_only": True,
         }
     elif case == "temperature_dependent_diffusivity":
@@ -345,7 +345,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "source": temp_dependent_diffusivity_source,
             "alpha": temp_dependent_diffusivity_alpha,
             "temperature_dependent_diffusivity": True,
-            "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9},
+            "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9, "anderson_depth": 5},
             "polygonal_only": True,
         }
     elif case == "radiative_manufactured":

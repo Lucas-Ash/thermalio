@@ -4,9 +4,9 @@ This checks observed error trends; it does not constitute a mathematical guarant
 curvilinear
   L2 monotone decrease: False
   Linf monotone decrease: False
-  level_01_coarse: h=5.000000e-01, L2_rel=5.840617e-01, Linf_rel=6.474858e-01, L2_rate=, Linf_rate=
-  level_02_medium: h=2.500000e-01, L2_rel=1.458747e-01, Linf_rel=2.318353e-01, L2_rate=2.001391, Linf_rate=1.481748
-  level_03_fine: h=1.666667e-01, L2_rel=2.125674e-01, Linf_rel=2.973246e-01, L2_rate=-0.928591, Linf_rate=-0.613610
-  level_04_finer: h=1.250000e-01, L2_rel=2.022555e-01, Linf_rel=3.082288e-01, L2_rate=0.172855, Linf_rate=-0.125200
-  level_05_superfine: h=8.333333e-02, L2_rel=6.235952e-02, Linf_rel=1.987043e-01, L2_rate=2.901891, Linf_rate=1.082768
+  level_01_coarse: h=1.333333e-01, L2_rel=1.656257e-01, Linf_rel=4.420012e-01, L2_rate=, Linf_rate=
+  level_02_medium: h=5.128205e-02, L2_rel=3.208549e-02, Linf_rel=8.683658e-02, L2_rate=1.717747, Linf_rate=1.703051
+  level_03_fine: h=3.225806e-02, L2_rel=2.174537e-02, Linf_rel=5.153600e-02, L2_rate=0.839141, Linf_rate=1.125492
+  level_04_finer: h=2.325581e-02, L2_rel=6.420313e-03, Linf_rel=1.676168e-02, L2_rate=3.728258, Linf_rate=3.432582
+  level_05_superfine: h=1.818182e-02, L2_rel=1.406917e-02, Linf_rel=3.750261e-02, L2_rate=-3.187377, Linf_rate=-3.271869
 
