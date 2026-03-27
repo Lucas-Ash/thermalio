@@ -57,6 +57,19 @@ class PolygonalHeatSolver:
     which is second-order accurate in time for smooth data (spatial accuracy is unchanged).
 
     Each step solves a sparse linear system; use ``linear_solver='bicgstab'`` or ``'cg'`` for iterative solves.
+
+    ``flux_scheme='tpfa'`` (default) is the two-point flux with optional nonorthogonal correction.
+    ``flux_scheme='mpfa'`` uses an MPFA-O style subcell linear FEM (``heat_solver.mpfa``) for the
+    diffusion block when ``bc_type='dirichlet'``. For ``bc_type`` Neumann or Robin, the solver uses
+    the same two-point TPFA diffusion stencil as ``flux_scheme='tpfa'`` together with
+    ``_assemble_boundary_system``, because the condensed MPFA assembly assumes fixed vertex values on
+    the boundary trace.
+
+    ``flux_discretization='tpfa'`` (default) uses the classical two-point transmissibility between
+    cell centers, optionally with ``nonorthogonal_correction``. ``flux_discretization='reconstructed'``
+    (only with ``flux_scheme='tpfa'``) builds the diffusive flux from a face-average of least-squares
+    cell gradients, giving a wider stencil that often reduces error on skewed meshes for smooth
+    solutions.
     """
 
     def __init__(
@@ -72,6 +85,8 @@ class PolygonalHeatSolver:
         linear_solver="direct",
         linear_solver_options=None,
         time_scheme="backward_euler",
+        flux_scheme="tpfa",
+        flux_discretization="tpfa",
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -93,6 +108,14 @@ class PolygonalHeatSolver:
         self.time_scheme = str(time_scheme).lower().strip()
         if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
             raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
+        self.flux_scheme = str(flux_scheme).lower().strip()
+        if self.flux_scheme not in {"tpfa", "mpfa"}:
+            raise ValueError("flux_scheme must be 'tpfa' or 'mpfa'.")
+        self.flux_discretization = str(flux_discretization).lower().strip()
+        if self.flux_discretization not in {"tpfa", "reconstructed"}:
+            raise ValueError("flux_discretization must be 'tpfa' or 'reconstructed'.")
+        if self.flux_scheme == "mpfa" and self.flux_discretization == "reconstructed":
+            raise ValueError("flux_discretization='reconstructed' is only supported with flux_scheme='tpfa'.")
         self.M = len(self.polygons)
         self.cell_centers = self._compute_cell_centers()
         self.cell_areas = self._compute_cell_areas()
@@ -101,7 +124,16 @@ class PolygonalHeatSolver:
         self.neighbors = self._build_neighbors()
         self.is_boundary = self._detect_boundary_cells()
         self._bc_accepts_normals = self._bc_func_accepts_normals()
-        self.gradient_coeffs = self._build_gradient_reconstruction() if self.nonorthogonal_correction else None
+        need_tpfa_gradients = (
+            (self.flux_scheme == "tpfa" and self.flux_discretization == "reconstructed")
+            or (
+                self.flux_scheme == "tpfa"
+                and self.flux_discretization == "tpfa"
+                and self.nonorthogonal_correction
+            )
+            or (self.flux_scheme == "mpfa" and self.bc_type != "dirichlet")
+        )
+        self.gradient_coeffs = self._build_gradient_reconstruction() if need_tpfa_gradients else None
         self.u = np.zeros(self.M)
 
     def _compute_cell_centers(self):
@@ -296,8 +328,103 @@ class PolygonalHeatSolver:
             coeffs.append(cell_coeffs)
         return coeffs
 
+    def _assemble_diffusion_reconstructed(self):
+        """
+        Diffusion matrix from face flux F = -edge_len * n^T K grad_face u, with
+        grad_face = 0.5 * (grad u_i + grad u_j) and cell gradients from least squares.
+        """
+        if self.gradient_coeffs is None:
+            raise RuntimeError("flux_discretization='reconstructed' requires gradient coefficients.")
+
+        diffusion = lil_matrix((self.M, self.M))
+        centers = self.cell_centers
+        verts = self.vertices
+        from .materials import process_alpha
+
+        for edge, cells in self.edge_to_cells.items():
+            if len(cells) != 2:
+                continue
+            i, j = cells
+            if j < i:
+                i, j = j, i
+            ci = centers[i]
+            cj = centers[j]
+            v0, v1 = verts[edge[0]], verts[edge[1]]
+            edge_vec = v1 - v0
+            edge_len = np.linalg.norm(edge_vec)
+            if edge_len == 0:
+                continue
+            tangent = edge_vec / edge_len
+            normal = np.array([-tangent[1], tangent[0]])
+            d_vec = cj - ci
+            dn = np.dot(d_vec, normal)
+            if dn < 0:
+                normal = -normal
+                dn = -dn
+            if dn <= 1e-12:
+                dn = max(np.linalg.norm(d_vec), 1e-12)
+
+            midpoint = 0.5 * (v0 + v1)
+            Alpha_face = process_alpha(self.alpha, midpoint[0], midpoint[1])
+            gi = self.gradient_coeffs[i]
+            gj = self.gradient_coeffs[j]
+            idxs = set(gi.keys()) | set(gj.keys())
+
+            any_flux = False
+            for k in idxs:
+                wi = gi.get(k)
+                if wi is None:
+                    wi = np.zeros(2, dtype=float)
+                else:
+                    wi = np.asarray(wi, dtype=float)
+                wj = gj.get(k)
+                if wj is None:
+                    wj = np.zeros(2, dtype=float)
+                else:
+                    wj = np.asarray(wj, dtype=float)
+                wsum = wi + wj
+                if np.linalg.norm(wsum) <= 1e-30:
+                    continue
+                tk = -0.5 * edge_len * float(np.dot(normal, Alpha_face @ wsum))
+                if abs(tk) <= 1e-30:
+                    continue
+                any_flux = True
+                diffusion[i, k] += tk
+                diffusion[j, k] -= tk
+
+            if not any_flux:
+                alpha_n = np.dot(normal, Alpha_face @ normal)
+                base = alpha_n * edge_len / dn
+                diffusion[i, i] += base
+                diffusion[i, j] -= base
+                diffusion[j, i] -= base
+                diffusion[j, j] += base
+
+        self.A = diffusion.tocsr()
+
     def _assemble_system(self):
         mass = diags(self.cell_areas, format="csr")
+        # MPFA condensed FEM is only used with Dirichlet: Neumann/Robin need a flux closure
+        # consistent with unprescribed boundary values; use the same TPFA two-point stencil as
+        # ``flux_scheme='tpfa'`` for the diffusion block in that case.
+        if self.flux_scheme == "mpfa" and self.bc_type == "dirichlet":
+            from .mpfa import assemble_mpfa_diffusion
+
+            self.M_diag = mass
+            self.A = assemble_mpfa_diffusion(
+                self.vertices,
+                self.polygons,
+                self.cell_centers,
+                self.alpha,
+                self.edge_to_cells,
+            )
+            return
+
+        if self.flux_discretization == "reconstructed":
+            self.M_diag = mass
+            self._assemble_diffusion_reconstructed()
+            return
+
         diffusion = lil_matrix((self.M, self.M))
         centers = self.cell_centers
         verts = self.vertices

@@ -12,7 +12,6 @@ from .meshes import (
     generate_square_polygonal_mesh,
 )
 from .plotting import create_delaunay_figure, create_polygonal_figure
-from .plotting import create_delaunay_figure, create_polygonal_figure
 from .polygonal import PolygonalHeatSolver
 from .triangular import NonUniformHeatSolver
 from .curvilinear import CurvilinearHeatSolver
@@ -95,6 +94,8 @@ def run_polygonal_mesh_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -123,6 +124,8 @@ def run_polygonal_mesh_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
     u0 = exact_solution(centers[:, 0], centers[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
@@ -159,6 +162,8 @@ def run_polygonal_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
@@ -179,6 +184,8 @@ def run_polygonal_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
 
 
@@ -197,6 +204,8 @@ def run_mixed_polygonal_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -214,6 +223,8 @@ def run_mixed_polygonal_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
 
 
@@ -232,6 +243,8 @@ def run_square_polygonal_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
     return run_polygonal_mesh_test(
@@ -249,6 +262,8 @@ def run_square_polygonal_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
 
 
@@ -268,6 +283,8 @@ def run_nonorthogonal_polygonal_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     vertices, polygons, _ = generate_nonorthogonal_polygonal_mesh(nx=nx, ny=ny, bbox=bbox, skew=skew)
     return run_polygonal_mesh_test(
@@ -285,6 +302,8 @@ def run_nonorthogonal_polygonal_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
 
 
@@ -304,6 +323,8 @@ def run_nonorthogonal_tiled_polygonal_test(
     linear_solver="direct",
     linear_solver_options=None,
     time_scheme="backward_euler",
+    flux_scheme="tpfa",
+    flux_discretization="tpfa",
 ):
     vertices, polygons, _ = generate_nonorthogonal_tiled_polygonal_mesh(
         nx_tiles=nx_tiles,
@@ -326,6 +347,8 @@ def run_nonorthogonal_tiled_polygonal_test(
         linear_solver=linear_solver,
         linear_solver_options=linear_solver_options,
         time_scheme=time_scheme,
+        flux_scheme=flux_scheme,
+        flux_discretization=flux_discretization,
     )
 
 
