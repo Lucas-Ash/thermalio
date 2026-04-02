@@ -1,3 +1,21 @@
 Empirical convergence summary.
 This checks observed error trends; it does not constitute a mathematical guarantee of convergence.
 
+curvilinear
+  L2 monotone decrease: True
+  Linf monotone decrease: True
+  level_01_coarse: h=6.666667e-02, L2_rel=5.477755e-04, Linf_rel=1.067560e-03, L2_rate=, Linf_rate=
+  level_02_medium: h=2.564103e-02, L2_rel=9.537275e-05, Linf_rel=5.553315e-04, L2_rate=1.829463, Linf_rate=0.683996
+  level_03_fine: h=1.612903e-02, L2_rel=4.890401e-05, Linf_rel=3.607024e-04, L2_rate=1.440839, Linf_rate=0.930840
+  level_04_finer: h=1.162791e-02, L2_rel=2.915792e-05, Linf_rel=2.305280e-04, L2_rate=1.580417, Linf_rate=1.368163
+  level_05_superfine: h=9.090909e-03, L2_rel=1.918307e-05, Linf_rel=1.566844e-04, L2_rate=1.701105, Linf_rate=1.568822
+
+square_polygonal
+  L2 monotone decrease: False
+  Linf monotone decrease: False
+  level_01_coarse: h=6.666667e-02, L2_rel=7.414434e-16, Linf_rel=1.429751e-15, L2_rate=, Linf_rate=
+  level_02_medium: h=2.564103e-02, L2_rel=1.240570e-15, Linf_rel=2.689161e-15, L2_rate=-0.538693, Linf_rate=-0.661143
+  level_03_fine: h=1.612903e-02, L2_rel=1.834058e-15, Linf_rel=4.466621e-15, L2_rate=-0.843363, Linf_rate=-1.094549
+  level_04_finer: h=1.162791e-02, L2_rel=3.462586e-15, Linf_rel=7.262470e-15, L2_rate=-1.942113, Linf_rate=-1.485539
+  level_05_superfine: h=9.090909e-03, L2_rel=7.259842e-15, Linf_rel=1.298418e-14, L2_rate=-3.007895, Linf_rate=-2.360561
+

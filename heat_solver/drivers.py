@@ -26,45 +26,59 @@ def run_curvilinear_test(
     nx=40,
     ny=40,
     warp=0.1,
+    twist=0.0,
     bbox=(-1.0, 1.0, -1.0, 1.0),
     bc_type=None,
     bc_func=None,
+    time_scheme="backward_euler",
+    phase_change_model=None,
+    phase_change_options=None,
+    nonlinear_options=None,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
-    if case_info.get("phase_change_model") is not None:
-        raise ValueError("Curvilinear solver does not yet support phase_change_model.")
     if bc_type is None:
         bc_type = case_info.get("bc_type", "dirichlet")
-    if bc_type != "dirichlet":
-        raise ValueError("Curvilinear solver only supports Dirichlet boundary conditions.")
-    
+
     exact_solution = case_info["solution"]
     if bc_func is None:
         bc_func = case_info.get("boundary", exact_solution)
-        
+    if phase_change_model is None:
+        phase_change_model = case_info.get("phase_change_model")
+    if phase_change_options is None:
+        phase_change_options = case_info.get("phase_change_options")
+    if nonlinear_options is None:
+        nonlinear_options = case_info.get("nonlinear_options")
+    alpha = case_info.get("alpha", alpha)
+
     x_min, x_max, y_min, y_max = bbox
     xi = np.linspace(x_min, x_max, nx)
     eta = np.linspace(y_min, y_max, ny)
     XI, ETA = np.meshgrid(xi, eta)
-    
+
     L_x = x_max - x_min
     L_y = y_max - y_min
-    X = XI + warp * L_x * np.sin(np.pi * (XI - x_min) / L_x) * np.sin(np.pi * (ETA - y_min) / L_y)
-    Y = ETA + warp * L_y * np.sin(np.pi * (XI - x_min) / L_x) * np.sin(np.pi * (ETA - y_min) / L_y)
-    
+    sx = (XI - x_min) / L_x
+    sy = (ETA - y_min) / L_y
+    interior_mode = np.sin(np.pi * sx) * np.sin(np.pi * sy)
+    cross_x = np.sin(2.0 * np.pi * sx) * np.sin(np.pi * sy)
+    cross_y = np.sin(np.pi * sx) * np.sin(2.0 * np.pi * sy)
+    X = XI + L_x * (warp * interior_mode + twist * cross_x)
+    Y = ETA + L_y * (0.9 * warp * interior_mode - twist * cross_y)
+
     source_func = case_info.get("source", lambda x, y, t: 0.0)
-    
-    def g(x, y, t):
-        return bc_func(x, y, t)
-        
+
     solver = CurvilinearHeatSolver(
         X,
         Y,
         alpha=alpha,
         dt=dt,
         bc_type=bc_type,
-        bc_func=g,
+        bc_func=bc_func,
         source_func=source_func,
+        time_scheme=time_scheme,
+        phase_change_model=phase_change_model,
+        phase_change_options=phase_change_options,
+        nonlinear_options=nonlinear_options,
         reuse_linear_lhs=True,
     )
     u0 = exact_solution(X, Y, t_init)

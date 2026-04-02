@@ -335,7 +335,6 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "source": stefan_apparent_capacity_source(alpha, phase_change_model),
             "phase_change_model": phase_change_model,
             "phase_change_options": {"max_iters": 100, "tol": 1e-9, "relaxation": 0.95, "anderson_depth": 5, "linearize_cp": True},
-            "polygonal_only": True,
         }
     elif case == "temperature_dependent_diffusivity":
         return {
@@ -357,7 +356,6 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "bc_type": "radiative",
             "boundary": lambda x, y, t, nx, ny: radiative_manufactured_bc(x, y, t, nx, ny, alpha),
             "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9},
-            "polygonal_only": True,
         }
     raise ValueError(
         "Unknown analytical case "

@@ -132,6 +132,18 @@ CASE_SETTINGS = {
 }
 
 CASE_SETTINGS_MINI = {
+    "steady_linear_neumann": {
+        "alpha": 0.1,
+        "dt": 2e-2,
+        "t_init": 0.0,
+        "t_end": 0.1,
+    },
+    "steady_linear_robin": {
+        "alpha": 0.1,
+        "dt": 2e-2,
+        "t_init": 0.0,
+        "t_end": 0.1,
+    },
     "stefan_apparent_capacity": {
         "alpha": 0.08,
         "dt": 1e-5,
@@ -299,12 +311,26 @@ def _delaunay_config(case, settings, level):
 def _curvilinear_config(case, settings, level):
     bbox = _case_bbox(case, settings)
     nx_param = level["curvilinear_nx"]
+    case_info = get_analytical_case(case, settings["alpha"], settings["t_end"])
+    bc_type = case_info.get("bc_type", "dirichlet")
+    nonlinear_options = case_info.get("nonlinear_options")
+    if case_info.get("phase_change_model") is not None:
+        warp = 0.18
+        twist = 0.07
+    elif bc_type == "dirichlet":
+        warp = 0.1
+        twist = 0.0
+    else:
+        warp = 0.18
+        twist = 0.07
     return {
         **settings,
         "bbox": bbox,
         "nx": nx_param,
         "ny": nx_param,
-        "warp": 0.1,
+        "warp": warp,
+        "twist": twist,
+        "nonlinear_options": nonlinear_options,
     }
 
 
@@ -439,9 +465,9 @@ def iter_test_jobs():
         case_info = get_analytical_case(case, settings["alpha"], settings["t_end"])
         if case_info.get("polygonal_only", False):
             continue
-        if case_info.get("bc_type", "dirichlet") != "dirichlet":
-            continue
         if case_info.get("phase_change_model") is not None:
+            continue
+        if case_info.get("temperature_dependent_diffusivity", False):
             continue
         for level in RESOLUTION_LEVELS:
             yield {
@@ -503,6 +529,14 @@ def _mesh_jobs(case, settings, level, level_dir):
     if case == "stefan_apparent_capacity":
         jobs.append(
             (
+                "curvilinear",
+                _curvilinear_config(case, settings, level),
+                _save_curvilinear_case,
+                level_dir / "curvilinear.png",
+            )
+        )
+        jobs.append(
+            (
                 "square_polygonal",
                 _square_config(case, settings, level),
                 _save_square_case,
@@ -510,7 +544,33 @@ def _mesh_jobs(case, settings, level, level_dir):
             )
         )
         return tuple(jobs)
-    if case in {"temperature_dependent_diffusivity", "radiative_manufactured"}:
+    if case == "temperature_dependent_diffusivity":
+        jobs.append(
+            (
+                "square_polygonal",
+                _square_config(case, settings, level),
+                _save_square_case,
+                level_dir / "square_polygonal.png",
+            )
+        )
+        jobs.append(
+            (
+                "nonorthogonal_tiled_polygonal",
+                _nonorthogonal_tiled_config(case, settings, level),
+                _save_nonorthogonal_tiled_case,
+                level_dir / "nonorthogonal_tiled_polygonal.png",
+            )
+        )
+        return tuple(jobs)
+    if case == "radiative_manufactured":
+        jobs.append(
+            (
+                "curvilinear",
+                _curvilinear_config(case, settings, level),
+                _save_curvilinear_case,
+                level_dir / "curvilinear.png",
+            )
+        )
         jobs.append(
             (
                 "square_polygonal",
@@ -529,6 +589,22 @@ def _mesh_jobs(case, settings, level, level_dir):
         )
         return tuple(jobs)
     bc_type = case_info.get("bc_type", "dirichlet")
+    if bc_type != "dirichlet":
+        jobs.append((
+            "curvilinear",
+            _curvilinear_config(case, settings, level),
+            _save_curvilinear_case,
+            level_dir / "curvilinear.png",
+        ))
+        jobs.append(
+            (
+                "square_polygonal",
+                _square_config(case, settings, level),
+                _save_square_case,
+                level_dir / "square_polygonal.png",
+            )
+        )
+        return tuple(jobs)
     if bc_type == "dirichlet":
         jobs.append((
             "curvilinear",
