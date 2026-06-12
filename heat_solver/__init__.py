@@ -30,9 +30,17 @@ from .meshes import (
 from .plotting import create_delaunay_figure, create_polygonal_figure, create_curvilinear_figure, visualize_polygonal_mesh
 from .phase_change import ApparentHeatCapacityModel
 from .polygonal import PolygonalHeatSolver
+from .transport import (
+    AdvectionDiffusionHeatSolver,
+    FractionalHeatSolver,
+    HyperbolicHeatSolver,
+)
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
+    "AdvectionDiffusionHeatSolver",
+    "FractionalHeatSolver",
+    "HyperbolicHeatSolver",
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
     "ApparentHeatCapacityModel",

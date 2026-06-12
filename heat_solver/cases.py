@@ -224,6 +224,108 @@ def radiative_manufactured_bc(x, y, t, nx, ny, alpha):
     return {"epsilon": epsilon, "sigma": sigma, "t_inf": t_inf}
 
 
+def cattaneo_wave_case(alpha=0.1, tau=0.2):
+    """Manufactured solution for the hyperbolic (Cattaneo--Vernotte) model.
+
+    ``tau u_tt + u_t - alpha laplacian(u) = Q`` on the unit square with
+    ``u(x, y, t) = exp(-t) sin(pi x) sin(pi y)`` (homogeneous Dirichlet data).
+
+    For this ``u``: ``u_t = -u``, ``u_tt = u``, ``laplacian(u) = -2 pi^2 u``, so
+    ``Q = (tau - 1 + 2 pi^2 alpha) u`` and the initial rate is ``du/dt|_0 = -u_0``.
+    """
+    alpha = float(alpha)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def solution(x, y, t):
+        return np.exp(-t) * phi(x, y)
+
+    def source(x, y, t):
+        return (tau - 1.0 + 2.0 * np.pi**2 * alpha) * solution(x, y, t)
+
+    def initial_rate(x, y):
+        return -phi(x, y)
+
+    return {
+        "name": "Cattaneo Thermal Wave",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "initial_rate": initial_rate,
+        "relaxation_time": float(tau),
+        "alpha": alpha,
+    }
+
+
+def advection_diffusion_case(alpha=0.05, velocity=(0.8, 0.4)):
+    """Manufactured solution for ``u_t + v . grad(u) - alpha laplacian(u) = Q``.
+
+    Uses ``u(x, y, t) = exp(-t) sin(pi x) sin(pi y)`` (homogeneous Dirichlet
+    data) with a constant velocity ``v = (vx, vy)``.
+    """
+    alpha = float(alpha)
+    vx, vy = float(velocity[0]), float(velocity[1])
+
+    def solution(x, y, t):
+        return np.exp(-t) * np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def source(x, y, t):
+        decay = np.exp(-t)
+        s = np.sin(np.pi * x) * np.sin(np.pi * y)
+        u = decay * s
+        u_t = -u
+        grad_x = decay * np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+        grad_y = decay * np.pi * np.sin(np.pi * x) * np.cos(np.pi * y)
+        laplacian = -2.0 * np.pi**2 * u
+        return u_t + vx * grad_x + vy * grad_y - alpha * laplacian
+
+    return {
+        "name": "Advection-Diffusion",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "velocity": (vx, vy),
+        "alpha": alpha,
+    }
+
+
+def fractional_subdiffusion_case(alpha=0.1, beta=0.6):
+    """Manufactured solution for Caputo subdiffusion ``D_t^beta u - alpha lap(u) = Q``.
+
+    Uses ``u(x, y, t) = t^2 sin(pi x) sin(pi y)`` (homogeneous Dirichlet data,
+    ``u(.,.,0) = 0``).  The Caputo derivative of ``t^2`` is
+    ``Gamma(3)/Gamma(3-beta) t^{2-beta} = 2/Gamma(3-beta) t^{2-beta}``.
+    """
+    from scipy.special import gamma as _gamma
+
+    alpha = float(alpha)
+    beta = float(beta)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def solution(x, y, t):
+        return (t**2) * phi(x, y)
+
+    def source(x, y, t):
+        caputo = (2.0 / _gamma(3.0 - beta)) * (t ** (2.0 - beta)) * phi(x, y)
+        laplacian = -2.0 * np.pi**2 * (t**2) * phi(x, y)
+        return caputo - alpha * laplacian
+
+    return {
+        "name": "Fractional Subdiffusion",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "beta": beta,
+        "alpha": alpha,
+    }
+
+
 def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
     if case == "heat_kernel":
         L = 4.0 * np.sqrt(4.0 * alpha * t_end)
