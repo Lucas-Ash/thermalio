@@ -8,6 +8,11 @@ solution:
   1. ``HyperbolicHeatSolver``       -- non-Fourier Cattaneo thermal waves.
   2. ``AdvectionDiffusionHeatSolver`` -- convective transport (upwind vs central).
   3. ``FractionalHeatSolver``       -- Caputo time-fractional subdiffusion.
+  4. Boundary-driven Cattaneo waves: a prescribed heat-flux pulse
+     (``bc_type='flux'``, e.g. pulsed-laser heating) launches a thermal wave
+     with finite speed sqrt(alpha/tau), compared against the parabolic
+     Fourier response on the same mesh.  Robin/Neumann data are also
+     supported by all three transport solvers.
 
 Usage:
     MPLCONFIGDIR=/tmp/matplotlib python transport_demo.py
@@ -37,6 +42,7 @@ from heat_solver.cases import (
 )
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.meshes import generate_square_polygonal_mesh
+from heat_solver.polygonal import PolygonalHeatSolver
 from heat_solver.transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
@@ -130,6 +136,66 @@ def fractional_example():
     return curves
 
 
+def flux_pulse_example():
+    """Boundary heat-flux pulse: finite-speed Cattaneo wave vs Fourier diffusion."""
+    print("\n[4] Flux-driven Cattaneo pulse (bc_type='flux') vs Fourier on the same strip")
+    alpha, tau = 0.05, 1.0
+    c = np.sqrt(alpha / tau)
+    q0, t_pulse, t_end = 1.0, 0.5, 4.0
+    bbox = (0.0, 2.0, 0.0, 0.25)
+    vertices, polygons, centers = generate_square_polygonal_mesh(nx=160, ny=20, bbox=bbox)
+    dt = 0.01
+    print(f"    wave speed c = sqrt(alpha/tau) = {c:.4f};  expected front at x = c*t = {c * t_end:.3f}")
+
+    def pulse_flux(x, y, t, nx, ny):
+        active = q0 if t <= t_pulse else 0.0
+        return np.where(np.isclose(x, 0.0), active, 0.0)
+
+    def pulse_neumann(x, y, t, nx, ny):
+        return pulse_flux(x, y, t, nx, ny) / alpha
+
+    hyperbolic = HyperbolicHeatSolver(
+        vertices, polygons, alpha, dt, tau, bc_type="flux", bc_func=pulse_flux,
+    )
+    snapshots = {}
+    for t_snap in (1.0, 2.0, t_end):
+        _, u = hyperbolic.solve(np.zeros(hyperbolic.M), 0.0, t_snap)
+        snapshots[t_snap] = u
+    u_hyp = snapshots[t_end]
+
+    fourier = PolygonalHeatSolver(
+        vertices, polygons, alpha, dt, bc_type="neumann", bc_func=pulse_neumann,
+    )
+    _, u_fourier = fourier.solve(np.zeros(hyperbolic.M), 0.0, t_end)
+
+    areas = hyperbolic.cell_areas
+    injected = q0 * (bbox[3] - bbox[2]) * t_pulse
+    print(f"    energy check (hyperbolic): sum(area*u) = {np.sum(areas * u_hyp):.6f}, injected = {injected:.6f}")
+    print(f"    energy check (Fourier):    sum(area*u) = {np.sum(areas * u_fourier):.6f}")
+
+    # Extract the centerline row of cells for profile plots.
+    y_mid = 0.5 * (bbox[2] + bbox[3])
+    h_y = (bbox[3] - bbox[2]) / 20
+    row = np.abs(centers[:, 1] - y_mid) < 0.5 * h_y
+    order = np.argsort(centers[row, 0])
+    x_line = centers[row, 0][order]
+    profile = {t_snap: u[row][order] for t_snap, u in snapshots.items()}
+    profile_fourier = u_fourier[row][order]
+
+    ahead = x_line > c * t_end + 0.3
+    print(f"    max u ahead of front (hyperbolic): {np.max(np.abs(u_hyp[row][order][ahead])):.2e}")
+    print(f"    max u ahead of front (Fourier):    {np.max(profile_fourier[ahead]):.2e}  (parabolic: no front)")
+    return {
+        "x": x_line,
+        "profiles": profile,
+        "fourier": profile_fourier,
+        "c": c,
+        "t_end": t_end,
+        "centers": centers,
+        "u_field": u_hyp,
+    }
+
+
 def _tri_field(ax, centers, values, title):
     tcf = ax.tripcolor(centers[:, 0], centers[:, 1], values, shading="gouraud")
     ax.set_title(title, fontsize=10)
@@ -143,8 +209,9 @@ def main():
     centers_h, u_h, ue_h, n_h = hyperbolic_example()
     adv = advection_example()
     frac = fractional_example()
+    pulse = flux_pulse_example()
 
-    fig, axes = plt.subplots(2, 3, figsize=(13, 8))
+    fig, axes = plt.subplots(3, 3, figsize=(13, 12))
 
     _tri_field(axes[0, 0], centers_h, u_h, "Cattaneo wave: numerical")
     _tri_field(axes[0, 1], centers_h, ue_h, "Cattaneo wave: exact")
@@ -156,6 +223,25 @@ def main():
     _tri_field(axes[1, 1], c_ce, u_ce, "Advection-diffusion (central)")
     cen_f, u_f = frac[0.6]
     _tri_field(axes[1, 2], cen_f, u_f, "Subdiffusion beta=0.6")
+
+    ax = axes[2, 0]
+    for t_snap, u_line in sorted(pulse["profiles"].items()):
+        ax.plot(pulse["x"], u_line, label=f"t = {t_snap:g}")
+        ax.axvline(pulse["c"] * t_snap, color="gray", lw=0.8, ls=":")
+    ax.set_title("Flux-pulse Cattaneo wave: centerline u(x, t)\n(dotted: wavefront x = ct)", fontsize=10)
+    ax.set_xlabel("x")
+    ax.legend(fontsize=8)
+
+    ax = axes[2, 1]
+    ax.plot(pulse["x"], pulse["profiles"][pulse["t_end"]], label="Cattaneo (flux BC)")
+    ax.plot(pulse["x"], pulse["fourier"], "--", label="Fourier (Neumann BC)")
+    ax.axvline(pulse["c"] * pulse["t_end"], color="gray", lw=0.8, ls=":")
+    ax.set_title(f"Finite vs infinite propagation speed (t = {pulse['t_end']:g})", fontsize=10)
+    ax.set_xlabel("x")
+    ax.legend(fontsize=8)
+
+    _tri_field(axes[2, 2], pulse["centers"], pulse["u_field"], "Flux-pulse Cattaneo field (strip)")
+    axes[2, 2].set_aspect("auto")
 
     fig.suptitle("Extended thermal-transport models", fontsize=14)
     out_dir = ROOT / "test_plots"

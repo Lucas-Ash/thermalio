@@ -326,6 +326,108 @@ def fractional_subdiffusion_case(alpha=0.1, beta=0.6):
     }
 
 
+def transport_linear_boundary_case(
+    model="cattaneo",
+    bc_type="neumann",
+    alpha=0.1,
+    tau=0.2,
+    velocity=(0.4, 0.3),
+    beta=0.6,
+    robin_beta=2.0,
+):
+    """Manufactured linear-profile cases for non-Dirichlet transport boundaries.
+
+    Spatial profile ``phi = 1 + 0.75 x - 0.5 y`` (``laplacian(phi) = 0``, so the
+    TPFA fluxes are spatially exact for constant scalar ``alpha`` and the error
+    is dominated by the time discretization), combined with a model-specific
+    time factor:
+
+    - ``model='cattaneo'``:   ``u = exp(-t) phi``, ``Q = (tau - 1) u``
+    - ``model='advection'``:  ``u = exp(-t) phi``,
+      ``Q = -u + exp(-t) (0.75 vx - 0.5 vy)``
+    - ``model='fractional'``: ``u = t^2 phi``,
+      ``Q = 2 t^{2-beta} / Gamma(3-beta) * phi``
+
+    ``bc_type`` selects the boundary data fed to the transport solvers:
+
+    - ``'neumann'``: ``du/dn = g(t) (0.75 nx - 0.5 ny)``
+    - ``'flux'``:    inward heat flux ``alpha * du/dn``
+    - ``'robin'``:   ``alpha du/dn + robin_beta u = value``
+    """
+    from scipy.special import gamma as _gamma
+
+    alpha = float(alpha)
+
+    def profile(x, y):
+        return 1.0 + 0.75 * x - 0.5 * y
+
+    def dprofile_dn(nx, ny):
+        return 0.75 * nx - 0.5 * ny
+
+    extras = {}
+    if model == "cattaneo":
+        tau = float(tau)
+
+        def time_factor(t):
+            return np.exp(-t)
+
+        def source(x, y, t):
+            return (tau - 1.0) * np.exp(-t) * profile(x, y)
+
+        extras["relaxation_time"] = tau
+        extras["initial_rate"] = lambda x, y: -profile(x, y)
+    elif model == "advection":
+        vx, vy = float(velocity[0]), float(velocity[1])
+
+        def time_factor(t):
+            return np.exp(-t)
+
+        def source(x, y, t):
+            return np.exp(-t) * (-profile(x, y) + (0.75 * vx - 0.5 * vy))
+
+        extras["velocity"] = (vx, vy)
+    elif model == "fractional":
+        beta = float(beta)
+
+        def time_factor(t):
+            return t**2
+
+        def source(x, y, t):
+            return (2.0 / _gamma(3.0 - beta)) * (t ** (2.0 - beta)) * profile(x, y)
+
+        extras["beta"] = beta
+    else:
+        raise ValueError("model must be 'cattaneo', 'advection', or 'fractional'.")
+
+    def solution(x, y, t):
+        return time_factor(t) * profile(x, y)
+
+    bc_type = str(bc_type).lower().strip()
+    if bc_type == "neumann":
+        def boundary(x, y, t, nx, ny):
+            return time_factor(t) * dprofile_dn(nx, ny)
+    elif bc_type == "flux":
+        def boundary(x, y, t, nx, ny):
+            return alpha * time_factor(t) * dprofile_dn(nx, ny)
+    elif bc_type == "robin":
+        def boundary(x, y, t, nx, ny):
+            value = alpha * time_factor(t) * dprofile_dn(nx, ny) + robin_beta * solution(x, y, t)
+            return robin_beta * np.ones_like(np.asarray(x, dtype=float)), value
+    else:
+        raise ValueError("bc_type must be 'neumann', 'flux', or 'robin'.")
+
+    return {
+        "name": f"Transport Linear Boundary ({model}, {bc_type})",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": boundary,
+        "bc_type": bc_type,
+        "alpha": alpha,
+        **extras,
+    }
+
+
 def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
     if case == "heat_kernel":
         L = 4.0 * np.sqrt(4.0 * alpha * t_end)

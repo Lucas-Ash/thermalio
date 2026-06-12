@@ -75,13 +75,13 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
   <img src="test_plots/radiative_manufactured/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Radiative BC on non-orthogonal tiled mesh" width="48%" />
 </p>
 
-**Extended transport models** — beyond the classical parabolic Fourier law, `heat_solver/transport.py` adds three research-oriented transport models (Dirichlet data, manufactured-solution verified, reusing the polygonal FV diffusion operator):
+**Extended transport models** — beyond the classical parabolic Fourier law, `heat_solver/transport.py` adds three research-oriented transport models (manufactured-solution verified, reusing the polygonal FV diffusion operator). All three support **Dirichlet**, **Neumann**, **Robin**, and **prescribed-flux** boundary data — `bc_type='flux'` prescribes the inward boundary heat flux $q_{\mathrm{in}}=\alpha\,\partial u/\partial n$ directly (the natural form for pulsed-laser/contact heating of the Cattaneo model), and is discretely energy-conservative:
 
 - **Non-Fourier / Cattaneo–Vernotte thermal waves** — $\tau\,\partial_{tt} u + \partial_t u - \nabla\cdot(\alpha\nabla u) = Q$, giving heat a finite propagation speed $c=\sqrt{\alpha/\tau}$ ("second sound"), integrated with an unconditionally stable second-order three-level scheme (`HyperbolicHeatSolver`).
 - **Advection–diffusion (convective transport)** — $\partial_t u + \nabla\cdot(\mathbf{v}\,u) - \nabla\cdot(\alpha\nabla u) = Q$, with a prescribed velocity field and a choice of first-order monotone **upwind** or second-order **central** face flux (Péclet-number aware) (`AdvectionDiffusionHeatSolver`).
 - **Anomalous / time-fractional subdiffusion** — Caputo derivative $D_t^\beta u - \nabla\cdot(\alpha\nabla u) = Q$ for $0<\beta<1$ via the L1 scheme (order $2-\beta$ in time), modeling long-memory thermal response in disordered media (`FractionalHeatSolver`).
 
-Runnable examples and convergence tables: `python transport_demo.py` (writes `test_plots/transport_models.png`); unit checks in `tests/test_transport.py`.
+Runnable examples and convergence tables: `python transport_demo.py` (writes `test_plots/transport_models.png`), including a **flux-pulse Cattaneo wave** demo that contrasts the finite wavefront $x=ct$ against the instantaneous parabolic Fourier response; unit checks in `tests/test_transport.py`.
 
 <p align="center">
   <img src="test_plots/transport_models.png" alt="Extended thermal-transport models" width="90%" />

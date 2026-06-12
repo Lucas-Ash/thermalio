@@ -39,9 +39,11 @@ mesh geometry, the diffusion stiffness matrix ``A`` and the lumped mass matrix
     (``beta < 1``) models heat conduction in fractal/disordered media and
     materials with long-memory (non-local-in-time) thermal response.
 
-All three solvers currently support Dirichlet boundary data, which keeps the
-manufactured-solution verification unambiguous; the bulk operators are the
-research-relevant part.  See ``transport_demo.py`` for runnable examples and
+All three solvers support ``bc_type`` in ``{'dirichlet', 'neumann', 'robin',
+'flux'}``.  ``'flux'`` prescribes the *inward* boundary heat flux per unit
+length (``q_in = alpha * du/dn``) directly, which is the natural way to drive
+the Cattaneo model with a boundary heat pulse (e.g. pulsed-laser heating).
+See ``transport_demo.py`` for runnable examples and
 ``tests/test_transport.py`` for convergence checks.
 """
 
@@ -72,19 +74,50 @@ def _as_velocity_callable(velocity):
 
 
 class _TransportBase:
-    """Shared plumbing: a composed base solver plus Dirichlet helpers."""
+    """Shared plumbing: a composed base solver plus boundary-condition helpers.
 
-    def __init__(self, vertices, polygons, alpha, dt, bc_func=None, source_func=None, **base_kwargs):
-        base_kwargs.setdefault("bc_type", "dirichlet")
-        if str(base_kwargs["bc_type"]).lower() != "dirichlet":
+    Supported ``bc_type`` values:
+
+    - ``'dirichlet'``: ``bc_func(x, y, t) -> u`` on the boundary.
+    - ``'neumann'``:   ``bc_func(x, y, t[, nx, ny]) -> du/dn`` (outward normal
+      derivative), same convention as :class:`PolygonalHeatSolver`.
+    - ``'flux'``:      ``bc_func(x, y, t[, nx, ny]) -> q_in``, the prescribed
+      *inward* heat flux per unit boundary length, ``q_in = alpha * du/dn``.
+      Unlike ``'neumann'`` this prescribes the physical flux directly without
+      referencing the conductivity -- the natural form for boundary heat
+      pulses (laser/contact heating) in the Cattaneo model.
+    - ``'robin'``:     ``bc_func(x, y, t[, nx, ny]) -> (beta, value)`` for
+      ``alpha * du/dn + beta * u = value``.
+    """
+
+    _BC_TYPES = ("dirichlet", "neumann", "robin", "flux")
+
+    def __init__(
+        self,
+        vertices,
+        polygons,
+        alpha,
+        dt,
+        bc_type="dirichlet",
+        bc_func=None,
+        source_func=None,
+        **base_kwargs,
+    ):
+        self.bc_type = str(bc_type).lower().strip()
+        if self.bc_type not in self._BC_TYPES:
             raise ValueError(
-                f"{type(self).__name__} currently supports bc_type='dirichlet' only."
+                f"{type(self).__name__} supports bc_type in {self._BC_TYPES}; got {bc_type!r}."
             )
+        # 'flux' reuses the base solver's Neumann face bookkeeping (normals,
+        # midpoints, callback signature detection); the flux value itself is
+        # integrated directly in _boundary_system without an alpha factor.
+        base_bc = "neumann" if self.bc_type == "flux" else self.bc_type
         self._base = PolygonalHeatSolver(
             vertices,
             polygons,
             alpha,
             dt,
+            bc_type=base_bc,
             bc_func=bc_func,
             source_func=source_func,
             **base_kwargs,
@@ -99,6 +132,9 @@ class _TransportBase:
         self._base._assemble_system()
         self.A = self._base.A.tocsr()
         self.area_diag = diags(self.cell_areas, format="csr")
+        # Only Robin data can change the LHS matrix between steps; Dirichlet rows
+        # are replaced and Neumann/flux data only feed the right-hand side.
+        self._bc_lhs_constant = self.bc_type != "robin"
 
     @staticmethod
     def _uniform_schedule(t0, t_end, dt):
@@ -124,6 +160,36 @@ class _TransportBase:
 
     def _apply_dirichlet(self, lhs_csr):
         return self._base._apply_dirichlet_identity_rows(lhs_csr)
+
+    def _boundary_system(self, t):
+        """Boundary closure ``(B, b)`` so that ``A_total = A + B`` and ``rhs += b``.
+
+        ``B`` is ``None`` when the boundary adds no matrix coupling (Dirichlet
+        rows are replaced instead; Neumann/flux data only contribute to ``b``).
+        """
+        if self.bc_type == "dirichlet":
+            return None, np.zeros(self.M)
+        if self.bc_type == "flux":
+            faces = self._base.boundary_faces
+            cells = faces["cells"]
+            if cells.size == 0:
+                return None, np.zeros(self.M)
+            midpoints = faces["midpoints"]
+            flux_in = np.broadcast_to(
+                np.asarray(
+                    self._base._evaluate_bc(
+                        midpoints[:, 0], midpoints[:, 1], t, normals=faces["normals"]
+                    ),
+                    dtype=float,
+                ),
+                (cells.size,),
+            )
+            b = np.bincount(cells, weights=faces["lengths"] * flux_in, minlength=self.M)
+            return None, b
+        if self.bc_type == "neumann":
+            _, b = self._base._assemble_boundary_system(t)
+            return None, b
+        return self._base._assemble_boundary_system(t)  # robin
 
 
 class HyperbolicHeatSolver(_TransportBase):
@@ -178,17 +244,24 @@ class HyperbolicHeatSolver(_TransportBase):
             return float(t0), u_n
 
         # Second-order startup level u^{-1} from a Taylor expansion using the
-        # initial acceleration implied by the PDE:
-        #   tau a0 = -v0 - (A u0)/area + Q0   ->   u^{-1} = u0 - dt v0 + dt^2/2 a0
+        # initial acceleration implied by the PDE (including boundary closure):
+        #   tau a0 = -v0 - ((A + B) u0 - b)/area + Q0
+        #   u^{-1} = u0 - dt v0 + dt^2/2 a0
         q0 = self._source(t0)
-        a0 = (-v0 - (self.A @ u_n) / self.cell_areas + q0) / self.tau
+        B0, b0 = self._boundary_system(t0)
+        A0 = self.A if B0 is None else (self.A + B0).tocsr()
+        a0 = (q0 + (b0 - A0 @ u_n) / self.cell_areas - v0) / self.tau
         u_nm1 = u_n - dt * v0 + 0.5 * dt * dt * a0
 
         c2 = self.tau / (dt * dt)
         c1 = 1.0 / (2.0 * dt)
-        lhs = (c2 + c1) * self.area_diag + self.A
-        lhs = self._apply_dirichlet(lhs.tocsr())
-        factor = factorized(lhs.tocsc())
+        base_lhs = ((c2 + c1) * self.area_diag + self.A).tocsr()
+        if self.bc_type == "dirichlet":
+            factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
+        elif self._bc_lhs_constant:
+            factor = factorized(base_lhs.tocsc())
+        else:
+            factor = None
 
         t = float(t0)
         for _ in range(nsteps):
@@ -197,9 +270,17 @@ class HyperbolicHeatSolver(_TransportBase):
             rhs = self.cell_areas * q_next + self.cell_areas * (
                 2.0 * c2 * u_n + (c1 - c2) * u_nm1
             )
-            bc = self._bc_values(t_next)
-            rhs[self._boundary_idx] = bc[self._boundary_idx]
-            u_np1 = factor(rhs)
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs[self._boundary_idx] = bc[self._boundary_idx]
+                u_np1 = factor(rhs)
+            else:
+                B, b = self._boundary_system(t_next)
+                rhs = rhs + b
+                if factor is not None:
+                    u_np1 = factor(rhs)
+                else:
+                    u_np1 = spsolve((base_lhs + B).tocsr(), rhs)
             u_nm1, u_n = u_n, u_np1
             t = t_next
         return t, u_n
@@ -234,6 +315,10 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
         if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
             raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
         self.C = self._assemble_convection().tocsr()
+        if self.bc_type != "dirichlet":
+            # Boundary rows stay active for Neumann/Robin/flux data, so div(v u)
+            # must keep its boundary-face contribution.
+            self.C = (self.C + self._convection_boundary_closure()).tocsr()
 
     def _assemble_convection(self):
         """Cell-centered FV convection matrix C with (C u)_i ~ int_cell_i div(v u)."""
@@ -276,6 +361,24 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
                     C[j, j] -= flow
         return C
 
+    def _convection_boundary_closure(self):
+        """First-order boundary convective flux using the cell value (``u_face ~ u_i``).
+
+        Exact for impermeable boundaries (``v . n = 0``); first-order accurate
+        otherwise.  Outflow-dominant boundaries (``v . n >= 0``) are recommended
+        for robustness at high Peclet number.
+        """
+        faces = self._base.boundary_faces
+        cells = faces["cells"]
+        if cells.size == 0:
+            return diags(np.zeros(self.M), format="csr")
+        midpoints = faces["midpoints"]
+        vx, vy = self.velocity(midpoints[:, 0], midpoints[:, 1], 0.0)
+        flow = (
+            np.ravel(vx) * faces["normals"][:, 0] + np.ravel(vy) * faces["normals"][:, 1]
+        ) * faces["lengths"]
+        return diags(np.bincount(cells, weights=flow, minlength=self.M), format="csr")
+
     def peclet_number(self, length_scale):
         """Mesh/representative Peclet number ``|v| * L / alpha`` (scalar alpha)."""
         alpha = self._base.alpha
@@ -294,12 +397,14 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
             return float(t0), u
 
         K = (self.A + self.C).tocsr()
-        if self.time_scheme == "backward_euler":
-            lhs = self._apply_dirichlet((self.area_diag + dt * K).tocsr())
-            factor = factorized(lhs.tocsc())
+        theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
+        base_lhs = (self.area_diag + theta * dt * K).tocsr()
+        if self.bc_type == "dirichlet":
+            factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
+        elif self._bc_lhs_constant:
+            factor = factorized(base_lhs.tocsc())
         else:
-            lhs = self._apply_dirichlet((self.area_diag + 0.5 * dt * K).tocsr())
-            factor = factorized(lhs.tocsc())
+            factor = None
 
         t = float(t0)
         for _ in range(nsteps):
@@ -312,9 +417,23 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
                 rhs = (self.area_diag - 0.5 * dt * K) @ u + 0.5 * dt * (
                     self.cell_areas * (q_next + q_prev)
                 )
-            bc = self._bc_values(t_next)
-            rhs[self._boundary_idx] = bc[self._boundary_idx]
-            u = factor(rhs)
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs[self._boundary_idx] = bc[self._boundary_idx]
+                u = factor(rhs)
+            else:
+                B_next, b_next = self._boundary_system(t_next)
+                if self.time_scheme == "backward_euler":
+                    rhs = rhs + dt * b_next
+                else:
+                    B_prev, b_prev = self._boundary_system(t)
+                    rhs = rhs + 0.5 * dt * (b_prev + b_next)
+                    if B_prev is not None:
+                        rhs = rhs - 0.5 * dt * (B_prev @ u)
+                if factor is not None:
+                    u = factor(rhs)
+                else:
+                    u = spsolve((base_lhs + theta * dt * B_next).tocsr(), rhs)
             t = t_next
         return t, u
 
@@ -349,8 +468,13 @@ class FractionalHeatSolver(_TransportBase):
             return float(t0), u0
 
         sigma = dt ** (-self.beta) / gamma(2.0 - self.beta)
-        lhs = self._apply_dirichlet((sigma * self.area_diag + self.A).tocsr())
-        factor = factorized(lhs.tocsc())
+        base_lhs = (sigma * self.area_diag + self.A).tocsr()
+        if self.bc_type == "dirichlet":
+            factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
+        elif self._bc_lhs_constant:
+            factor = factorized(base_lhs.tocsc())
+        else:
+            factor = None
 
         history = [u0.copy()]  # history[m] == u^m
         weights = self._l1_weights(nsteps)  # b_0 .. b_nsteps
@@ -365,9 +489,17 @@ class FractionalHeatSolver(_TransportBase):
                 hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
             g = history[n] - hist_sum  # = u^n - sum_{k>=1} b_k (u^{n+1-k} - u^{n-k})
             rhs = self.cell_areas * q_next + sigma * (self.cell_areas * g)
-            bc = self._bc_values(t_next)
-            rhs[self._boundary_idx] = bc[self._boundary_idx]
-            u_np1 = factor(rhs)
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs[self._boundary_idx] = bc[self._boundary_idx]
+                u_np1 = factor(rhs)
+            else:
+                B, b = self._boundary_system(t_next)
+                rhs = rhs + b
+                if factor is not None:
+                    u_np1 = factor(rhs)
+                else:
+                    u_np1 = spsolve((base_lhs + B).tocsr(), rhs)
             history.append(u_np1)
             t = t_next
         return t, history[-1]
