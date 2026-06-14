@@ -34,6 +34,7 @@ from .transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
     HyperbolicHeatSolver,
+    ReactionDiffusionHeatSolver,
 )
 from .triangular import NonUniformHeatSolver
 
@@ -41,6 +42,7 @@ __all__ = [
     "AdvectionDiffusionHeatSolver",
     "FractionalHeatSolver",
     "HyperbolicHeatSolver",
+    "ReactionDiffusionHeatSolver",
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
     "ApparentHeatCapacityModel",

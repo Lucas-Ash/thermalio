@@ -326,6 +326,85 @@ def fractional_subdiffusion_case(alpha=0.1, beta=0.6):
     }
 
 
+def functionally_graded_alpha(x, y, alpha0=0.1, grade=0.8):
+    """Exponentially graded thermal diffusivity ``alpha(x) = alpha0 * exp(grade * x)``.
+
+    Models a functionally graded material (e.g. a thermal-barrier coating) whose
+    conductivity varies smoothly with position.
+    """
+    del y
+    return alpha0 * np.exp(grade * np.asarray(x, dtype=float))
+
+
+def functionally_graded_solution(x, y, t):
+    return np.exp(-t) * np.sin(np.pi * x) * np.sin(np.pi * y)
+
+
+def functionally_graded_source(x, y, t, alpha0=0.1, grade=0.8):
+    """Source closing ``u_t - div(alpha(x) grad u) = Q`` for the graded case.
+
+    With ``div(alpha grad u) = alpha * laplacian(u) + (d alpha/dx) * du/dx`` and
+    ``d alpha/dx = grade * alpha``.
+    """
+    u = functionally_graded_solution(x, y, t)
+    alpha = functionally_graded_alpha(x, y, alpha0, grade)
+    du_dx = np.exp(-t) * np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+    laplacian = -2.0 * np.pi**2 * u
+    div_flux = alpha * laplacian + grade * alpha * du_dx
+    return -u - div_flux
+
+
+def pennes_bioheat_case(alpha=0.1, perfusion=8.0, ambient=0.0, forced=False):
+    """Manufactured solution for the Pennes bioheat / reaction-diffusion equation.
+
+    ``u_t - alpha laplacian(u) + k (u - u_a) = q_met`` on the unit square, written
+    in the solver's form ``u_t - div(alpha grad u) + k u = Q`` with
+    ``Q = k u_a + q_met``.  Here ``k`` is the perfusion (reaction) rate and
+    ``u_a`` the arterial/ambient temperature.
+
+    ``forced=False`` (default) returns the *source-free* decaying eigenmode
+    ``u = exp(-(2 pi^2 alpha + k) t) sin(pi x) sin(pi y)`` with ``u_a = 0`` and
+    ``Q = 0``: perfusion makes the mode decay faster than pure diffusion, which
+    is the physical signature of the reaction term.  ``forced=True`` returns a
+    manufactured solution ``u = u_a + exp(-t) sin(pi x) sin(pi y)`` whose
+    boundary trace is the (nonzero) ambient temperature ``u_a``, with closing
+    source ``Q = (-1 + 2 pi^2 alpha + k) exp(-t) sin(pi x) sin(pi y) + k u_a``,
+    exercising the ambient/metabolic source path and nonzero Dirichlet data.
+    """
+    alpha = float(alpha)
+    perfusion = float(perfusion)
+    ambient = float(ambient)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    if not forced:
+        decay = 2.0 * np.pi**2 * alpha + perfusion
+
+        def solution(x, y, t):
+            return np.exp(-decay * t) * phi(x, y)
+
+        source = lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float))
+    else:
+        def solution(x, y, t):
+            return ambient + np.exp(-t) * phi(x, y)
+
+        def source(x, y, t):
+            w = np.exp(-t) * phi(x, y)
+            return (-1.0 + 2.0 * np.pi**2 * alpha + perfusion) * w + perfusion * ambient
+
+    return {
+        "name": "Pennes Bioheat",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "alpha": alpha,
+        "perfusion": perfusion,
+        "ambient": ambient,
+    }
+
+
 def transport_linear_boundary_case(
     model="cattaneo",
     bc_type="neumann",
@@ -551,6 +630,19 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9, "anderson_depth": 5},
             "polygonal_only": True,
         }
+    elif case == "functionally_graded":
+        grade = 0.8
+        if np.isscalar(alpha) or np.asarray(alpha).ndim == 0:
+            alpha0 = float(alpha)
+        else:
+            alpha0 = 0.1
+        return {
+            "name": "Functionally Graded Diffusivity",
+            "bbox": (0.0, 1.0, 0.0, 1.0),
+            "solution": functionally_graded_solution,
+            "source": lambda x, y, t: functionally_graded_source(x, y, t, alpha0, grade),
+            "alpha": lambda x, y: functionally_graded_alpha(x, y, alpha0, grade),
+        }
     elif case == "radiative_manufactured":
         return {
             "name": "Radiative Manufactured",
@@ -567,7 +659,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
         "source_driven_sine, steady_linear_neumann, steady_linear_robin, "
         "linear_patch, hot_block, off_axis_wave, nyquist_oscillations, point_source, "
         "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity, "
-        "temperature_dependent_diffusivity, radiative_manufactured"
+        "temperature_dependent_diffusivity, radiative_manufactured, functionally_graded"
     )
 
 

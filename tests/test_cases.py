@@ -79,6 +79,44 @@ def test_get_analytical_case_radiative_manufactured():
     assert "t_inf" in bc
 
 
+def test_get_analytical_case_functionally_graded():
+    case = get_analytical_case("functionally_graded", alpha=0.1, t_end=0.02)
+    assert case["name"] == "Functionally Graded Diffusivity"
+    alpha = case["alpha"]
+    # alpha(x) = alpha0 * exp(grade * x); increases with x.
+    assert callable(alpha)
+    assert np.isclose(alpha(0.0, 0.0), 0.1)
+    assert alpha(1.0, 0.0) > alpha(0.0, 0.0)
+    x = np.array([0.25, 0.5, 0.75])
+    y = np.array([0.5, 0.5, 0.5])
+    assert case["solution"](x, y, 0.0).shape == x.shape
+    assert case["source"](x, y, 0.01).shape == x.shape
+
+
+def test_pennes_bioheat_eigenmode_is_source_free():
+    from heat_solver.cases import pennes_bioheat_case
+
+    case = pennes_bioheat_case(alpha=0.1, perfusion=8.0)
+    assert case["name"] == "Pennes Bioheat"
+    x = np.array([0.25, 0.5, 0.75])
+    y = np.array([0.25, 0.5, 0.75])
+    # Source-free eigenmode: Q == 0 and the decay rate is 2 pi^2 alpha + k.
+    assert np.allclose(case["source"](x, y, 0.1), 0.0)
+    decay = 2.0 * np.pi**2 * 0.1 + 8.0
+    u0 = case["solution"](x, y, 0.0)
+    u1 = case["solution"](x, y, 0.5)
+    assert np.allclose(u1, u0 * np.exp(-decay * 0.5))
+
+
+def test_pennes_bioheat_forced_boundary_is_ambient():
+    from heat_solver.cases import pennes_bioheat_case
+
+    case = pennes_bioheat_case(alpha=0.1, perfusion=8.0, ambient=0.5, forced=True)
+    # The sin-mode vanishes on the unit-square boundary, so u = ambient there.
+    assert np.isclose(case["solution"](0.0, 0.5, 0.3), 0.5)
+    assert np.isclose(case["solution"](0.5, 0.0, 0.3), 0.5)
+
+
 def test_get_analytical_case_unknown():
     with pytest.raises(ValueError, match="Unknown analytical case"):
         get_analytical_case("unknown_case_name")

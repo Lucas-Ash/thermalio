@@ -55,6 +55,8 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 
 **Anisotropic diffusion** — $\boldsymbol{\alpha}$ a full $2\times2$ tensor (elliptic kernels, rotated principal directions).
 
+**Functionally graded materials** — **Spatially graded conductivity** $\alpha(x)=\alpha_0 e^{\gamma x}$ (e.g. thermal-barrier coatings), with a manufactured solution that closes the full $\nabla\cdot(\alpha\nabla u)=\alpha\nabla^2 u + \nabla\alpha\cdot\nabla u$ flux (case `functionally_graded`, second-order convergent).
+
 **Nonlinear material response** — **Temperature-dependent diffusivity** $\alpha = \alpha(x,u)$ with iterative solves; solutions and sources are manufactured for strict consistency.
 
 <p align="center">
@@ -80,6 +82,7 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 - **Non-Fourier / Cattaneo–Vernotte thermal waves** — $\tau\,\partial_{tt} u + \partial_t u - \nabla\cdot(\alpha\nabla u) = Q$, giving heat a finite propagation speed $c=\sqrt{\alpha/\tau}$ ("second sound"), integrated with an unconditionally stable second-order three-level scheme (`HyperbolicHeatSolver`).
 - **Advection–diffusion (convective transport)** — $\partial_t u + \nabla\cdot(\mathbf{v}\,u) - \nabla\cdot(\alpha\nabla u) = Q$, with a prescribed velocity field and a choice of first-order monotone **upwind** or second-order **central** face flux (Péclet-number aware) (`AdvectionDiffusionHeatSolver`).
 - **Anomalous / time-fractional subdiffusion** — Caputo derivative $D_t^\beta u - \nabla\cdot(\alpha\nabla u) = Q$ for $0<\beta<1$ via the L1 scheme (order $2-\beta$ in time), modeling long-memory thermal response in disordered media (`FractionalHeatSolver`).
+- **Reaction–diffusion / Pennes bioheat** — $\partial_t u - \nabla\cdot(\alpha\nabla u) + k\,u = Q$, where the linear reaction term $k\,u$ models tissue perfusion cooling (Pennes bioheat), volumetric Newton cooling, or first-order chemical heat consumption; the source-free mode decays at the faster rate $2\pi^2\alpha + k$ (`ReactionDiffusionHeatSolver`).
 
 Runnable examples and convergence tables: `python transport_demo.py` (writes `test_plots/transport_models.png`), including a **flux-pulse Cattaneo wave** demo that contrasts the finite wavefront $x=ct$ against the instantaneous parabolic Fourier response; unit checks in `tests/test_transport.py`.
 
@@ -94,7 +97,7 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | Path | Role |
 |------|------|
 | `heat_solver/polygonal.py` | Main **polygonal** cell-centered solver (broadest BC and physics support). |
-| `heat_solver/transport.py` | **Extended transport models**: hyperbolic (Cattaneo), advection–diffusion, and time-fractional subdiffusion solvers. |
+| `heat_solver/transport.py` | **Extended transport models**: hyperbolic (Cattaneo), advection–diffusion, time-fractional subdiffusion, and reaction–diffusion / Pennes bioheat solvers. |
 | `heat_solver/triangular.py` | **Delaunay / triangular** vertex-centered solver. |
 | `heat_solver/curvilinear.py` | **Curvilinear** mapped-grid solver. |
 | `heat_solver/cases.py` | Manufactured solutions, sources, BC callbacks, case metadata. |

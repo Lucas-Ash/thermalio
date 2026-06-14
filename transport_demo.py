@@ -39,7 +39,9 @@ from heat_solver.cases import (
     advection_diffusion_case,
     cattaneo_wave_case,
     fractional_subdiffusion_case,
+    pennes_bioheat_case,
 )
+from heat_solver.drivers import run_square_polygonal_test
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.meshes import generate_square_polygonal_mesh
 from heat_solver.polygonal import PolygonalHeatSolver
@@ -47,6 +49,7 @@ from heat_solver.transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
     HyperbolicHeatSolver,
+    ReactionDiffusionHeatSolver,
 )
 
 
@@ -196,6 +199,48 @@ def flux_pulse_example():
     }
 
 
+def reaction_diffusion_example():
+    """Pennes bioheat: perfusion accelerates decay; forced case converges in space."""
+    print("\n[5] Reaction-diffusion / Pennes bioheat:  u_t - alpha lap(u) + k u = Q")
+    print("    source-free eigenmode decays at rate 2 pi^2 alpha + k (perfusion cooling)")
+    print(f"    {'perfusion k':>11} {'decay rate':>11} {'peak u(t=0.3)':>14} {'rel L2':>11}")
+    fields = {}
+    for k in (0.0, 8.0, 30.0):
+        case = pennes_bioheat_case(alpha=0.1, perfusion=k)
+        vertices, polygons, centers, areas = _mesh(48, case["bbox"])
+        solver = ReactionDiffusionHeatSolver(
+            vertices, polygons, case["alpha"], 0.002, k, time_scheme="crank_nicolson",
+            bc_func=case["boundary"], source_func=case["source"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        t, u = solver.solve(u0, 0.0, 0.3)
+        u_exact = case["solution"](centers[:, 0], centers[:, 1], t)
+        rate = 2.0 * np.pi**2 * 0.1 + k
+        print(f"    {k:>11.1f} {rate:>11.3f} {np.max(u):>14.4e} {_rel_l2(u, u_exact, areas):>11.3e}")
+        fields[k] = (centers, u)
+    return fields
+
+
+def functionally_graded_example():
+    """Exponentially graded conductivity alpha(x) = alpha0 exp(grade x)."""
+    print("\n[6] Functionally graded diffusivity:  alpha(x) = alpha0 exp(grade x)")
+    print(f"    {'cells/side':>10} {'rel L2':>11} {'order':>7}")
+    prev = None
+    field = None
+    for n in (16, 32, 64):
+        out = run_square_polygonal_test(
+            case="functionally_graded", alpha=0.1, dt=2e-4,
+            t_init=0.0, t_end=0.02, nx=n, ny=n, bbox=(0.0, 1.0, 0.0, 1.0),
+        )
+        vertices, polygons, centers, u_num, u_exact, diff, results = out
+        err = results["L2_rel"]
+        order = "" if prev is None else f"{np.log2(prev / err):.2f}"
+        print(f"    {n:>10} {err:>11.3e} {order:>7}")
+        prev = err
+        field = (centers, u_num)
+    return field
+
+
 def _tri_field(ax, centers, values, title):
     tcf = ax.tripcolor(centers[:, 0], centers[:, 1], values, shading="gouraud")
     ax.set_title(title, fontsize=10)
@@ -210,8 +255,10 @@ def main():
     adv = advection_example()
     frac = fractional_example()
     pulse = flux_pulse_example()
+    pennes = reaction_diffusion_example()
+    graded = functionally_graded_example()
 
-    fig, axes = plt.subplots(3, 3, figsize=(13, 12))
+    fig, axes = plt.subplots(4, 3, figsize=(13, 16))
 
     _tri_field(axes[0, 0], centers_h, u_h, "Cattaneo wave: numerical")
     _tri_field(axes[0, 1], centers_h, ue_h, "Cattaneo wave: exact")
@@ -242,6 +289,13 @@ def main():
 
     _tri_field(axes[2, 2], pulse["centers"], pulse["u_field"], "Flux-pulse Cattaneo field (strip)")
     axes[2, 2].set_aspect("auto")
+
+    cen_p0, u_p0 = pennes[0.0]
+    cen_p1, u_p1 = pennes[30.0]
+    _tri_field(axes[3, 0], cen_p0, u_p0, "Pennes: no perfusion (k=0), t=0.3")
+    _tri_field(axes[3, 1], cen_p1, u_p1, "Pennes: strong perfusion (k=30), t=0.3")
+    cen_g, u_g = graded
+    _tri_field(axes[3, 2], cen_g, u_g, "Functionally graded diffusivity")
 
     fig.suptitle("Extended thermal-transport models", fontsize=14)
     out_dir = ROOT / "test_plots"

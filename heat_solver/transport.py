@@ -39,6 +39,14 @@ mesh geometry, the diffusion stiffness matrix ``A`` and the lumped mass matrix
     (``beta < 1``) models heat conduction in fractal/disordered media and
     materials with long-memory (non-local-in-time) thermal response.
 
+``ReactionDiffusionHeatSolver``
+    Reaction-diffusion / Pennes bioheat equation with a linear reaction term::
+
+        u_t - div(alpha grad u) + k(x, y) u = Q
+
+    The ``k u`` term models tissue perfusion cooling (Pennes bioheat),
+    volumetric Newton cooling, or first-order chemical heat consumption.
+
 All three solvers support ``bc_type`` in ``{'dirichlet', 'neumann', 'robin',
 'flux'}``.  ``'flux'`` prescribes the *inward* boundary heat flux per unit
 length (``q_in = alpha * du/dn``) directly, which is the natural way to drive
@@ -503,3 +511,90 @@ class FractionalHeatSolver(_TransportBase):
             history.append(u_np1)
             t = t_next
         return t, history[-1]
+
+
+class ReactionDiffusionHeatSolver(_TransportBase):
+    """Reaction-diffusion / Pennes bioheat solver ``u_t - div(alpha grad u) + k u = Q``.
+
+    The reaction rate ``k`` (perfusion coefficient) may be a non-negative scalar
+    or a callable ``k(x, y)``.  It contributes a diagonal block ``R = diag(area*k)``
+    so the semi-discrete system is ``M u' + (A + R) u = M Q``.  Time integration
+    is backward Euler (default) or Crank--Nicolson.
+
+    For constant scalar ``alpha`` and ``k``, the source-free mode
+    ``sin(pi x) sin(pi y)`` decays at rate ``2 pi^2 alpha + k`` -- faster than
+    pure diffusion -- which is the physical signature of perfusion cooling.
+    """
+
+    def __init__(
+        self,
+        vertices,
+        polygons,
+        alpha,
+        dt,
+        reaction_rate,
+        time_scheme="backward_euler",
+        **kwargs,
+    ):
+        super().__init__(vertices, polygons, alpha, dt, **kwargs)
+        self.time_scheme = str(time_scheme).lower().strip()
+        if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
+            raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
+        cx = self.cell_centers[:, 0]
+        cy = self.cell_centers[:, 1]
+        if callable(reaction_rate):
+            k = np.asarray(reaction_rate(cx, cy), dtype=float)
+        else:
+            k = np.asarray(reaction_rate, dtype=float)
+        k = np.broadcast_to(k, (self.M,)).astype(float)
+        if np.any(k < 0.0):
+            raise ValueError("reaction_rate (perfusion coefficient) must be non-negative.")
+        self.reaction_rate = k
+        self.R = diags(self.cell_areas * k, format="csr")
+
+    def solve(self, u0, t0, t_end):
+        u = np.array(u0, dtype=float)
+        nsteps, dt = self._uniform_schedule(t0, t_end, self.dt)
+        if nsteps == 0:
+            return float(t0), u
+
+        K = (self.A + self.R).tocsr()
+        theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
+        base_lhs = (self.area_diag + theta * dt * K).tocsr()
+        if self.bc_type == "dirichlet":
+            factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
+        elif self._bc_lhs_constant:
+            factor = factorized(base_lhs.tocsc())
+        else:
+            factor = None
+
+        t = float(t0)
+        for _ in range(nsteps):
+            t_next = t + dt
+            q_next = self._source(t_next)
+            if self.time_scheme == "backward_euler":
+                rhs = self.cell_areas * u + dt * (self.cell_areas * q_next)
+            else:
+                q_prev = self._source(t)
+                rhs = (self.area_diag - 0.5 * dt * K) @ u + 0.5 * dt * (
+                    self.cell_areas * (q_next + q_prev)
+                )
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs[self._boundary_idx] = bc[self._boundary_idx]
+                u = factor(rhs)
+            else:
+                B_next, b_next = self._boundary_system(t_next)
+                if self.time_scheme == "backward_euler":
+                    rhs = rhs + dt * b_next
+                else:
+                    B_prev, b_prev = self._boundary_system(t)
+                    rhs = rhs + 0.5 * dt * (b_prev + b_next)
+                    if B_prev is not None:
+                        rhs = rhs - 0.5 * dt * (B_prev @ u)
+                if factor is not None:
+                    u = factor(rhs)
+                else:
+                    u = spsolve((base_lhs + theta * dt * B_next).tocsr(), rhs)
+            t = t_next
+        return t, u

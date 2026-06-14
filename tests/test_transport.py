@@ -5,6 +5,7 @@ from heat_solver.cases import (
     advection_diffusion_case,
     cattaneo_wave_case,
     fractional_subdiffusion_case,
+    pennes_bioheat_case,
     transport_linear_boundary_case,
 )
 from heat_solver.geometry import polygon_area_and_centroid
@@ -13,6 +14,7 @@ from heat_solver.transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
     HyperbolicHeatSolver,
+    ReactionDiffusionHeatSolver,
 )
 
 
@@ -302,3 +304,119 @@ def test_hyperbolic_flux_pulse_finite_propagation_speed():
     ahead = centers[:, 0] > front + 0.3  # margin for numerical front smearing
     behind = centers[:, 0] < front
     assert np.max(u[behind]) > 50.0 * max(np.max(np.abs(u[ahead])), 1e-30)
+
+
+# --------------------------------------------------------------------------- #
+# Reaction-diffusion / Pennes bioheat
+# --------------------------------------------------------------------------- #
+def test_reaction_diffusion_rejects_negative_rate():
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=4, ny=4)
+    with pytest.raises(ValueError):
+        ReactionDiffusionHeatSolver(vertices, polygons, 0.1, 0.01, reaction_rate=-1.0)
+
+
+def test_reaction_diffusion_zero_rate_matches_pure_diffusion():
+    # k = 0 must reproduce the classical Fourier diffusion result.
+    from heat_solver.polygonal import PolygonalHeatSolver
+
+    case = pennes_bioheat_case(alpha=0.1, perfusion=0.0)
+    vertices, polygons, centers, _ = _square(20, case["bbox"])
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+
+    rd = ReactionDiffusionHeatSolver(
+        vertices, polygons, 0.1, 0.01, reaction_rate=0.0,
+        bc_func=case["boundary"], source_func=case["source"],
+    )
+    _, u_rd = rd.solve(u0, 0.0, 0.2)
+
+    fourier = PolygonalHeatSolver(
+        vertices, polygons, 0.1, 0.01, bc_type="dirichlet",
+        bc_func=case["boundary"], source_func=case["source"],
+    )
+    _, u_f = fourier.solve(u0, 0.0, 0.2)
+    assert np.allclose(u_rd, u_f, atol=1e-10)
+
+
+def test_reaction_diffusion_perfusion_accelerates_decay():
+    # Higher perfusion -> the source-free eigenmode decays to a smaller peak.
+    centers0 = None
+    peaks = []
+    for omega in (0.0, 8.0, 30.0):
+        case = pennes_bioheat_case(alpha=0.1, perfusion=omega)
+        vertices, polygons, centers, _ = _square(32, case["bbox"])
+        solver = ReactionDiffusionHeatSolver(
+            vertices, polygons, 0.1, 0.002, omega, time_scheme="crank_nicolson",
+            bc_func=case["boundary"], source_func=case["source"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        _, u = solver.solve(u0, 0.0, 0.3)
+        peaks.append(np.max(u))
+    assert peaks[0] > peaks[1] > peaks[2]
+
+
+def test_reaction_diffusion_eigenmode_temporal_convergence():
+    # Source-free decaying eigenmode: Crank-Nicolson is second order in time.
+    case = pennes_bioheat_case(alpha=0.1, perfusion=8.0)
+    vertices, polygons, centers, areas = _square(64, case["bbox"])
+    t_end = 0.4
+    errors = []
+    for nt in (20, 40):
+        solver = ReactionDiffusionHeatSolver(
+            vertices, polygons, case["alpha"], t_end / nt, case["perfusion"],
+            time_scheme="crank_nicolson", bc_func=case["boundary"], source_func=case["source"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        _, u = solver.solve(u0, 0.0, t_end)
+        u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+        errors.append(_rel_l2(u, u_exact, areas))
+    assert np.log2(errors[0] / errors[1]) > 1.7
+    assert errors[1] < 5e-3
+
+
+def test_reaction_diffusion_forced_spatial_convergence_with_ambient():
+    # Manufactured u = u_a + e^{-t} phi: nonzero ambient + nonzero Dirichlet trace.
+    case = pennes_bioheat_case(alpha=0.1, perfusion=8.0, ambient=0.5, forced=True)
+    t_end = 0.05
+    errors = []
+    for n in (16, 32):
+        vertices, polygons, centers, areas = _square(n, case["bbox"])
+        solver = ReactionDiffusionHeatSolver(
+            vertices, polygons, case["alpha"], 1e-4, case["perfusion"],
+            time_scheme="crank_nicolson", bc_func=case["boundary"], source_func=case["source"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        _, u = solver.solve(u0, 0.0, t_end)
+        u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+        errors.append(_rel_l2(u, u_exact, areas))
+    assert np.log2(errors[0] / errors[1]) > 1.7
+    assert errors[1] < 1e-4
+
+
+def test_reaction_diffusion_spatially_varying_rate_runs():
+    case = pennes_bioheat_case(alpha=0.1, perfusion=8.0, forced=True)
+    vertices, polygons, centers, _ = _square(20, case["bbox"])
+    solver = ReactionDiffusionHeatSolver(
+        vertices, polygons, 0.1, 1e-3, reaction_rate=lambda x, y: 8.0 * (1.0 + 0.5 * x),
+        bc_func=case["boundary"], source_func=case["source"],
+    )
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+    _, u = solver.solve(u0, 0.0, 0.05)
+    assert np.all(np.isfinite(u))
+
+
+# --------------------------------------------------------------------------- #
+# Functionally graded diffusivity
+# --------------------------------------------------------------------------- #
+def test_functionally_graded_convergence():
+    from heat_solver.drivers import run_square_polygonal_test
+
+    errors = []
+    for n in (16, 32):
+        *_, results = run_square_polygonal_test(
+            case="functionally_graded", alpha=0.1, dt=2e-4,
+            t_init=0.0, t_end=0.02, nx=n, ny=n, bbox=(0.0, 1.0, 0.0, 1.0),
+        )
+        errors.append(results["L2_rel"])
+    # Spatially graded scalar diffusivity -> roughly second-order spatial decay.
+    assert np.log2(errors[0] / errors[1]) > 1.6
+    assert errors[1] < 1e-3
