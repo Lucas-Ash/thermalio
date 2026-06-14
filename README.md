@@ -105,6 +105,10 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/meshes.py` | Mesh generators (hex, square, mixed, skewed, tiled, Delaunay). |
 | `tests.py` | Full verification sweep: plots and `convergence_summary` under `test_plots/`. |
 | `qa_regression.py` | Compare fresh numerical outputs to stored baselines. |
+| `heat_solver/verification.py` | Observed order of accuracy, Richardson extrapolation, and GCI (feeds the convergence summaries). |
+| `heat_solver/mms.py` | SymPy method-of-manufactured-solutions source auto-derivation (optional `sympy` dependency). |
+| `heat_solver/nversion.py` | Cross-scheme "N-version" agreement harness (TPFA vs reconstructed vs MPFA). |
+| `docs/research/` | Research backlog: planned directions (A–D) for novel work. |
 
 **Run the main verification sweep** (writes figures and CSV/TXT summaries under `test_plots/`):
 
@@ -114,6 +118,8 @@ MPLCONFIGDIR=/tmp/matplotlib python tests.py
 ```
 
 **Boundary-condition spot checks** (polygonal Neumann / Robin): `test_polygonal_boundary_conditions.py`.
+
+**Verification & Validation tooling** — the convergence summaries now report the **observed order of accuracy**, **Richardson-extrapolated error**, and an **asymptotic-range flag** (via `heat_solver/verification.py`). Manufactured-solution sources can be **auto-derived symbolically** with `heat_solver/mms.py` (reproducing the hand-coded cases to machine precision; needs the optional `sympy` dependency, `pip install -r requirements-dev.txt`). Cross-scheme agreement (TPFA vs reconstructed-gradient vs MPFA) is checked by `python -m heat_solver.nversion --case source_driven_sine`. Planned research directions are tracked in `docs/research/`.
 
 Dependencies are the usual scientific Python stack (**NumPy**, **SciPy**, **Matplotlib**). Use a virtual environment and install those packages if they are not already present.
 
