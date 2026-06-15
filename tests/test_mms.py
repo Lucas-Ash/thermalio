@@ -84,6 +84,52 @@ def test_mms_reproduces_fractional_subdiffusion():
     assert _max_source_diff(mms, case["source"]) < 1e-13
 
 
+def test_mms_caputo_cubic_polynomial_in_time():
+    # Generalized Caputo handles arbitrary integer powers (here t**3): the source
+    # must equal Gamma(4)/Gamma(4-beta) t^{3-beta} phi + 2 pi^2 alpha t^3 phi.
+    from scipy.special import gamma as _gamma
+
+    beta, alpha = 0.6, 0.1
+    mms = manufactured_case(
+        "t**3*sin(pi*x)*sin(pi*y)", alpha=alpha, model="fractional", beta=beta
+    )
+
+    def expected(x, y, t):
+        phi = np.sin(np.pi * x) * np.sin(np.pi * y)
+        caputo = _gamma(4.0) / _gamma(4.0 - beta) * t ** (3.0 - beta) * phi
+        return caputo + 2.0 * np.pi**2 * alpha * (t**3) * phi
+
+    diff = _max_source_diff(mms, expected)
+    assert diff < 1e-13
+
+
+def test_mms_caputo_fractional_power_in_time():
+    # Non-integer power t**(1+beta): D_t^beta t^{1+beta} = Gamma(2+beta) t.
+    from scipy.special import gamma as _gamma
+
+    beta, alpha = 0.5, 0.1
+    mms = manufactured_case(
+        f"t**(1+{beta})*sin(pi*x)*sin(pi*y)", alpha=alpha, model="fractional", beta=beta
+    )
+
+    def expected(x, y, t):
+        phi = np.sin(np.pi * x) * np.sin(np.pi * y)
+        caputo = _gamma(2.0 + beta) * t * phi  # Gamma(2+beta)/Gamma(2) t^1, Gamma(2)=1
+        return caputo + 2.0 * np.pi**2 * alpha * (t ** (1.0 + beta)) * phi
+
+    diff = _max_source_diff(mms, expected, times=(0.2, 0.5))
+    assert diff < 1e-12
+
+
+def test_mms_caputo_rejects_transcendental_time():
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="powers of t"):
+        manufactured_case(
+            "exp(-t)*sin(pi*x)*sin(pi*y)", alpha=0.1, model="fractional", beta=0.5
+        )
+
+
 def test_mms_neumann_boundary_matches_linear_case():
     # Steady linear u = 1 + 0.75 x - 0.5 y has du/dn = 0.75 nx - 0.5 ny.
     mms = manufactured_case(

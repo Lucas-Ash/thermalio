@@ -21,7 +21,8 @@ Supported operators (``model=``):
   - ``"reaction_diffusion"``  : u_t - div(alpha grad u) + k u   (Pennes bioheat)
   - ``"cattaneo"``            : tau u_tt + u_t - div(alpha grad u)
   - ``"fractional"``          : D_t^beta u - div(alpha grad u)   (Caputo; u must
-                                be polynomial in t)
+                                be a sum of real powers of t, e.g. t**2 or
+                                t**(1+beta))
 
 ``alpha`` may be a number, a string expression in ``x, y`` (and ``u`` for
 temperature-dependent diffusivity), or a 2x2 nested list (anisotropic tensor).
@@ -74,18 +75,31 @@ def _diffusion_divergence(u, x, y, K, sp):
     return sp.diff(flux[0], x) + sp.diff(flux[1], y)
 
 
-def _caputo_monomial(u, t, beta, sp):
-    """Caputo derivative D_t^beta u for u polynomial in t.
+def _caputo(u, t, beta, sp):
+    """Caputo derivative D_t^beta u for u a sum of (real) powers of t.
 
-    For a term ``c(x,y) t^n``: ``D_t^beta t^n = Gamma(n+1)/Gamma(n+1-beta) t^{n-beta}``
-    for integer ``n >= 1`` and 0 for ``n == 0``.
+    Each additive term must factor as ``c(x, y) * t**p`` with a constant exponent
+    ``p`` (integer or real); then
+    ``D_t^beta t^p = Gamma(p+1)/Gamma(p+1-beta) t^{p-beta}`` for ``p > 0`` and 0
+    for ``p == 0``.  This covers polynomials in ``t`` (any degree) and fractional
+    powers such as ``t**(1+beta)`` that are standard in fractional MMS, but not
+    genuinely transcendental time dependence (e.g. ``exp(t)``), which would need a
+    Mittag-Leffler / series treatment.
     """
-    poly = sp.Poly(sp.expand(u), t)
+    u = sp.expand(u)
     result = sp.Integer(0)
-    for (n,), coeff in poly.terms():
-        if n == 0:
-            continue
-        result += coeff * sp.gamma(n + 1) / sp.gamma(n + 1 - beta) * t ** (n - beta)
+    for term in u.as_ordered_terms():
+        coeff, tpart = term.as_independent(t)
+        if tpart == sp.Integer(1):
+            continue  # constant in t -> Caputo derivative is 0
+        base, exp = tpart.as_base_exp()
+        if base != t or exp.has(t):
+            raise ValueError(
+                "Caputo derivation supports sums of powers of t "
+                f"(c(x,y)*t**p); got non-power time dependence in term {term}."
+            )
+        p = exp
+        result += coeff * sp.gamma(p + 1) / sp.gamma(p + 1 - beta) * t ** (p - beta)
     return result
 
 
@@ -104,7 +118,7 @@ def _operator(model, u, x, y, t, K, *, velocity, reaction, tau, beta, symbols, s
     if model == "cattaneo":
         return tau * sp.diff(u, t, 2) + sp.diff(u, t) - diffusion
     if model == "fractional":
-        return _caputo_monomial(u, t, beta, sp) - diffusion
+        return _caputo(u, t, beta, sp) - diffusion
     raise ValueError(
         f"Unknown model {model!r}. Use diffusion, advection_diffusion, "
         "reaction_diffusion, cattaneo, or fractional."

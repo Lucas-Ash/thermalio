@@ -6,7 +6,7 @@ affect any test, sweep, or regression run.
 
 | ID | Direction | Status | Note |
 |----|-----------|--------|------|
-| A | Open V&V benchmark suite for non-classical heat transport | **in-progress** | [direction_A_vv_benchmarks.md](direction_A_vv_benchmarks.md) |
+| A | Open V&V benchmark suite for non-classical heat transport | **landed** | [direction_A_vv_benchmarks.md](direction_A_vv_benchmarks.md) |
 | B | Monotone / bound-preserving polygonal & MPFA FV for non-Fourier / fractional / anisotropic models | idea | [direction_B_monotone_polygonal_fv.md](direction_B_monotone_polygonal_fv.md) |
 | C | 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan) | idea | [direction_C_nonfourier_phase_change.md](direction_C_nonfourier_phase_change.md) |
 | D | Inverse-problem / parameter-identification testbed (bioheat, non-Fourier) | idea | [direction_D_inverse_problems.md](direction_D_inverse_problems.md) |

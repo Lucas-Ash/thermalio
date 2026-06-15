@@ -19,6 +19,19 @@ def test_nversion_agreement_smooth_dirichlet():
     }
 
 
+def test_nversion_cross_mesh_agreement():
+    # Independent mesh types (square vs skewed tiled), interpolated onto a common
+    # grid, must agree to within the looser cross-mesh tolerance.
+    report = run_nversion(
+        "source_driven_sine", alpha=0.1, dt=1e-4, t_init=0.0, t_end=0.02,
+        bbox=(-1.0, 1.0, -1.0, 1.0), n=32, tol=2e-2, cross_tol=5e-2,
+    )
+    assert report["cross_mesh_max_spread"] is not None
+    assert report["cross_mesh_ok"], report["cross_mesh_max_spread"]
+    # Cross-mesh spread is looser than within-mesh (different discretizations).
+    assert report["cross_mesh_max_spread"] >= max(report["within_mesh_max_spread"].values())
+
+
 def test_nversion_skips_unsupported_variant():
     # Explicitly request the invalid mpfa+reconstructed combo; it must be skipped.
     report = run_nversion(
