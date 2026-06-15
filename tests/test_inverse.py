@@ -5,7 +5,10 @@ from heat_solver.cases import pennes_bioheat_case
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.inverse import (
     add_observation_noise,
+    bootstrap_parameter_estimates,
+    bootstrap_summary,
     collect_observations,
+    confidence_intervals,
     estimate_parameters,
     estimate_scalar_parameter,
     finite_difference_jacobian,
@@ -15,6 +18,7 @@ from heat_solver.inverse import (
     least_squares_gradient,
     make_synthetic_observations,
     nearest_sensor_indices,
+    reaction_diffusion_perfusion_adjoint,
     residual_jacobian,
     regularization_residual,
     residual_vector,
@@ -312,6 +316,50 @@ def test_sparse_multitime_observations_recover_perfusion_and_sensitivity():
     assert np.isfinite(gradient[0])
 
 
+def test_reaction_diffusion_discrete_adjoint_matches_finite_difference_gradient():
+    true_perfusion = 4.0
+    candidate = 4.45
+    dt = 0.002
+    forward_snapshots, centers, times = _pennes_multitime_forward_map(
+        nx=10,
+        true_perfusion=true_perfusion,
+        times=(0.02, 0.05, 0.08),
+        dt=dt,
+    )
+    sensors = nearest_sensor_indices(
+        centers,
+        np.array([[0.25, 0.25], [0.5, 0.5], [0.75, 0.5], [0.5, 0.75]]),
+    )
+    observed = collect_observations(forward_snapshots(true_perfusion), sensor_indices=sensors).values
+
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=10, ny=10, bbox=(0.0, 1.0, 0.0, 1.0))
+    case = pennes_bioheat_case(alpha=0.1, perfusion=true_perfusion)
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+
+    def adjoint_at(perfusion):
+        return reaction_diffusion_perfusion_adjoint(
+            vertices,
+            polygons,
+            alpha=0.1,
+            dt=dt,
+            reaction_rate=perfusion,
+            u0=u0,
+            observation_times=times,
+            observed=observed,
+            sensor_indices=sensors,
+            bc_func=case["boundary"],
+            source_func=lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float)),
+        )
+
+    adjoint = adjoint_at(candidate)
+    assert adjoint.objective > 0.0
+    assert adjoint.predicted.shape == observed.shape
+
+    h = 1e-4
+    finite_difference = (adjoint_at(candidate + h).objective - adjoint_at(candidate - h).objective) / (2.0 * h)
+    assert adjoint.gradient == pytest.approx(finite_difference, rel=2e-4, abs=2e-8)
+
+
 def test_identifiability_grid_scan_for_alpha_and_perfusion():
     true_theta = np.array([0.1, 4.0])
     forward, weights = _pennes_alpha_perfusion_forward_map(nx=10)
@@ -361,6 +409,37 @@ def test_regularization_residual_validation():
         regularization_residual(np.array([1.0]), {"strength": -1.0})
     with pytest.raises(ValueError):
         regularization_residual(np.array([1.0]), {"scale": np.array([0.0])})
+
+
+def test_confidence_intervals_and_bootstrap_summary():
+    covariance = np.array([[0.04, 0.0], [0.0, 0.25]])
+    intervals = confidence_intervals(
+        np.array([1.0, 2.0]),
+        covariance,
+        confidence=0.95,
+        parameter_names=("alpha", "k"),
+    )
+    assert intervals[0]["parameter"] == "alpha"
+    assert intervals[0]["standard_error"] == pytest.approx(0.2)
+    assert intervals[0]["lower"] < 1.0 < intervals[0]["upper"]
+    assert intervals[1]["standard_error"] == pytest.approx(0.5)
+
+    samples = bootstrap_parameter_estimates(
+        estimator=lambda obs: np.array([np.mean(obs), np.max(obs)]),
+        observations=np.array([1.0, 2.0, 3.0]),
+        n_samples=8,
+        absolute_noise=0.01,
+        seed=123,
+    )
+    assert samples.shape == (8, 2)
+    summary = bootstrap_summary(samples, parameter_names=("mean", "max"))
+    assert {row["parameter"] for row in summary} == {"mean", "max"}
+    assert all(row["lower"] <= row["mean"] <= row["upper"] for row in summary)
+
+    with pytest.raises(ValueError):
+        confidence_intervals(np.array([1.0]), covariance=np.eye(2))
+    with pytest.raises(ValueError):
+        bootstrap_parameter_estimates(lambda obs: obs, np.array([1.0]), n_samples=0)
 
 
 def test_estimate_parameters_validation():

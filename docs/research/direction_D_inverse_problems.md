@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1/PR2 plus sparse-observation and sensitivity diagnostics
+- **Status:** PR1/PR2 plus Pennes adjoint and UQ diagnostics
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -28,9 +28,12 @@ reference?*
 - **Implemented diagnostics increment:** sparse/multi-time observation operators,
   finite-difference residual Jacobians, least-squares adjoint products `J.T r`,
   and Gauss-Newton covariance diagnostics.
-- **Out of scope (later):** adjoint/auto-diff gradients; full Bayesian inversion;
-  PINN implementation and head-to-head benchmark; field (spatially varying)
-  parameter recovery.
+- **Implemented adjoint/UQ increment:** a discrete backward-Euler adjoint for
+  scalar Pennes perfusion gradients, normal-approximation confidence intervals,
+  and bootstrap/noise-ensemble summaries.
+- **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
+  full Bayesian inversion; PINN implementation and head-to-head benchmark; field
+  (spatially varying) parameter recovery.
 
 ## Design sketch
 - New: `heat_solver/inverse.py` — objective `J(theta) = ||u(theta) - u_obs||`,
@@ -66,19 +69,25 @@ reference?*
 - `test_plots/direction_D_inverse_problems/sensitivity_adjoint_diagnostics.png`
   shows finite-difference observation sensitivities, the adjoint product `J.T r`,
   and a local covariance-derived parameter standard deviation.
+- `test_plots/direction_D_inverse_problems/pennes_discrete_adjoint_gradient_check.png`
+  compares the Pennes discrete-adjoint gradient against a central finite-
+  difference objective derivative.
+- `test_plots/direction_D_inverse_problems/perfusion_uncertainty_intervals.png`
+  compares local covariance confidence intervals and bootstrap intervals for a
+  sparse multi-time perfusion fit.
 
 ## Further development priorities
-- **PDE adjoint support:** the current code provides finite-difference
-  sensitivities and least-squares adjoint products around black-box forward maps.
-  The next meaningful step is a discrete adjoint for the parabolic and Pennes
-  solvers so gradients cost roughly one forward plus one adjoint solve instead of
-  one forward solve per parameter.
+- **Broader PDE adjoint support:** the current discrete adjoint covers scalar
+  reaction/perfusion in the backward-Euler Pennes model. Extend the same pattern
+  to diffusivity, source amplitudes, Robin/radiative boundary parameters,
+  Cattaneo/Fractional transport, and nonlinear phase-change solves.
 - **Observation design:** sparse-sensor and multi-time observation operators are
   now available. Next, add sensor-design metrics such as D-optimality, time-window
   comparisons, and automated observability/rank diagnostics.
-- **Uncertainty quantification:** estimate local covariance from the least-squares
-  Jacobian, add profile-likelihood scans, and expose bootstrap/noise-ensemble
-  utilities for confidence intervals.
+- **Uncertainty quantification:** local covariance intervals and bootstrap
+  summaries are available. Next add profile-likelihood scans, model-mismatch
+  studies, and likelihood-aware reports that distinguish observation noise from
+  discretization error.
 - **Regularized field inversion:** extend parameter vectors to low-dimensional
   spatial bases for perfusion/conductivity fields, with smoothness penalties and
   mesh-aware regularization.
@@ -100,7 +109,10 @@ reference?*
   `heat_solver/inverse.py` with joint diffusivity/perfusion recovery tests.
 - PR3: sparse/multi-time observations and sensitivity diagnostics. Implemented in
   `heat_solver/inverse.py` with solver-backed sparse perfusion recovery tests.
-- PR3+: discrete PDE adjoints, field inversion, and ML comparison.
+- PR4: Pennes discrete adjoint and UQ diagnostics. Implemented in
+  `heat_solver/inverse.py` with adjoint-vs-finite-difference and confidence/
+  bootstrap tests.
+- PR4+: broader PDE adjoints, field inversion, and ML comparison.
 
 ## References
 - Pennes bioheat inverse problems (perfusion estimation); PINN inverse-problem

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse.linalg import factorized
+from scipy.stats import norm
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,19 @@ class ObservationSet:
     sensor_indices: np.ndarray | None = None
     time_indices: np.ndarray | None = None
     time_values: np.ndarray | None = None
+
+
+@dataclass(frozen=True)
+class ReactionDiffusionAdjointResult:
+    """Discrete-adjoint result for scalar reaction/perfusion identification."""
+
+    objective: float
+    gradient: float
+    predicted: np.ndarray
+    residual: np.ndarray
+    snapshots: np.ndarray
+    adjoint_states: np.ndarray
+    observation_steps: np.ndarray
 
 
 def _as_vector(values, name):
@@ -401,6 +416,237 @@ def gauss_newton_covariance(jacobian, residual_variance=1.0, rcond=1e-12):
         raise ValueError("residual_variance must be non-negative.")
     normal_matrix = jacobian.T @ jacobian
     return residual_variance * np.linalg.pinv(normal_matrix, rcond=float(rcond))
+
+
+def reaction_diffusion_perfusion_adjoint(
+    vertices,
+    polygons,
+    alpha,
+    dt,
+    reaction_rate,
+    u0,
+    observation_times,
+    observed,
+    sensor_indices=None,
+    weights=None,
+    bc_func=None,
+    source_func=None,
+):
+    """Discrete adjoint gradient for backward-Euler Pennes/reaction diffusion.
+
+    The differentiated parameter is the scalar ``reaction_rate`` in
+    ``u_t - div(alpha grad u) + reaction_rate * u = Q``.  Observations may be
+    full-field or sparse sensors at multiple times.  Observation times must land
+    on the uniform ``dt`` grid.
+    """
+    from .transport import ReactionDiffusionHeatSolver
+
+    dt = float(dt)
+    if dt <= 0.0:
+        raise ValueError("dt must be positive.")
+    reaction_rate = float(reaction_rate)
+    times = np.asarray(observation_times, dtype=float).reshape(-1)
+    if times.size == 0:
+        raise ValueError("observation_times must be non-empty.")
+    if np.any(times <= 0.0) or np.any(np.diff(times) <= 0.0):
+        raise ValueError("observation_times must be positive and strictly increasing.")
+    steps_float = times / dt
+    steps = np.rint(steps_float).astype(int)
+    if np.max(np.abs(steps_float - steps)) > 1e-10:
+        raise ValueError("observation_times must align with the uniform dt grid.")
+
+    solver = ReactionDiffusionHeatSolver(
+        vertices,
+        polygons,
+        alpha,
+        dt,
+        reaction_rate=reaction_rate,
+        bc_func=bc_func,
+        source_func=source_func,
+    )
+    if solver.bc_type != "dirichlet":
+        raise ValueError("reaction_diffusion_perfusion_adjoint currently supports Dirichlet boundaries.")
+
+    u0 = np.broadcast_to(np.asarray(u0, dtype=float), (solver.M,)).copy()
+    if sensor_indices is None:
+        sensor_idx = np.arange(solver.M, dtype=int)
+    else:
+        sensor_idx = np.asarray(sensor_indices, dtype=int).reshape(-1)
+    if sensor_idx.size == 0:
+        raise ValueError("sensor_indices must select at least one sensor.")
+    if np.any((sensor_idx < 0) | (sensor_idx >= solver.M)):
+        raise IndexError("sensor_indices contain an out-of-range entry.")
+
+    observed_matrix = np.asarray(observed, dtype=float)
+    if observed_matrix.ndim == 1:
+        observed_matrix = observed_matrix.reshape(times.size, sensor_idx.size)
+    if observed_matrix.shape != (times.size, sensor_idx.size):
+        raise ValueError(
+            "observed must have shape (n_observation_times, n_sensors) or the matching flat size."
+        )
+    if weights is None:
+        weight_matrix = np.ones_like(observed_matrix)
+    else:
+        weight_array = np.asarray(weights, dtype=float)
+        if weight_array.ndim == 1 and weight_array.size == sensor_idx.size:
+            weight_matrix = np.tile(weight_array, (times.size, 1))
+        elif weight_array.ndim == 1 and weight_array.size == observed_matrix.size:
+            weight_matrix = weight_array.reshape(observed_matrix.shape)
+        elif weight_array.shape == observed_matrix.shape:
+            weight_matrix = weight_array
+        else:
+            raise ValueError("weights must match sensors, flattened observations, or observation matrix.")
+        if np.any(weight_matrix < 0.0):
+            raise ValueError("weights must be non-negative.")
+
+    K = (solver.A + solver.R).tocsr()
+    lhs = (solver.area_diag + dt * K).tocsr()
+    lhs = solver._apply_dirichlet(lhs)
+    solve_forward = factorized(lhs.tocsc())
+    solve_adjoint = factorized(lhs.T.tocsc())
+    boundary_idx = solver._boundary_idx
+    is_interior = np.ones(solver.M, dtype=bool)
+    is_interior[boundary_idx] = False
+
+    nsteps = int(steps[-1])
+    snapshots_all = np.empty((nsteps + 1, solver.M), dtype=float)
+    snapshots_all[0] = u0
+    u = u0.copy()
+    obs_lookup = {int(step): i for i, step in enumerate(steps)}
+
+    for step in range(1, nsteps + 1):
+        t_next = step * dt
+        rhs = solver.area_diag @ u + dt * (solver.cell_areas * solver._source(t_next))
+        bc = solver._bc_values(t_next)
+        rhs[boundary_idx] = bc[boundary_idx]
+        u = solve_forward(rhs)
+        snapshots_all[step] = u
+
+    predicted_matrix = np.vstack([snapshots_all[step, sensor_idx] for step in steps])
+    raw_residual = predicted_matrix - observed_matrix
+    objective = 0.5 * float(np.sum(weight_matrix * raw_residual**2))
+
+    adjoints = np.zeros((nsteps + 1, solver.M), dtype=float)
+    lam_next = np.zeros(solver.M, dtype=float)
+    gradient = 0.0
+    for step in range(nsteps, 0, -1):
+        obs_grad = np.zeros(solver.M, dtype=float)
+        obs_pos = obs_lookup.get(step)
+        if obs_pos is not None:
+            np.add.at(
+                obs_grad,
+                sensor_idx,
+                weight_matrix[obs_pos] * raw_residual[obs_pos],
+            )
+        rhs_adj = obs_grad + solver.cell_areas * lam_next
+        lam = solve_adjoint(rhs_adj)
+        adjoints[step] = lam
+        gradient -= dt * float(np.dot(lam[is_interior], solver.cell_areas[is_interior] * snapshots_all[step, is_interior]))
+        lam_next = lam
+
+    return ReactionDiffusionAdjointResult(
+        objective=objective,
+        gradient=gradient,
+        predicted=predicted_matrix.reshape(-1),
+        residual=raw_residual.reshape(-1),
+        snapshots=snapshots_all[steps],
+        adjoint_states=adjoints,
+        observation_steps=steps,
+    )
+
+
+def confidence_intervals(values, covariance, confidence=0.95, parameter_names=None):
+    """Return normal-approximation confidence intervals from a covariance matrix."""
+    values = _as_parameter_vector(values, "values")
+    covariance = np.asarray(covariance, dtype=float)
+    if covariance.shape != (values.size, values.size):
+        raise ValueError("covariance shape must be (n_parameters, n_parameters).")
+    confidence = float(confidence)
+    if not (0.0 < confidence < 1.0):
+        raise ValueError("confidence must satisfy 0 < confidence < 1.")
+    if parameter_names is None:
+        parameter_names = tuple(f"theta_{i}" for i in range(values.size))
+    else:
+        parameter_names = tuple(str(name) for name in parameter_names)
+    if len(parameter_names) != values.size:
+        raise ValueError("parameter_names length must match values length.")
+    standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+    z_value = float(norm.ppf(0.5 + 0.5 * confidence))
+    intervals = []
+    for name, value, stderr in zip(parameter_names, values, standard_errors):
+        half_width = z_value * float(stderr)
+        intervals.append(
+            {
+                "parameter": name,
+                "estimate": float(value),
+                "standard_error": float(stderr),
+                "lower": float(value - half_width),
+                "upper": float(value + half_width),
+                "confidence": confidence,
+            }
+        )
+    return intervals
+
+
+def bootstrap_parameter_estimates(
+    estimator,
+    observations,
+    n_samples,
+    relative_noise=0.0,
+    absolute_noise=0.0,
+    seed=None,
+):
+    """Generate bootstrap/noise-ensemble parameter estimates."""
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive.")
+    rng = np.random.default_rng(seed)
+    estimates = []
+    for _ in range(n_samples):
+        noisy = add_observation_noise(
+            observations,
+            relative_level=relative_noise,
+            absolute_level=absolute_noise,
+            seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+        )
+        estimate = np.asarray(estimator(noisy), dtype=float).reshape(-1)
+        estimates.append(estimate)
+    return np.vstack(estimates)
+
+
+def bootstrap_summary(samples, confidence=0.95, parameter_names=None):
+    """Summarize bootstrap samples with means, standard deviations, and quantiles."""
+    samples = np.asarray(samples, dtype=float)
+    if samples.ndim == 1:
+        samples = samples[:, None]
+    if samples.ndim != 2 or samples.shape[0] == 0:
+        raise ValueError("samples must have shape (n_samples, n_parameters).")
+    confidence = float(confidence)
+    if not (0.0 < confidence < 1.0):
+        raise ValueError("confidence must satisfy 0 < confidence < 1.")
+    if parameter_names is None:
+        parameter_names = tuple(f"theta_{i}" for i in range(samples.shape[1]))
+    else:
+        parameter_names = tuple(str(name) for name in parameter_names)
+    if len(parameter_names) != samples.shape[1]:
+        raise ValueError("parameter_names length must match sample dimension.")
+    alpha_tail = 0.5 * (1.0 - confidence)
+    lower_q = 100.0 * alpha_tail
+    upper_q = 100.0 * (1.0 - alpha_tail)
+    rows = []
+    for j, name in enumerate(parameter_names):
+        column = samples[:, j]
+        rows.append(
+            {
+                "parameter": name,
+                "mean": float(np.mean(column)),
+                "std": float(np.std(column, ddof=1)) if column.size > 1 else 0.0,
+                "lower": float(np.percentile(column, lower_q)),
+                "upper": float(np.percentile(column, upper_q)),
+                "confidence": confidence,
+            }
+        )
+    return rows
 
 
 def estimate_parameters(
