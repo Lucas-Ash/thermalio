@@ -2,7 +2,7 @@
 
 - **Status:** PR1/PR2 initial implementation + expansion-study diagnostics
 - **Owner:** —
-- **Last updated:** 2026-06-14
+- **Last updated:** 2026-06-15
 
 ## Motivation & V&V question
 Phase change and the extended transport models are currently **not composable** in
@@ -76,6 +76,58 @@ is its observed order?*
    useful next increment would add systematic sweeps over latent heat, transition
    width, Picard relaxation, and Anderson depth, with failure maps and
    enthalpy-based preconditioning.
+
+## Additional computing capabilities that would help
+
+1. **Adaptive time stepping for stiff phase change.**  Hyperbolic and
+   fractional Stefan solves become difficult when the mushy-zone width is
+   narrow, latent heat is large, or `tau` is small.  The solvers would benefit
+   from automatic `dt` reduction on Picard/Anderson failure and conservative
+   step growth after successful nonlinear convergence.  This would make the
+   Direction C runners less hand-tuned and more suitable for broad parameter
+   sweeps.
+
+2. **Memory compression for fractional Stefan.**  The Caputo L1 scheme stores
+   and sums the full time history, so long simulations become increasingly
+   expensive.  Sum-of-exponentials, short-memory windowing, or adaptive history
+   compression would make fractional phase-change studies practical at larger
+   final times and finer spatial resolutions.
+
+3. **Enthalpy-primary nonlinear formulation.**  The current apparent-capacity
+   approach solves in temperature and inserts the latent-heat spike through
+   `c(T)`.  An enthalpy-primary formulation could improve robustness and energy
+   accounting for narrow mushy zones, because latent heat is naturally linear in
+   enthalpy even when temperature changes slowly through the phase interval.
+
+4. **Sharp-interface diagnostics on top of apparent capacity.**  Even without
+   explicit front tracking, post-processing should extract interface position,
+   front speed, curvature, mushy-zone thickness, and phase-fraction contours.
+   These diagnostics would make comparisons against Stefan theory and
+   experimental front-position data much clearer.
+
+5. **Application-study runners.**  Direction C needs reproducible 2D scenarios
+   beyond manufactured solutions: pulsed-laser melting, cryosurgery freezing
+   margins, and additive-manufacturing-like melt pools.  Each runner should
+   report front position, peak temperature, liquid fraction, injected energy,
+   and latent/sensible heat budgets.
+
+6. **Nonlinear convergence reporting.**  The current solvers raise convergence
+   failures, but research studies need richer metadata: Picard/Anderson
+   iteration counts per time step, residual histories, capacity extrema, failed
+   cells, and relaxation factors.  This would support failure maps over `tau`,
+   `beta`, latent heat, and transition width.
+
+7. **Energy and enthalpy conservation audits.**  Since Direction C is centered
+   on latent heat, every application runner should track injected heat, boundary
+   fluxes, sensible enthalpy, latent enthalpy, and numerical residuals.  This is
+   especially important for flux-driven Cattaneo pulses and cryosurgery-style
+   freezing fronts.
+
+8. **Parameter sweep infrastructure.**  A small suite runner, similar in spirit
+   to the Direction D inverse-study runners, should sweep `tau`, `beta`, latent
+   heat, mushy-zone width, front speed, mesh resolution, and time resolution,
+   then write JSON/CSV/PNG artifacts.  This would turn exploratory Direction C
+   experiments into reproducible research datasets.
 
 ## Expansion plots
 
