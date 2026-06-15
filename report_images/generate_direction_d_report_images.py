@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from heat_solver.inverse import (
+    GaussianFieldBasis,
     add_observation_noise,
     bootstrap_parameter_estimates,
     bootstrap_summary,
@@ -225,6 +226,98 @@ def multiparameter_landscape() -> None:
     )
 
 
+def sensor_time_information() -> None:
+    alpha = 0.1
+    k = 3.0
+    x = np.linspace(0.0, 1.0, 90)
+    y = np.linspace(0.0, 1.0, 90)
+    xx, yy = np.meshgrid(x, y)
+    times = np.linspace(0.0, 0.35, 160)
+    spatial_amplitude = np.sin(np.pi * xx) * np.sin(np.pi * yy)
+    decay = 2.0 * np.pi**2 * alpha + k
+    t_late = 0.18
+    sensitivity_field = -t_late * spatial_amplitude * np.exp(-decay * t_late)
+
+    center_amp = 1.0
+    edge_amp = np.sin(np.pi * 0.25) * np.sin(np.pi * 0.25)
+    line_amp = np.sin(np.pi * 0.5) * np.sin(np.pi * 0.25)
+    amplitudes = {
+        "center sensor": center_amp,
+        "quarter sensor": edge_amp,
+        "mid-edge interior": line_amp,
+    }
+    info_curves = {}
+    for name, amp in amplitudes.items():
+        sensitivity = -times * amp * np.exp(-decay * times)
+        info_curves[name] = np.cumsum(sensitivity**2) / max(np.sum(sensitivity**2), 1e-16)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.3), constrained_layout=True)
+    im = axes[0].pcolormesh(xx, yy, sensitivity_field**2, shading="auto", cmap="viridis")
+    axes[0].set_aspect("equal")
+    axes[0].set_xlabel("$x$")
+    axes[0].set_ylabel("$y$")
+    axes[0].set_title(f"Spatial information density at $t={t_late:.2f}$")
+    fig.colorbar(im, ax=axes[0], label="$|\\partial u/\\partial k|^2$")
+    for name, curve in info_curves.items():
+        axes[1].plot(times, curve, label=name)
+    axes[1].set_xlabel("latest observation time")
+    axes[1].set_ylabel("fraction of cumulative information")
+    axes[1].set_title("Timing and sensor placement effect")
+    axes[1].legend(fontsize=8)
+    _save(
+        fig,
+        "sensor_time_information",
+        "Sensor/time information diagnostic for scalar Pennes perfusion. Information is proportional to $|\\partial u/\\partial k|^2$: central sensors see the largest modal amplitude, while later observations accumulate more perfusion information until the thermal signal has decayed.",
+        "sensor-time-information",
+    )
+
+
+def profile_likelihood_diagnostic() -> None:
+    true_k = 2.75
+    alpha = 0.1
+    times = np.linspace(0.01, 0.22, 18)
+    observed = add_observation_noise(_pennes_signal(true_k, times, alpha), relative_level=0.006, seed=99)
+    forward = lambda theta: _pennes_signal(theta[0], times, alpha)
+    result = estimate_parameters(forward, observed, initial_guess=[2.4], bounds=([0.2], [6.0]), parameter_names=("k",))
+    k_grid = np.linspace(1.4, 4.4, 220)
+    rows = identifiability_scan(lambda k: _pennes_signal(k, times, alpha), observed, k_grid)
+    costs = np.array([row["cost"] for row in rows])
+    min_cost = float(np.min(costs))
+    jac = residual_jacobian(forward, result.values, observed)
+    curvature = float((jac.T @ jac)[0, 0])
+    quadratic = min_cost + 0.5 * curvature * (k_grid - result.values[0]) ** 2
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.2), constrained_layout=True)
+    axes[0].plot(k_grid, costs - min_cost, color="tab:blue", label="profile scan")
+    axes[0].plot(k_grid, quadratic - min_cost, color="tab:orange", ls="--", label="GN quadratic")
+    axes[0].axvline(true_k, color="black", ls=":", label="truth")
+    axes[0].axvline(result.values[0], color="tab:red", ls="-.", label="estimate")
+    axes[0].set_yscale("log")
+    axes[0].set_xlabel("perfusion $k$")
+    axes[0].set_ylabel("$\\Phi(k)-\\Phi(\\widehat{k})$")
+    axes[0].set_title("Profile likelihood curvature")
+    axes[0].legend(fontsize=8)
+
+    residuals = observed - _pennes_signal(result.values[0], times, alpha)
+    axes[1].plot(times, observed, "o", label="noisy observations", color="tab:gray")
+    axes[1].plot(times, _pennes_signal(true_k, times, alpha), "-", label="truth", color="black")
+    axes[1].plot(times, _pennes_signal(result.values[0], times, alpha), "--", label="fit", color="tab:red")
+    ax2 = axes[1].twinx()
+    ax2.bar(times, residuals, width=0.006, color="tab:purple", alpha=0.25, label="fit residual")
+    axes[1].set_xlabel("time")
+    axes[1].set_ylabel("temperature signal")
+    ax2.set_ylabel("residual")
+    axes[1].set_title("Fit and residual structure")
+    axes[1].legend(fontsize=8, loc="upper right")
+    ax2.legend(fontsize=8, loc="center right")
+    _save(
+        fig,
+        "profile_likelihood_diagnostic",
+        "Profile-likelihood diagnostic for scalar perfusion. The left panel compares the scanned objective to the local Gauss-Newton quadratic model, showing where the normal approximation is reliable; the right panel shows the fitted signal and residual structure.",
+        "profile-likelihood-diagnostic",
+    )
+
+
 def sensitivity_adjoint_uq() -> None:
     true_k = 2.6
     candidate = 2.25
@@ -335,6 +428,44 @@ def regularization_path() -> None:
     )
 
 
+def field_basis_coverage() -> None:
+    centers = np.array([[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]], dtype=float)
+    basis = GaussianFieldBasis(centers=centers, radius=0.45, normalize=True)
+    x = np.linspace(0.0, 1.0, 95)
+    y = np.linspace(0.0, 1.0, 95)
+    xx, yy = np.meshgrid(x, y)
+    design = basis.design_matrix(xx.ravel(), yy.ravel())
+    fields = [design[:, j].reshape(xx.shape) for j in range(basis.n_basis)]
+    gram = design.T @ design / design.shape[0]
+    normalized_gram = gram / np.sqrt(np.outer(np.diag(gram), np.diag(gram)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2), constrained_layout=True)
+    colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
+    for j, field in enumerate(fields):
+        axes[0].contour(xx, yy, field, levels=[0.18, 0.32, 0.46], colors=[colors[j]], linewidths=1.4)
+        axes[0].plot(centers[j, 0], centers[j, 1], "o", color=colors[j], mec="black")
+    axes[0].set_aspect("equal")
+    axes[0].set_xlabel("$x$")
+    axes[0].set_ylabel("$y$")
+    axes[0].set_title("Normalized Gaussian basis support")
+    im = axes[1].imshow(normalized_gram, vmin=0.0, vmax=1.0, cmap="magma")
+    axes[1].set_xticks(np.arange(basis.n_basis))
+    axes[1].set_yticks(np.arange(basis.n_basis))
+    axes[1].set_xlabel("basis index")
+    axes[1].set_ylabel("basis index")
+    axes[1].set_title("Basis overlap / parameter coupling")
+    for i in range(basis.n_basis):
+        for j in range(basis.n_basis):
+            axes[1].text(j, i, f"{normalized_gram[i, j]:.2f}", ha="center", va="center", color="white" if normalized_gram[i, j] > 0.55 else "black", fontsize=8)
+    fig.colorbar(im, ax=axes[1], label="normalized overlap")
+    _save(
+        fig,
+        "field_basis_coverage",
+        "Gaussian perfusion-field basis diagnostic. The left panel shows the spatial support of each normalized radial basis function; the right panel reports basis overlap, which acts as a practical proxy for coefficient coupling in the field inverse problem.",
+        "field-basis-coverage",
+    )
+
+
 def field_inversion_coefficients() -> None:
     csv_path = DIRECTION_D / "pennes_field_inverse_study" / "pennes_field_inverse_coefficients.csv"
     summary_path = DIRECTION_D / "pennes_field_inverse_study" / "pennes_field_inverse_summary.json"
@@ -436,9 +567,12 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     workflow_tree()
     scalar_identifiability_noise()
+    sensor_time_information()
     multiparameter_landscape()
+    profile_likelihood_diagnostic()
     sensitivity_adjoint_uq()
     regularization_path()
+    field_basis_coverage()
     field_inversion_coefficients()
     baseline_comparison()
 

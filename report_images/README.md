@@ -17,3 +17,16 @@ MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python report_images
 The generator is deterministic and uses the Direction D inverse-problem utilities
 plus the solver-backed artifacts already stored under
 `test_plots/direction_D_inverse_problems/`.
+
+Current generated figure topics:
+
+- Direction D inverse workflow.
+- Scalar perfusion identifiability and noise robustness.
+- Sensor/time information content.
+- Multi-parameter diffusivity/perfusion identifiability.
+- Profile likelihood versus local Gauss-Newton curvature.
+- Sensitivity and uncertainty diagnostics.
+- Regularization-path behavior.
+- Gaussian field-basis coverage and overlap.
+- Field-inversion coefficient recovery.
+- FV/ML/JAX PINN baseline comparison.

@@ -68,6 +68,27 @@ The observation model is
 \end{equation}
 where $\mathcal{H}$ selects sparse sensors and observation times, and
 $\bm{\theta}_\star$ is the known synthetic truth used for verification.
+The symbols in \cref{eq:pennes-continuous,eq:forward-map,eq:observation-model}
+have the following roles:
+\begin{description}[leftmargin=2.8cm,style=nextline]
+  \item[$u(\bm{x},t)$] Temperature or nondimensional thermal state at position
+  $\bm{x}$ and time $t$.
+  \item[$\alpha$] Thermal diffusivity.  In joint inverse studies it is one of
+  the recovered parameters.
+  \item[$k$] Linear perfusion/reaction coefficient.  In bioheat language it
+  represents cooling by blood perfusion after nondimensionalization.
+  \item[$Q$] Volumetric source.  Most Direction D experiments set $Q=0$ so the
+  inverse problem isolates decay due to diffusion and perfusion.
+  \item[$u_h$] Discrete finite-volume approximation of $u$ produced by the
+  verified forward solver.
+  \item[$\mathcal{F}$] Forward map: the deterministic numerical experiment that
+  maps candidate parameters to predicted temperatures.
+  \item[$\mathcal{H}$] Observation map: a sampling operator that extracts the
+  temperatures actually ``measured'' at selected sensors and times.
+  \item[$\bm{\eta}$ and $\Sigma_\eta$] Additive measurement perturbation and its
+  covariance.  These represent experimental noise in synthetic verification
+  studies.
+\end{description}
 
 \begin{figure}[t]
   \centering
@@ -99,6 +120,19 @@ with a standard least-squares norm:
 \end{equation}
 This form allows quadrature weights, sensor confidence weights, and unweighted
 sensor stacks to use the same objective.
+Here $U_{\tau,s}$ means the state value at time index $\tau$ and sensor or cell
+index $s$.  The vector $\bm{r}$ is the actual object minimized by the optimizer.
+Large weights $w_i$ make observation $i$ more influential; zero weights remove
+observations without changing array shapes.  The square root appears because
+least-squares optimizers minimize $\norm{\bm{r}}_2^2$, so using $W^{1/2}$ makes
+the objective equal to $(\mathcal{H}\mathcal{F}-\bm{y})^T
+W(\mathcal{H}\mathcal{F}-\bm{y})$.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{sensor_time_information.png}
+  \input{report_images/sensor_time_information.caption.tex}
+\end{figure}
 
 \section{Scalar and Vector Parameter Estimation}
 
@@ -116,6 +150,12 @@ example perfusion $k$.  The vector form supports multi-parameter recovery, such
 as joint diffusivity and perfusion estimation.  The implementation delegates the
 nonlinear solve to SciPy's trust-region least-squares optimizer, while keeping
 all residual construction local and explicit.
+In \cref{eq:least-squares}, $\widehat{\bm{\theta}}$ is the recovered parameter
+vector, $\bm{\ell}$ and $\bm{u}$ are lower and upper physical bounds, and the
+factor $1/2$ is conventional: it cancels the factor of two when differentiating
+the squared norm.  This objective is nonlinear whenever changing
+$\bm{\theta}$ changes the PDE solution nonlinearly, even if the forward PDE is
+linear in $u$ for fixed parameters.
 
 Identifiability scans evaluate the same cost on a prescribed grid:
 \begin{equation}
@@ -126,6 +166,10 @@ Identifiability scans evaluate the same cost on a prescribed grid:
 For one parameter this produces a cost curve; for two parameters it produces a
 Cartesian cost surface.  These scans are not the optimizer itself.  They are
 diagnostics for curvature, local uniqueness, and parameter tradeoff.
+The scan value $\Phi(\bm{\theta}_i)$ should be read as a diagnostic likelihood
+surrogate: narrow wells indicate informative data, flat directions indicate
+weak identifiability, and elongated two-parameter wells indicate parameter
+correlation.
 
 \begin{figure}[t]
   \centering
@@ -137,6 +181,12 @@ diagnostics for curvature, local uniqueness, and parameter tradeoff.
   \centering
   \includegraphics[width=\linewidth]{multi_parameter_identifiability.png}
   \input{report_images/multi_parameter_identifiability.caption.tex}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{profile_likelihood_diagnostic.png}
+  \input{report_images/profile_likelihood_diagnostic.caption.tex}
 \end{figure}
 
 \section{Regularization}
@@ -172,6 +222,13 @@ The matrix form uses a linear operator $L$ and target $\bm{b}$:
 In the field-inversion runner, $L$ can be a pairwise-difference matrix between
 Gaussian-basis coefficients.  This penalizes rough coefficient patterns without
 requiring a full cellwise unknown at every mesh cell.
+In these expressions, $\bm{R}$ is the complete residual sent to the optimizer,
+$\bm{r}_{\mathrm{data}}$ measures mismatch to temperature observations, and
+$\bm{r}_{\mathrm{reg}}$ encodes prior information.  The strength $\lambda$
+controls the compromise: $\lambda=0$ ignores the prior, while large $\lambda$
+forces the solution toward the prior or toward a smooth coefficient pattern.
+The scale vector $\bm{s}$ or matrix $S$ prevents parameters with different
+units or magnitudes from being penalized unfairly.
 
 \begin{figure}[t]
   \centering
@@ -210,6 +267,11 @@ least-squares gradient is the adjoint product
 where $J_r$ is the Jacobian of the residual.  The function
 \texttt{least\_squares\_gradient} exposes this product directly for diagnostic
 and verification use.
+Here $f$ is the predicted observation vector, not necessarily the full PDE
+state.  A column of $J$ answers the practical question: ``if parameter
+$\theta_j$ changes slightly, which observations move and by how much?''  The
+product $J_r^T\bm{r}$ compresses all observation mismatches into one gradient
+component per parameter.
 
 \section{Discrete Pennes Adjoint}
 
@@ -257,6 +319,14 @@ scalar gradient accumulated by the implementation is
 with boundary entries excluded where Dirichlet conditions overwrite the state.
 The tests compare \cref{eq:pennes-adjoint-gradient} against central finite
 differences of the fully discrete objective.
+The adjoint variable $\lambda^n$ is not a physical temperature.  It is a
+backward-in-time sensitivity accumulator: it tells how strongly the objective
+would change if the state equation at time step $n$ were perturbed.  The matrix
+$B(k)$ is the same implicit time-step matrix used by the forward solve, and
+$B(k)^T$ appears because adjoints propagate sensitivities through the transpose
+of the linearized forward equations.  This is why one adjoint sweep gives a
+gradient without re-solving the forward problem for every finite-difference
+step.
 
 \section{Uncertainty Quantification}
 
@@ -294,6 +364,12 @@ inverse problem:
 \end{equation}
 Sample quantiles of $\{\widehat{\bm{\theta}}^{(b)}\}$ give a non-asymptotic
 interval estimate.
+In \cref{eq:gn-covariance}, $J_r^TJ_r$ is the local curvature of the
+least-squares objective and $(\cdot)^+$ is a pseudo-inverse used when the
+curvature matrix is nearly singular.  The scalar
+$\widehat{\sigma}^2$ estimates the noise level left in the residuals after
+fitting.  The bootstrap estimate in \cref{eq:bootstrap} is more computationally
+expensive but makes fewer assumptions about local quadratic behavior.
 
 \begin{figure}[t]
   \centering
@@ -338,6 +414,17 @@ problem.  The study solves
 \end{equation}
 where $L$ is a smoothness operator on the basis coefficients.  The report
 artifacts include coefficient tables, field plots, and RMSE metrics.
+In \cref{eq:gaussian-field}, $\bm{\mu}_\ell$ is the center of basis function
+$\ell$, $\rho$ is its radius, $c_\ell$ is the unknown coefficient, and the
+normalization makes the basis functions form a partition of unity.  This keeps
+$k(\bm{x};\bm{c})$ in the same physical scale as the coefficients rather than
+letting overlapping Gaussians artificially inflate the field.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{field_basis_coverage.png}
+  \input{report_images/field_basis_coverage.caption.tex}
+\end{figure}
 
 \begin{figure}[t]
   \centering
@@ -358,6 +445,12 @@ candidate method is scored by the same residual metrics:
   \rho=\frac{\norm{\widehat{\bm{y}}-\bm{y}}_2}{\norm{\bm{y}}_2}.
   \label{eq:baseline-metrics}
 \end{equation}
+In \cref{eq:baseline-metrics}, $\widehat{\bm{y}}$ is the observation vector
+predicted by a candidate method at its recovered parameter estimate.  The
+absolute and relative parameter errors measure parameter recovery, while
+$\rho$ measures whether the method reproduces the observed temperatures.
+These are deliberately separated because a method can fit noisy data well while
+recovering a biased parameter.
 The dependency-light baselines are:
 \begin{enumerate}[label=\arabic*.]
   \item trusted finite-volume inverse solve,
@@ -406,6 +499,11 @@ Automatic differentiation supplies the PINN derivatives.  The current JAX run
 is a progress diagnostic rather than a fully tuned benchmark, but it is already
 compatible with the same reporting schema as the finite-volume and surrogate
 baselines.
+The four terms in \cref{eq:pinn-loss} enforce different information channels:
+the data term matches sensor observations, the PDE term penalizes violation of
+the Pennes equation at collocation points, the initial term enforces the known
+starting temperature, and the boundary term enforces prescribed boundary data.
+The weights $w_d,w_p,w_0,w_b$ set their relative influence during training.
 
 \begin{figure}[t]
   \centering
@@ -443,5 +541,114 @@ adjoints, uncertainty tools, regularized field inversions, and baseline
 comparisons.  This design keeps the forward physics trusted and explicit while
 allowing inverse-method experiments to grow around the same verification
 surface.
+
+\appendix
+\section{Appendix: Specialized Concepts for Non-Specialists}
+
+This appendix summarizes concepts used in the report that are common in
+inverse-problem and computational-PDE literature but may be less familiar to a
+physicist whose training is mainly in forward modeling.
+
+\subsection{Forward Problem Versus Inverse Problem}
+
+A forward heat-transfer problem asks for $u(\bm{x},t)$ when the parameters,
+sources, boundary conditions, and initial data are known.  An inverse problem
+reverses part of that logic: one observes partial information about $u$ and
+infers an unknown parameter such as perfusion $k$ or diffusivity $\alpha$.
+Inverse problems are usually more delicate because different parameters can
+produce similar observations, especially when only a few sensors are available.
+
+\subsection{Identifiability}
+
+A parameter is identifiable from a data set if changing it causes an observable
+change in the predicted measurements.  In a cost scan, identifiability appears
+as a clear isolated minimum.  A flat valley means the observations do not
+distinguish parameters well.  In multi-parameter problems, an elongated valley
+means one parameter can compensate for another, for example diffusivity and
+perfusion both accelerating thermal decay.
+
+\subsection{Observation Operator}
+
+The numerical solver may compute thousands of cell temperatures at every time
+step, but an experiment may only measure five sensors at three times.  The
+observation operator $\mathcal{H}$ formalizes this mismatch.  It is simply the
+map from the full computed state to the values that would actually be observed.
+Writing it explicitly prevents accidentally optimizing against inaccessible
+full-field information.
+
+\subsection{Residuals and Weighting}
+
+The residual is the difference between predicted and observed data.  Weighting
+the residual is equivalent to telling the optimizer which measurements are more
+reliable or more physically important.  For independent Gaussian measurement
+noise, the statistically natural weight is the inverse variance:
+$w_i=1/\sigma_i^2$.
+
+\subsection{Regularization}
+
+Regularization adds controlled prior information to an inverse problem.  This
+is not merely numerical decoration.  If the data do not uniquely determine all
+unknowns, a regularization term selects a physically plausible member of the
+family of solutions.  A smoothness penalty says, for example, that neighboring
+perfusion-field basis coefficients should not oscillate wildly unless the data
+strongly require it.
+
+\subsection{Finite-Difference Sensitivity}
+
+A finite-difference sensitivity perturbs a parameter and re-runs the forward
+model to estimate a derivative.  It is easy to understand and useful for
+verification, but it scales poorly: recovering $p$ parameters can require
+roughly $2p$ additional forward solves for one central-difference Jacobian.
+
+\subsection{Adjoint Method}
+
+An adjoint method computes gradients by solving a related problem backward in
+time.  The adjoint field is not a measurable physical field; it is a bookkeeping
+field for how future measurement mismatch depends on earlier state changes.
+The main benefit is computational: for many observations and few objective
+functions, one adjoint sweep can provide a full gradient at a cost comparable
+to one additional forward solve.
+
+\subsection{Gauss-Newton Covariance}
+
+Near a well-identified least-squares solution, the objective often behaves like
+a quadratic bowl.  The matrix $J^TJ$ describes the local curvature of that bowl.
+Large curvature means small parameter uncertainty; small curvature means the
+data weakly constrain that parameter direction.  The Gauss-Newton covariance is
+therefore a local, linearized uncertainty estimate.  It is fast, but it can be
+misleading if the cost surface is strongly non-quadratic or multimodal.
+
+\subsection{Bootstrap or Noise-Ensemble Uncertainty}
+
+The bootstrap/noise ensemble repeatedly perturbs the observations and resolves
+the inverse problem.  The spread in the resulting parameter estimates gives an
+empirical uncertainty estimate.  This is more expensive than the Gauss-Newton
+formula but can reveal nonlinearity, skewed uncertainty, or optimizer
+sensitivity.
+
+\subsection{Profile Likelihood}
+
+A profile likelihood scan fixes one parameter at a sequence of values and
+evaluates or re-optimizes the cost.  In the scalar experiments here it is simply
+the cost curve as a function of $k$.  Comparing the scanned curve with a local
+quadratic approximation shows whether confidence intervals derived from local
+curvature are trustworthy.
+
+\subsection{Physics-Informed Neural Network}
+
+A physics-informed neural network represents the solution field by a neural
+network and trains it with a loss containing both data mismatch and PDE
+residual terms.  The neural network does not replace the PDE; the PDE appears
+as a soft constraint through automatic differentiation.  In this report the JAX
+PINN is included as an optional comparison backend, not as the trusted reference
+solver.
+
+\subsection{Why Use Synthetic Data?}
+
+Synthetic data are essential for verification because the true parameter is
+known.  This makes it possible to separate algorithmic error from experimental
+ambiguity.  Once an inverse method behaves correctly on controlled synthetic
+data, real experimental data can be approached with clearer expectations about
+identifiability, noise sensitivity, and model mismatch.
 
 \end{document}
