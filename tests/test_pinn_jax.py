@@ -90,3 +90,8 @@ def test_run_pennes_jax_pinn_baseline_writes_reports(tmp_path):
     assert result.summary["true_perfusion"] == pytest.approx(true_k)
     assert "pennes_jax_pinn_summary.json" in result.summary_path
     assert "pennes_jax_pinn_history.csv" in result.coefficients_path
+    assert result.plot_path is not None
+    assert "pennes_jax_pinn_training.png" in result.plot_path
+    assert tmp_path.joinpath("pennes_jax_pinn_summary.json").is_file()
+    assert tmp_path.joinpath("pennes_jax_pinn_history.csv").is_file()
+    assert tmp_path.joinpath("pennes_jax_pinn_training.png").is_file()

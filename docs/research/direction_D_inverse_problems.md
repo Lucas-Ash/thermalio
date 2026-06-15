@@ -40,7 +40,8 @@ reference?*
   can plug into.
 - **Implemented JAX PINN adapter increment:** optional `heat_solver.pinn_jax`
   backend for source-free Pennes inverse PINNs, with lazy JAX imports, trainable
-  scalar perfusion, PDE/data/initial/boundary losses, and JSON/CSV report output.
+  scalar perfusion, PDE/data/initial/boundary losses, and JSON/CSV/PNG report
+  output.
 - **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
   full Bayesian inversion; PINN implementation and head-to-head benchmark;
   high-dimensional cellwise field recovery.
@@ -95,6 +96,10 @@ reference?*
   `pennes_ml_baseline_summary.json`,
   `pennes_ml_baseline_metrics.csv`, and
   `pennes_ml_baseline_comparison.png`.
+- `test_plots/direction_D_inverse_problems/jax_pinn_baseline/`
+  contains the optional JAX PINN baseline output when run in a JAX-enabled
+  environment: `pennes_jax_pinn_summary.json`,
+  `pennes_jax_pinn_history.csv`, and `pennes_jax_pinn_training.png`.
 
 ## Further development priorities
 - **Broader PDE adjoint support:** the current discrete adjoint covers scalar

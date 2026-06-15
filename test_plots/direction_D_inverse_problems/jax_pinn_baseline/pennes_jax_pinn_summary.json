@@ -1,0 +1,12 @@
+{
+  "absolute_error": 0.22734494209289546,
+  "backend": "jax",
+  "boundary_loss": 0.0010518524795770645,
+  "case": "Pennes JAX PINN inverse baseline",
+  "data_loss": 0.00032195966923609376,
+  "final_loss": 0.0752706229686737,
+  "initial_loss": 0.0015758243389427662,
+  "pde_loss": 0.13487917184829712,
+  "perfusion": 2.0273449420928955,
+  "true_perfusion": 1.8
+}

@@ -14,6 +14,8 @@ import json
 
 import numpy as np
 
+from .inverse import InverseStudyResult
+
 
 def _require_jax():
     try:
@@ -272,6 +274,7 @@ def run_pennes_jax_pinn_baseline(
     boundary_points=None,
     boundary_values=None,
     config=None,
+    make_plot=True,
 ):
     """Run the optional JAX PINN baseline and write JSON/CSV reports."""
     output_dir = Path(output_dir)
@@ -301,6 +304,7 @@ def run_pennes_jax_pinn_baseline(
     }
     summary_path = output_dir / "pennes_jax_pinn_summary.json"
     history_path = output_dir / "pennes_jax_pinn_history.csv"
+    plot_path = output_dir / "pennes_jax_pinn_training.png" if make_plot else None
     with summary_path.open("w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2, sort_keys=True)
     with history_path.open("w", newline="", encoding="utf-8") as fh:
@@ -308,9 +312,40 @@ def run_pennes_jax_pinn_baseline(
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(result.history)
+    if make_plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        iterations = [row["iteration"] for row in result.history]
+        losses = [row["loss"] for row in result.history]
+        data_losses = [row["data_loss"] for row in result.history]
+        pde_losses = [row["pde_loss"] for row in result.history]
+        perfusion = [row["perfusion"] for row in result.history]
+
+        fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8), constrained_layout=True)
+        axes[0].semilogy(iterations, losses, "o-", label="total")
+        axes[0].semilogy(iterations, data_losses, "s-", label="data")
+        axes[0].semilogy(iterations, pde_losses, "^-", label="PDE")
+        axes[0].set_xlabel("iteration")
+        axes[0].set_ylabel("loss")
+        axes[0].set_title("Training loss")
+        axes[0].legend(fontsize=8)
+
+        axes[1].plot(iterations, perfusion, "o-", color="tab:blue", label="JAX PINN")
+        if true_perfusion is not None:
+            axes[1].axhline(float(true_perfusion), color="tab:red", ls="--", label="truth")
+        axes[1].set_xlabel("iteration")
+        axes[1].set_ylabel("perfusion k")
+        axes[1].set_title("Recovered perfusion")
+        axes[1].legend(fontsize=8)
+        fig.suptitle("Direction D: JAX PINN inverse baseline")
+        fig.savefig(plot_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
     return InverseStudyResult(
         summary_path=str(summary_path),
         coefficients_path=str(history_path),
-        plot_path=None,
+        plot_path=None if plot_path is None else str(plot_path),
         summary=summary,
     )
