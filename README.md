@@ -55,6 +55,8 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 
 **Anisotropic diffusion** — $\boldsymbol{\alpha}$ a full $2\times2$ tensor (elliptic kernels, rotated principal directions).
 
+**Functionally graded materials** — **Spatially graded conductivity** $\alpha(x)=\alpha_0 e^{\gamma x}$ (e.g. thermal-barrier coatings), with a manufactured solution that closes the full $\nabla\cdot(\alpha\nabla u)=\alpha\nabla^2 u + \nabla\alpha\cdot\nabla u$ flux (case `functionally_graded`, second-order convergent).
+
 **Nonlinear material response** — **Temperature-dependent diffusivity** $\alpha = \alpha(x,u)$ with iterative solves; solutions and sources are manufactured for strict consistency.
 
 <p align="center">
@@ -75,6 +77,19 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
   <img src="test_plots/radiative_manufactured/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Radiative BC on non-orthogonal tiled mesh" width="48%" />
 </p>
 
+**Extended transport models** — beyond the classical parabolic Fourier law, `heat_solver/transport.py` adds three research-oriented transport models (manufactured-solution verified, reusing the polygonal FV diffusion operator). All three support **Dirichlet**, **Neumann**, **Robin**, and **prescribed-flux** boundary data — `bc_type='flux'` prescribes the inward boundary heat flux $q_{\mathrm{in}}=\alpha\,\partial u/\partial n$ directly (the natural form for pulsed-laser/contact heating of the Cattaneo model), and is discretely energy-conservative:
+
+- **Non-Fourier / Cattaneo–Vernotte thermal waves** — $\tau\,\partial_{tt} u + \partial_t u - \nabla\cdot(\alpha\nabla u) = Q$, giving heat a finite propagation speed $c=\sqrt{\alpha/\tau}$ ("second sound"), integrated with an unconditionally stable second-order three-level scheme (`HyperbolicHeatSolver`).
+- **Advection–diffusion (convective transport)** — $\partial_t u + \nabla\cdot(\mathbf{v}\,u) - \nabla\cdot(\alpha\nabla u) = Q$, with a prescribed velocity field and a choice of first-order monotone **upwind** or second-order **central** face flux (Péclet-number aware) (`AdvectionDiffusionHeatSolver`).
+- **Anomalous / time-fractional subdiffusion** — Caputo derivative $D_t^\beta u - \nabla\cdot(\alpha\nabla u) = Q$ for $0<\beta<1$ via the L1 scheme (order $2-\beta$ in time), modeling long-memory thermal response in disordered media (`FractionalHeatSolver`).
+- **Reaction–diffusion / Pennes bioheat** — $\partial_t u - \nabla\cdot(\alpha\nabla u) + k\,u = Q$, where the linear reaction term $k\,u$ models tissue perfusion cooling (Pennes bioheat), volumetric Newton cooling, or first-order chemical heat consumption; the source-free mode decays at the faster rate $2\pi^2\alpha + k$ (`ReactionDiffusionHeatSolver`).
+
+Runnable examples and convergence tables: `python transport_demo.py` (writes `test_plots/transport_models.png`), including a **flux-pulse Cattaneo wave** demo that contrasts the finite wavefront $x=ct$ against the instantaneous parabolic Fourier response; unit checks in `tests/test_transport.py`.
+
+<p align="center">
+  <img src="test_plots/transport_models.png" alt="Extended thermal-transport models" width="90%" />
+</p>
+
 ---
 
 ## Repository layout & workflows
@@ -82,6 +97,7 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 | Path | Role |
 |------|------|
 | `heat_solver/polygonal.py` | Main **polygonal** cell-centered solver (broadest BC and physics support). |
+| `heat_solver/transport.py` | **Extended transport models**: hyperbolic (Cattaneo), advection–diffusion, time-fractional subdiffusion, and reaction–diffusion / Pennes bioheat solvers. |
 | `heat_solver/triangular.py` | **Delaunay / triangular** vertex-centered solver. |
 | `heat_solver/curvilinear.py` | **Curvilinear** mapped-grid solver. |
 | `heat_solver/cases.py` | Manufactured solutions, sources, BC callbacks, case metadata. |
@@ -89,6 +105,13 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 | `heat_solver/meshes.py` | Mesh generators (hex, square, mixed, skewed, tiled, Delaunay). |
 | `tests.py` | Full verification sweep: plots and `convergence_summary` under `test_plots/`. |
 | `qa_regression.py` | Compare fresh numerical outputs to stored baselines. |
+| `heat_solver/verification.py` | Observed order of accuracy, Richardson extrapolation, and GCI (feeds the convergence summaries). |
+| `heat_solver/mms.py` | SymPy method-of-manufactured-solutions source auto-derivation (optional `sympy` dependency). |
+| `heat_solver/nversion.py` | Cross-scheme + cross-mesh "N-version" agreement harness (TPFA vs reconstructed vs MPFA; interpolated cross-mesh comparison). |
+| `heat_solver/reference_fd.py` | Independent 5-point finite-difference reference solver for cross-code validation. |
+| `heat_solver/dmp.py` | Discrete-maximum-principle diagnostics + a conservative monotone (M-matrix projection) diffusion scheme. |
+| `benchmark_suite.py` | Consolidated V&V benchmark runner (observed order + N-version + cross-code) → `test_plots/benchmark/`. |
+| `docs/research/` | Research backlog: planned directions (A–D) for novel work. |
 
 **Run the main verification sweep** (writes figures and CSV/TXT summaries under `test_plots/`):
 
@@ -98,6 +121,16 @@ MPLCONFIGDIR=/tmp/matplotlib python tests.py
 ```
 
 **Boundary-condition spot checks** (polygonal Neumann / Robin): `test_polygonal_boundary_conditions.py`.
+
+**Verification & Validation tooling** — the convergence summaries report the **observed order of accuracy**, **Richardson-extrapolated error**, and an **asymptotic-range flag** (via `heat_solver/verification.py`). Manufactured-solution sources can be **auto-derived symbolically** with `heat_solver/mms.py` (reproducing the hand-coded cases to machine precision, including sums of real powers of `t` for fractional cases; needs the optional `sympy` dependency, `pip install -r requirements-dev.txt`). Cross-scheme and cross-mesh agreement (TPFA vs reconstructed-gradient vs MPFA) is checked by `python -m heat_solver.nversion --case source_driven_sine`, and the FV solvers are validated against an **independent finite-difference reference** (`heat_solver/reference_fd.py`). The consolidated **benchmark runner** ties these together:
+
+```bash
+MPLCONFIGDIR=/tmp/matplotlib python benchmark_suite.py   # writes test_plots/benchmark/
+```
+
+**Monotonicity / discrete maximum principle** — `heat_solver/dmp.py` quantifies where the flux schemes violate the discrete maximum principle (overshoot/undershoot of bounded data; positive off-diagonals of the diffusion matrix) and provides a conservative **monotone** option (`PolygonalHeatSolver(..., monotone=True)`, a symmetric M-matrix projection) that restores bound preservation. `python dmp_study.py` sweeps anisotropy × mesh skew and reports the accuracy↔monotonicity trade-off.
+
+Planned research directions are tracked in `docs/research/`.
 
 Dependencies are the usual scientific Python stack (**NumPy**, **SciPy**, **Matplotlib**). Use a virtual environment and install those packages if they are not already present.
 

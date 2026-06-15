@@ -18,6 +18,13 @@ from .drivers import (
     visualize,
     visualize_polygonal,
 )
+from .dmp import (
+    anisotropic_tensor,
+    bound_excursion,
+    m_matrix_metrics,
+    make_monotone,
+    run_dmp_study,
+)
 from .geometry import polygon_area_and_centroid
 from .meshes import (
     generate_hexagonal_polygonal_mesh,
@@ -30,13 +37,28 @@ from .meshes import (
 from .plotting import create_delaunay_figure, create_polygonal_figure, create_curvilinear_figure, visualize_polygonal_mesh
 from .phase_change import ApparentHeatCapacityModel
 from .polygonal import PolygonalHeatSolver
+from .transport import (
+    AdvectionDiffusionHeatSolver,
+    FractionalHeatSolver,
+    HyperbolicHeatSolver,
+    ReactionDiffusionHeatSolver,
+)
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
+    "AdvectionDiffusionHeatSolver",
+    "FractionalHeatSolver",
+    "HyperbolicHeatSolver",
+    "ReactionDiffusionHeatSolver",
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
     "ApparentHeatCapacityModel",
+    "anisotropic_tensor",
+    "bound_excursion",
     "build_error_report",
+    "m_matrix_metrics",
+    "make_monotone",
+    "run_dmp_study",
     "create_delaunay_figure",
     "create_polygonal_figure",
     "create_curvilinear_figure",

@@ -3,6 +3,8 @@ from math import log
 from pathlib import Path
 import numpy as np
 
+from heat_solver.verification import triplet_report
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -479,7 +481,41 @@ def iter_test_jobs():
             }
 
 
+def _augment_with_gci(rows):
+    """Add Richardson/GCI verification columns to each row, in place.
+
+    For every mesh, slide a 3-level window (coarse->fine) over the L2_rel error
+    sequence and attach the ``triplet_report`` results to the finest row of each
+    window: observed order of accuracy, three-grid order, Richardson-extrapolated
+    error (~0 confirms power-law decay), fine-grid GCI, and an asymptotic-range
+    flag.  Rows without a full preceding triplet get blanks.  This is pure
+    post-processing of numbers already in ``rows`` and writes only new CSV
+    columns -- it never touches the regression-snapshotted ``results`` dict.
+    """
+    gci_keys = ("L2_p_obs", "L2_p_obs_3grid", "L2_extrap_err", "asymptotic")
+    for row in rows:
+        for key in gci_keys:
+            row.setdefault(key, "")
+
+    for mesh_name in {row["mesh"] for row in rows}:
+        mesh_rows = [row for row in rows if row["mesh"] == mesh_name]
+        mesh_rows.sort(key=lambda r: float(r["h"]), reverse=True)  # coarse -> fine
+        for i in range(2, len(mesh_rows)):
+            window = mesh_rows[i - 2 : i + 1]
+            hs = [float(r["h"]) for r in window]
+            errors = [float(r["L2_rel"]) for r in window]
+            if any(e <= 0.0 for e in errors) or len(set(hs)) < 3:
+                continue
+            rep = triplet_report(hs, errors)
+            finest = window[-1]
+            finest["L2_p_obs"] = "" if rep["p_obs"] is None else f"{rep['p_obs']:.6f}"
+            finest["L2_p_obs_3grid"] = "" if rep["p_obs_3grid"] is None else f"{rep['p_obs_3grid']:.6f}"
+            finest["L2_extrap_err"] = "" if rep["extrap_error"] is None else f"{rep['extrap_error']:.6e}"
+            finest["asymptotic"] = str(rep["asymptotic"])
+
+
 def _write_case_summary(case_dir, rows):
+    _augment_with_gci(rows)
     csv_path = case_dir / "convergence_summary.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
@@ -494,6 +530,10 @@ def _write_case_summary(case_dir, rows):
                 "Linf_rel",
                 "L2_rate",
                 "Linf_rate",
+                "L2_p_obs",
+                "L2_p_obs_3grid",
+                "L2_extrap_err",
+                "asymptotic",
             ],
         )
         writer.writeheader()
@@ -514,10 +554,17 @@ def _write_case_summary(case_dir, rows):
             handle.write(f"  L2 monotone decrease: {l2_monotone}\n")
             handle.write(f"  Linf monotone decrease: {linf_monotone}\n")
             for row in mesh_rows:
+                gci_note = ""
+                if row.get("L2_p_obs"):
+                    gci_note = (
+                        f", p_obs={row['L2_p_obs']}, p_3grid={row.get('L2_p_obs_3grid', '')}, "
+                        f"extrap_err={row.get('L2_extrap_err', '')}, "
+                        f"asymptotic={row.get('asymptotic', '')}"
+                    )
                 handle.write(
                     f"  {row['resolution']}: h={row['h']:.6e}, "
                     f"L2_rel={row['L2_rel']:.6e}, Linf_rel={row['Linf_rel']:.6e}, "
-                    f"L2_rate={row['L2_rate']}, Linf_rate={row['Linf_rate']}\n"
+                    f"L2_rate={row['L2_rate']}, Linf_rate={row['Linf_rate']}{gci_note}\n"
                 )
             handle.write("\n")
 

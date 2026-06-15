@@ -1,0 +1,7 @@
+# Optional / test-time dependencies for Thermalio's V&V tooling.
+# The core solvers (heat_solver, excluding heat_solver.mms) need only
+# numpy / scipy / matplotlib. SymPy powers the manufactured-solution
+# auto-derivation in heat_solver/mms.py and is imported lazily, so it is
+# required only to build/verify MMS sources, not to run the solvers.
+pytest
+sympy

@@ -155,6 +155,7 @@ class PolygonalHeatSolver:
         temperature_dependent_diffusivity=None,
         nonlinear_options=None,
         reuse_linear_lhs=True,
+        monotone=False,
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -166,6 +167,7 @@ class PolygonalHeatSolver:
         if self.bc_type not in {"dirichlet", "neumann", "robin", "radiative"}:
             raise ValueError("bc_type must be one of: dirichlet, neumann, robin, radiative")
         self.nonorthogonal_correction = bool(nonorthogonal_correction)
+        self.monotone = bool(monotone)
         self.linear_solver = str(linear_solver).lower().strip()
         if self.linear_solver not in {"direct", "bicgstab", "cg"}:
             raise ValueError(
@@ -589,9 +591,18 @@ class PolygonalHeatSolver:
 
         self.A = diffusion.tocsr()
 
+    def _apply_monotone(self, A):
+        """Optionally project the diffusion matrix onto an M-matrix (DMP-preserving)."""
+        if not self.monotone:
+            return A
+        from .dmp import make_monotone
+
+        return make_monotone(A)
+
     def _assemble_system(self, temperature=None):
         if temperature is not None and self._vec_assembly is not None:
             self._assemble_diffusion_vectorized(temperature)
+            self.A = self._apply_monotone(self.A)
             return
         mass = diags(self.cell_areas, format="csr")
         # MPFA condensed FEM is only used with Dirichlet: Neumann/Robin need a flux closure
@@ -601,18 +612,19 @@ class PolygonalHeatSolver:
             from .mpfa import assemble_mpfa_diffusion
 
             self.M_diag = mass
-            self.A = assemble_mpfa_diffusion(
+            self.A = self._apply_monotone(assemble_mpfa_diffusion(
                 self.vertices,
                 self.polygons,
                 self.cell_centers,
                 self.alpha,
                 self.edge_to_cells,
-            )
+            ))
             return
 
         if self.flux_discretization == "reconstructed":
             self.M_diag = mass
             self._assemble_diffusion_reconstructed(temperature=temperature)
+            self.A = self._apply_monotone(self.A)
             return
 
         diffusion = lil_matrix((self.M, self.M))
@@ -667,7 +679,7 @@ class PolygonalHeatSolver:
                     diffusion[i, idx] -= correction_scale * coeff
                     diffusion[j, idx] += correction_scale * coeff
         self.M_diag = mass
-        self.A = diffusion.tocsr()
+        self.A = self._apply_monotone(diffusion.tocsr())
 
     def _precompute_vectorized_assembly(self):
         """Pre-compute edge topology and COO structure for vectorized diffusion assembly.

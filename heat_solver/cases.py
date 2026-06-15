@@ -224,6 +224,289 @@ def radiative_manufactured_bc(x, y, t, nx, ny, alpha):
     return {"epsilon": epsilon, "sigma": sigma, "t_inf": t_inf}
 
 
+def cattaneo_wave_case(alpha=0.1, tau=0.2):
+    """Manufactured solution for the hyperbolic (Cattaneo--Vernotte) model.
+
+    ``tau u_tt + u_t - alpha laplacian(u) = Q`` on the unit square with
+    ``u(x, y, t) = exp(-t) sin(pi x) sin(pi y)`` (homogeneous Dirichlet data).
+
+    For this ``u``: ``u_t = -u``, ``u_tt = u``, ``laplacian(u) = -2 pi^2 u``, so
+    ``Q = (tau - 1 + 2 pi^2 alpha) u`` and the initial rate is ``du/dt|_0 = -u_0``.
+    """
+    alpha = float(alpha)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def solution(x, y, t):
+        return np.exp(-t) * phi(x, y)
+
+    def source(x, y, t):
+        return (tau - 1.0 + 2.0 * np.pi**2 * alpha) * solution(x, y, t)
+
+    def initial_rate(x, y):
+        return -phi(x, y)
+
+    return {
+        "name": "Cattaneo Thermal Wave",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "initial_rate": initial_rate,
+        "relaxation_time": float(tau),
+        "alpha": alpha,
+    }
+
+
+def advection_diffusion_case(alpha=0.05, velocity=(0.8, 0.4)):
+    """Manufactured solution for ``u_t + v . grad(u) - alpha laplacian(u) = Q``.
+
+    Uses ``u(x, y, t) = exp(-t) sin(pi x) sin(pi y)`` (homogeneous Dirichlet
+    data) with a constant velocity ``v = (vx, vy)``.
+    """
+    alpha = float(alpha)
+    vx, vy = float(velocity[0]), float(velocity[1])
+
+    def solution(x, y, t):
+        return np.exp(-t) * np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def source(x, y, t):
+        decay = np.exp(-t)
+        s = np.sin(np.pi * x) * np.sin(np.pi * y)
+        u = decay * s
+        u_t = -u
+        grad_x = decay * np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+        grad_y = decay * np.pi * np.sin(np.pi * x) * np.cos(np.pi * y)
+        laplacian = -2.0 * np.pi**2 * u
+        return u_t + vx * grad_x + vy * grad_y - alpha * laplacian
+
+    return {
+        "name": "Advection-Diffusion",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "velocity": (vx, vy),
+        "alpha": alpha,
+    }
+
+
+def fractional_subdiffusion_case(alpha=0.1, beta=0.6):
+    """Manufactured solution for Caputo subdiffusion ``D_t^beta u - alpha lap(u) = Q``.
+
+    Uses ``u(x, y, t) = t^2 sin(pi x) sin(pi y)`` (homogeneous Dirichlet data,
+    ``u(.,.,0) = 0``).  The Caputo derivative of ``t^2`` is
+    ``Gamma(3)/Gamma(3-beta) t^{2-beta} = 2/Gamma(3-beta) t^{2-beta}``.
+    """
+    from scipy.special import gamma as _gamma
+
+    alpha = float(alpha)
+    beta = float(beta)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def solution(x, y, t):
+        return (t**2) * phi(x, y)
+
+    def source(x, y, t):
+        caputo = (2.0 / _gamma(3.0 - beta)) * (t ** (2.0 - beta)) * phi(x, y)
+        laplacian = -2.0 * np.pi**2 * (t**2) * phi(x, y)
+        return caputo - alpha * laplacian
+
+    return {
+        "name": "Fractional Subdiffusion",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "beta": beta,
+        "alpha": alpha,
+    }
+
+
+def functionally_graded_alpha(x, y, alpha0=0.1, grade=0.8):
+    """Exponentially graded thermal diffusivity ``alpha(x) = alpha0 * exp(grade * x)``.
+
+    Models a functionally graded material (e.g. a thermal-barrier coating) whose
+    conductivity varies smoothly with position.
+    """
+    del y
+    return alpha0 * np.exp(grade * np.asarray(x, dtype=float))
+
+
+def functionally_graded_solution(x, y, t):
+    return np.exp(-t) * np.sin(np.pi * x) * np.sin(np.pi * y)
+
+
+def functionally_graded_source(x, y, t, alpha0=0.1, grade=0.8):
+    """Source closing ``u_t - div(alpha(x) grad u) = Q`` for the graded case.
+
+    With ``div(alpha grad u) = alpha * laplacian(u) + (d alpha/dx) * du/dx`` and
+    ``d alpha/dx = grade * alpha``.
+    """
+    u = functionally_graded_solution(x, y, t)
+    alpha = functionally_graded_alpha(x, y, alpha0, grade)
+    du_dx = np.exp(-t) * np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+    laplacian = -2.0 * np.pi**2 * u
+    div_flux = alpha * laplacian + grade * alpha * du_dx
+    return -u - div_flux
+
+
+def pennes_bioheat_case(alpha=0.1, perfusion=8.0, ambient=0.0, forced=False):
+    """Manufactured solution for the Pennes bioheat / reaction-diffusion equation.
+
+    ``u_t - alpha laplacian(u) + k (u - u_a) = q_met`` on the unit square, written
+    in the solver's form ``u_t - div(alpha grad u) + k u = Q`` with
+    ``Q = k u_a + q_met``.  Here ``k`` is the perfusion (reaction) rate and
+    ``u_a`` the arterial/ambient temperature.
+
+    ``forced=False`` (default) returns the *source-free* decaying eigenmode
+    ``u = exp(-(2 pi^2 alpha + k) t) sin(pi x) sin(pi y)`` with ``u_a = 0`` and
+    ``Q = 0``: perfusion makes the mode decay faster than pure diffusion, which
+    is the physical signature of the reaction term.  ``forced=True`` returns a
+    manufactured solution ``u = u_a + exp(-t) sin(pi x) sin(pi y)`` whose
+    boundary trace is the (nonzero) ambient temperature ``u_a``, with closing
+    source ``Q = (-1 + 2 pi^2 alpha + k) exp(-t) sin(pi x) sin(pi y) + k u_a``,
+    exercising the ambient/metabolic source path and nonzero Dirichlet data.
+    """
+    alpha = float(alpha)
+    perfusion = float(perfusion)
+    ambient = float(ambient)
+
+    def phi(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    if not forced:
+        decay = 2.0 * np.pi**2 * alpha + perfusion
+
+        def solution(x, y, t):
+            return np.exp(-decay * t) * phi(x, y)
+
+        source = lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float))
+    else:
+        def solution(x, y, t):
+            return ambient + np.exp(-t) * phi(x, y)
+
+        def source(x, y, t):
+            w = np.exp(-t) * phi(x, y)
+            return (-1.0 + 2.0 * np.pi**2 * alpha + perfusion) * w + perfusion * ambient
+
+    return {
+        "name": "Pennes Bioheat",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "alpha": alpha,
+        "perfusion": perfusion,
+        "ambient": ambient,
+    }
+
+
+def transport_linear_boundary_case(
+    model="cattaneo",
+    bc_type="neumann",
+    alpha=0.1,
+    tau=0.2,
+    velocity=(0.4, 0.3),
+    beta=0.6,
+    robin_beta=2.0,
+):
+    """Manufactured linear-profile cases for non-Dirichlet transport boundaries.
+
+    Spatial profile ``phi = 1 + 0.75 x - 0.5 y`` (``laplacian(phi) = 0``, so the
+    TPFA fluxes are spatially exact for constant scalar ``alpha`` and the error
+    is dominated by the time discretization), combined with a model-specific
+    time factor:
+
+    - ``model='cattaneo'``:   ``u = exp(-t) phi``, ``Q = (tau - 1) u``
+    - ``model='advection'``:  ``u = exp(-t) phi``,
+      ``Q = -u + exp(-t) (0.75 vx - 0.5 vy)``
+    - ``model='fractional'``: ``u = t^2 phi``,
+      ``Q = 2 t^{2-beta} / Gamma(3-beta) * phi``
+
+    ``bc_type`` selects the boundary data fed to the transport solvers:
+
+    - ``'neumann'``: ``du/dn = g(t) (0.75 nx - 0.5 ny)``
+    - ``'flux'``:    inward heat flux ``alpha * du/dn``
+    - ``'robin'``:   ``alpha du/dn + robin_beta u = value``
+    """
+    from scipy.special import gamma as _gamma
+
+    alpha = float(alpha)
+
+    def profile(x, y):
+        return 1.0 + 0.75 * x - 0.5 * y
+
+    def dprofile_dn(nx, ny):
+        return 0.75 * nx - 0.5 * ny
+
+    extras = {}
+    if model == "cattaneo":
+        tau = float(tau)
+
+        def time_factor(t):
+            return np.exp(-t)
+
+        def source(x, y, t):
+            return (tau - 1.0) * np.exp(-t) * profile(x, y)
+
+        extras["relaxation_time"] = tau
+        extras["initial_rate"] = lambda x, y: -profile(x, y)
+    elif model == "advection":
+        vx, vy = float(velocity[0]), float(velocity[1])
+
+        def time_factor(t):
+            return np.exp(-t)
+
+        def source(x, y, t):
+            return np.exp(-t) * (-profile(x, y) + (0.75 * vx - 0.5 * vy))
+
+        extras["velocity"] = (vx, vy)
+    elif model == "fractional":
+        beta = float(beta)
+
+        def time_factor(t):
+            return t**2
+
+        def source(x, y, t):
+            return (2.0 / _gamma(3.0 - beta)) * (t ** (2.0 - beta)) * profile(x, y)
+
+        extras["beta"] = beta
+    else:
+        raise ValueError("model must be 'cattaneo', 'advection', or 'fractional'.")
+
+    def solution(x, y, t):
+        return time_factor(t) * profile(x, y)
+
+    bc_type = str(bc_type).lower().strip()
+    if bc_type == "neumann":
+        def boundary(x, y, t, nx, ny):
+            return time_factor(t) * dprofile_dn(nx, ny)
+    elif bc_type == "flux":
+        def boundary(x, y, t, nx, ny):
+            return alpha * time_factor(t) * dprofile_dn(nx, ny)
+    elif bc_type == "robin":
+        def boundary(x, y, t, nx, ny):
+            value = alpha * time_factor(t) * dprofile_dn(nx, ny) + robin_beta * solution(x, y, t)
+            return robin_beta * np.ones_like(np.asarray(x, dtype=float)), value
+    else:
+        raise ValueError("bc_type must be 'neumann', 'flux', or 'robin'.")
+
+    return {
+        "name": f"Transport Linear Boundary ({model}, {bc_type})",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": boundary,
+        "bc_type": bc_type,
+        "alpha": alpha,
+        **extras,
+    }
+
+
 def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
     if case == "heat_kernel":
         L = 4.0 * np.sqrt(4.0 * alpha * t_end)
@@ -347,6 +630,19 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "nonlinear_options": {"max_iters": 35, "tol": 1e-10, "relaxation": 0.9, "anderson_depth": 5},
             "polygonal_only": True,
         }
+    elif case == "functionally_graded":
+        grade = 0.8
+        if np.isscalar(alpha) or np.asarray(alpha).ndim == 0:
+            alpha0 = float(alpha)
+        else:
+            alpha0 = 0.1
+        return {
+            "name": "Functionally Graded Diffusivity",
+            "bbox": (0.0, 1.0, 0.0, 1.0),
+            "solution": functionally_graded_solution,
+            "source": lambda x, y, t: functionally_graded_source(x, y, t, alpha0, grade),
+            "alpha": lambda x, y: functionally_graded_alpha(x, y, alpha0, grade),
+        }
     elif case == "radiative_manufactured":
         return {
             "name": "Radiative Manufactured",
@@ -363,7 +659,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
         "source_driven_sine, steady_linear_neumann, steady_linear_robin, "
         "linear_patch, hot_block, off_axis_wave, nyquist_oscillations, point_source, "
         "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity, "
-        "temperature_dependent_diffusivity, radiative_manufactured"
+        "temperature_dependent_diffusivity, radiative_manufactured, functionally_graded"
     )
 
 
