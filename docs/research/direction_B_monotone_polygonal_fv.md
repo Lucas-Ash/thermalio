@@ -1,6 +1,6 @@
 # Direction B: Monotone / bound-preserving polygonal & MPFA FV for non-classical models
 
-- **Status:** in-progress (PR1 diagnostic + linear monotone projection landed; PR2 NTPFA next)
+- **Status:** in-progress (PR1 diagnostic + linear monotone projection landed; PR2 nonlinear AFC landed)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -23,11 +23,23 @@ without destroying accuracy?*
   a symmetric M-matrix projection), the `monotone=True` option on
   `PolygonalHeatSolver`, an anisotropy×skew sweep harness (`run_dmp_study`), and
   the `dmp_study.py` script. Findings below.
-- **Next (PR2):** a **nonlinear** monotone scheme (NTPFA, Le Potier /
-  Lipnikov–Svyatskiy–Vassilevski) that is *both* consistent and DMP-preserving on
-  K-non-orthogonal meshes — needed because the linear projection (PR1) restores
-  the DMP but reverts to the inconsistent two-point behavior on skewed anisotropic
-  meshes (see findings).
+- **Delivered (PR2):** a **nonlinear** bound-preserving high-resolution scheme via
+  **algebraic flux correction / FCT** (`heat_solver/afc.py`, `AFCMonotoneSolver`).
+  It limits the anti-diffusive flux between the high-order operator ``A_H`` and
+  the low-order M-matrix operator ``A_L = make_monotone(A_H)`` with a node-based
+  Zalesak limiter (Picard-iterated on the RHS, so the implicit operator stays the
+  monotone M-matrix). Chosen over geometric NTPFA because it reuses the verified
+  `make_monotone` and is purely algebraic (lower bug surface). Findings:
+    - **bound-preserving**: zero over/undershoot on the steep anisotropic front
+      where the high-order scheme overshoots ~0.04–0.06;
+    - **accuracy**: ~2–3x lower error than the linear M-matrix projection on a
+      smooth anisotropic solution, approaching the high-order scheme;
+    - **limitation**: the basic Zalesak limiter clips smooth extrema, so it does
+      not fully recover 2nd order on smooth solutions — an extremum-aware
+      (linearity-preserving) limiter is the next refinement.
+- **Next (PR3):** an extremum-aware / linearity-preserving limiter (or geometric
+  NTPFA) to recover full high-order accuracy on smooth solutions while keeping the
+  DMP.
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).
@@ -68,7 +80,10 @@ Dirichlet data):
 
 ## PR breakdown
 - PR1 (done): DMP/overshoot diagnostic + linear monotone projection + sweep.
-- PR2: nonlinear monotone FV (NTPFA) for consistency + DMP.
+- PR2 (done): nonlinear bound-preserving high-resolution scheme via algebraic
+  flux correction (`AFCMonotoneSolver`) + demonstrative graphs
+  (`dmp_afc_demo.py` -> `test_plots/dmp/monotonicity_showcase.png`).
+- PR3: extremum-aware limiter / NTPFA for full smooth-solution accuracy + DMP.
 
 ## References
 - Le Potier; Lipnikov, Svyatskiy, Vassilevski (monotone/nonlinear FV).

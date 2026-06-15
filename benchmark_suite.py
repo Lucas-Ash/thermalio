@@ -114,7 +114,7 @@ def run_benchmark(quick=False):
         "name": "source_driven_sine (scalar diffusion)",
         "observed_order": rep["p_obs"], "order_3grid": rep["p_obs_3grid"],
         "extrap_error": rep["extrap_error"], "asymptotic": rep["asymptotic"],
-        "L2_rel": errs, "nversion_within_mesh": nv["within_mesh_max_spread"],
+        "h": hs, "L2_rel": errs, "nversion_within_mesh": nv["within_mesh_max_spread"],
         "nversion_cross_mesh": nv["cross_mesh_max_spread"],
         "fd_reference_error": fd_err, "fv_be_error": fv_be_err,
         "checks": {
@@ -136,7 +136,7 @@ def run_benchmark(quick=False):
         "name": "sine_mode (pure diffusion)",
         "observed_order": rep["p_obs"], "order_3grid": rep["p_obs_3grid"],
         "extrap_error": rep["extrap_error"], "asymptotic": rep["asymptotic"],
-        "L2_rel": errs, "nversion_within_mesh": nv["within_mesh_max_spread"],
+        "h": hs, "L2_rel": errs, "nversion_within_mesh": nv["within_mesh_max_spread"],
         "nversion_cross_mesh": nv["cross_mesh_max_spread"],
         "checks": {
             "order_near_2": rep["p_obs"] is not None and rep["p_obs"] > 1.6,
@@ -157,7 +157,7 @@ def run_benchmark(quick=False):
         "name": "anisotropic diffusion (MMS tensor alpha)",
         "observed_order": rep["p_obs"], "order_3grid": rep["p_obs_3grid"],
         "extrap_error": rep["extrap_error"], "asymptotic": rep["asymptotic"],
-        "L2_rel": errs,
+        "h": hs, "L2_rel": errs,
         "checks": {"order_near_2": rep["p_obs"] is not None and rep["p_obs"] > 1.6},
     })
 
@@ -186,6 +186,35 @@ def _write_report(report):
     return csv_path
 
 
+def _write_plot(report):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7, 5.5))
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+    for entry, color in zip(report["entries"], colors):
+        h = np.asarray(entry["h"], dtype=float)
+        e = np.asarray(entry["L2_rel"], dtype=float)
+        p = entry["observed_order"]
+        plabel = "" if p is None else f"  (p={p:.2f})"
+        ax.loglog(h, e, "o-", color=color, label=entry["name"] + plabel)
+    # Slope-2 reference anchored to the first entry's finest point.
+    h0 = np.asarray(report["entries"][0]["h"], dtype=float)
+    e0 = np.asarray(report["entries"][0]["L2_rel"], dtype=float)
+    href = np.array([h0.min(), h0.max()])
+    ax.loglog(href, e0[-1] * (href / h0.min()) ** 2, "k--", alpha=0.6, label="slope 2 (reference)")
+    ax.set_xlabel("mesh size h")
+    ax.set_ylabel("relative L2 error")
+    ax.set_title("V&V benchmark: observed order of accuracy\n(manufactured solutions, square polygonal mesh)")
+    ax.legend(fontsize=8)
+    ax.grid(True, which="both", alpha=0.3)
+    out_path = OUTPUT_DIR / "benchmark_convergence.png"
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Thermalio V&V benchmark suite.")
     parser.add_argument("--quick", action="store_true", help="coarser resolutions for speed")
@@ -193,6 +222,7 @@ def main():
 
     report = run_benchmark(quick=args.quick)
     csv_path = _write_report(report)
+    plot_path = _write_plot(report)
 
     print("=== Thermalio V&V benchmark ===")
     print(f"resolutions: {report['resolutions']}")
@@ -203,7 +233,7 @@ def main():
         print(f"  {e['name']}")
         print(f"      observed order = {pstr}, finest L2_rel = {e['L2_rel'][-1]:.3e} | {checks}")
     print(f"OVERALL: {'PASS' if report['all_pass'] else 'FAIL'}")
-    print(f"wrote {OUTPUT_DIR / 'benchmark_report.json'} and {csv_path}")
+    print(f"wrote {OUTPUT_DIR / 'benchmark_report.json'}, {csv_path}, and {plot_path}")
     return 0 if report["all_pass"] else 1
 
 

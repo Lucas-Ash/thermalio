@@ -110,6 +110,7 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/nversion.py` | Cross-scheme + cross-mesh "N-version" agreement harness (TPFA vs reconstructed vs MPFA; interpolated cross-mesh comparison). |
 | `heat_solver/reference_fd.py` | Independent 5-point finite-difference reference solver for cross-code validation. |
 | `heat_solver/dmp.py` | Discrete-maximum-principle diagnostics + a conservative monotone (M-matrix projection) diffusion scheme. |
+| `heat_solver/afc.py` | Nonlinear bound-preserving high-resolution diffusion via algebraic flux correction (FCT). |
 | `benchmark_suite.py` | Consolidated V&V benchmark runner (observed order + N-version + cross-code) → `test_plots/benchmark/`. |
 | `docs/research/` | Research backlog: planned directions (A–D) for novel work. |
 
@@ -128,7 +129,11 @@ MPLCONFIGDIR=/tmp/matplotlib python tests.py
 MPLCONFIGDIR=/tmp/matplotlib python benchmark_suite.py   # writes test_plots/benchmark/
 ```
 
-**Monotonicity / discrete maximum principle** — `heat_solver/dmp.py` quantifies where the flux schemes violate the discrete maximum principle (overshoot/undershoot of bounded data; positive off-diagonals of the diffusion matrix) and provides a conservative **monotone** option (`PolygonalHeatSolver(..., monotone=True)`, a symmetric M-matrix projection) that restores bound preservation. `python dmp_study.py` sweeps anisotropy × mesh skew and reports the accuracy↔monotonicity trade-off.
+**Monotonicity / discrete maximum principle** — `heat_solver/dmp.py` quantifies where the flux schemes violate the discrete maximum principle (overshoot/undershoot of bounded data; positive off-diagonals of the diffusion matrix) and provides a conservative **monotone** option (`PolygonalHeatSolver(..., monotone=True)`, a symmetric M-matrix projection) that restores bound preservation. For high resolution *and* bound preservation, `heat_solver/afc.py` (`AFCMonotoneSolver`) adds a **nonlinear algebraic-flux-correction (FCT)** scheme. `python dmp_study.py` sweeps anisotropy × mesh skew, and `python dmp_afc_demo.py` writes a showcase figure (`test_plots/dmp/monotonicity_showcase.png`) comparing the high-order, linear-monotone, and AFC schemes.
+
+<p align="center">
+  <img src="test_plots/dmp/monotonicity_showcase.png" alt="Monotonicity / AFC showcase" width="90%" />
+</p>
 
 Planned research directions are tracked in `docs/research/`.
 

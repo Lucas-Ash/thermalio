@@ -1,4 +1,4 @@
 entry,observed_order,order_3grid,asymptotic,finest_L2_rel,checks_pass
-source_driven_sine (scalar diffusion),1.9959,1.9749,True,3.136e-05,True
-sine_mode (pure diffusion),1.9960,1.9749,True,3.167e-05,True
-anisotropic diffusion (MMS tensor alpha),1.9654,1.9054,True,1.618e-05,True
+source_driven_sine (scalar diffusion),1.9947,1.9722,True,5.571e-05,True
+sine_mode (pure diffusion),1.9948,1.9722,True,5.626e-05,True
+anisotropic diffusion (MMS tensor alpha),1.9600,1.8989,True,2.854e-05,True

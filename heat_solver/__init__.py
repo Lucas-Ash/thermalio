@@ -25,6 +25,7 @@ from .dmp import (
     make_monotone,
     run_dmp_study,
 )
+from .afc import AFCMonotoneSolver
 from .geometry import polygon_area_and_centroid
 from .meshes import (
     generate_hexagonal_polygonal_mesh,
@@ -46,6 +47,7 @@ from .transport import (
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
+    "AFCMonotoneSolver",
     "AdvectionDiffusionHeatSolver",
     "FractionalHeatSolver",
     "HyperbolicHeatSolver",
