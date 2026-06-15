@@ -1,6 +1,6 @@
 # Direction B: Monotone / bound-preserving polygonal & MPFA FV for non-classical models
 
-- **Status:** in-progress (PR1 diagnostic + linear monotone projection, PR2 nonlinear AFC, PR3 smoothness-relaxed limiter all landed)
+- **Status:** landed (PR1 diagnostic, PR2 nonlinear AFC, PR3 smoothness-relaxed limiter, PR4 global maximum-principle limiter)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -46,9 +46,21 @@ without destroying accuracy?*
   **essentially non-oscillatory** — it vanishes monotonically under refinement
   (faster than the slope-1.5 reference). ``smoothness_factor=0`` recovers PR2's
   strictly bound-preserving limiter.
-- **Next (PR4):** a curvature-based (or geometric NTPFA) limiter for *strict*
-  bound preservation together with full smooth-extremum accuracy at coarse
-  resolution.
+- **Delivered (PR4):** a **global maximum-principle (MPP) limiter**
+  (`AFCMonotoneSolver(..., limiter="global")`, Zhang--Shu style). It enforces the
+  physical bounds ``[m, M]`` (auto-detected from initial + boundary data, or
+  given) for every node instead of local neighbour bounds. Because a smooth
+  interior extremum lies inside ``[m, M]`` it is never clipped, so PR4 achieves
+  **both** goals at once: strict bound preservation even at coarse resolution
+  (zero excursion where PR3's relaxed limiter overshoots ~0.04) **and** full
+  high-order accuracy on smooth solutions (error matches the reconstructed
+  scheme; order 0.89 vs the strict local limiter's 0.07). Rigorous when the
+  continuous problem obeys a maximum principle (source-free or sign-definite
+  forcing). PR4 strictly dominates PR2 (bounds, but clips smooth) and PR3
+  (accurate, but coarse overshoot).
+- **Open (future):** MPP for problems without an a-priori maximum principle
+  (general sign-changing sources); geometric NTPFA for local-extremum control
+  within ``[m, M]``.
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).
@@ -94,7 +106,8 @@ Dirichlet data):
   (`dmp_afc_demo.py` -> `test_plots/dmp/monotonicity_showcase.png`).
 - PR3 (done): smoothness-relaxed (linearity-preserving) limiter
   (`smoothness_factor`) + graph (`test_plots/dmp/smoothness_relaxation.png`).
-- PR4: curvature-based / NTPFA limiter for strict bounds + full smooth accuracy.
+- PR4 (done): global maximum-principle limiter (`limiter="global"`) -- strict
+  bounds AND high-order accuracy + graph (`test_plots/dmp/mpp_limiter.png`).
 
 ## References
 - Le Potier; Lipnikov, Svyatskiy, Vassilevski (monotone/nonlinear FV).

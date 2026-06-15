@@ -43,6 +43,20 @@ class AFCMonotoneSolver:
     (Dirichlet only).  ``flux_discretization`` selects the high-order target
     operator (``"reconstructed"`` by default, or ``"tpfa"`` with the
     nonorthogonal correction).
+
+    ``limiter``:
+
+    - ``"local"`` (default): Zalesak limiter against local neighbour bounds.
+      High resolution, but clips smooth extrema unless ``smoothness_factor > 0``
+      (a Venkatakrishnan-style, essentially-non-oscillatory relaxation).
+    - ``"global"``: enforce the physical maximum-principle bounds ``[m, M]`` for
+      every node (Zhang--Shu style).  Strictly bound-preserving even at coarse
+      resolution AND it does not clip smooth interior extrema (which lie inside
+      ``[m, M]``), so it recovers high-order accuracy on smooth solutions.  The
+      bounds are ``bounds=(m, M)`` if given, else auto-detected from the initial
+      data and the Dirichlet boundary samples.  This is rigorous when the
+      continuous solution obeys a maximum principle (e.g. source-free or
+      sign-definite forcing).
     """
 
     def __init__(
@@ -56,6 +70,8 @@ class AFCMonotoneSolver:
         flux_discretization="reconstructed",
         nonorthogonal_correction=True,
         smoothness_factor=0.0,
+        limiter="local",
+        bounds=None,
         max_iters=50,
         tol=1e-10,
     ):
@@ -80,6 +96,14 @@ class AFCMonotoneSolver:
         self.smoothness_factor = float(smoothness_factor)
         self._h = np.sqrt(self.cell_areas)
         self._eps = np.zeros(self.M)
+        # Limiter bounds: "local" uses neighbour min/max (high resolution but
+        # clips smooth extrema unless smoothness_factor > 0); "global" enforces
+        # the physical maximum-principle bounds [m, M] for every node, which is
+        # strictly bound-preserving AND does not clip smooth interior extrema.
+        self.limiter = str(limiter).lower().strip()
+        if self.limiter not in {"local", "global"}:
+            raise ValueError("limiter must be 'local' or 'global'.")
+        self._user_bounds = None if bounds is None else (float(bounds[0]), float(bounds[1]))
 
         self._base._assemble_system()
         self.A_H = self._base.A.tocsr()
@@ -120,6 +144,23 @@ class AFCMonotoneSolver:
                 umin[i] = min(umin[i], vals.min())
                 umax[i] = max(umax[i], vals.max())
         return umin, umax
+
+    def _global_bounds(self, u0, t0, t_end):
+        """Physical maximum-principle bounds [m, M] for the global limiter.
+
+        Uses ``bounds`` if supplied, else the extrema of the initial data and the
+        Dirichlet boundary sampled across the time interval.
+        """
+        if self._user_bounds is not None:
+            return self._user_bounds
+        cx, cy = self.cell_centers[:, 0], self.cell_centers[:, 1]
+        lo = float(np.min(u0))
+        hi = float(np.max(u0))
+        for t in (t0, 0.5 * (t0 + t_end), t_end):
+            bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t), dtype=float), (self.M,))
+            lo = min(lo, float(bc[self._boundary_idx].min()) if self._boundary_idx.size else lo)
+            hi = max(hi, float(bc[self._boundary_idx].max()) if self._boundary_idx.size else hi)
+        return lo, hi
 
     def _zalesak_alpha(self, u_iter, umin, umax):
         """Edge limiter coefficients alpha_ij in [0, 1] (Zalesak)."""
@@ -180,6 +221,8 @@ class AFCMonotoneSolver:
         factor = factorized(sys_L.tocsc())
 
         cx, cy = self.cell_centers[:, 0], self.cell_centers[:, 1]
+        global_m, global_M = self._global_bounds(u, t0, t_end) if self.limiter == "global" else (None, None)
+
         t = float(t0)
         for _ in range(nsteps):
             t_next = t + dt
@@ -188,11 +231,15 @@ class AFCMonotoneSolver:
             rhs_base = self.cell_areas * u + dt * (self.cell_areas * src)
             rhs_base[self._boundary_idx] = bc[self._boundary_idx]
 
-            # Bounds from the previous time level's local neighbourhood.
-            umin, umax = self._local_bounds(u)
-            # Include the Dirichlet data so boundary-adjacent nodes are not over-limited.
-            umin[self._boundary_idx] = np.minimum(umin[self._boundary_idx], bc[self._boundary_idx])
-            umax[self._boundary_idx] = np.maximum(umax[self._boundary_idx], bc[self._boundary_idx])
+            if self.limiter == "global":
+                # Physical maximum-principle bounds for every node.
+                umin = np.full(self.M, global_m)
+                umax = np.full(self.M, global_M)
+            else:
+                # Bounds from the previous time level's local neighbourhood.
+                umin, umax = self._local_bounds(u)
+                umin[self._boundary_idx] = np.minimum(umin[self._boundary_idx], bc[self._boundary_idx])
+                umax[self._boundary_idx] = np.maximum(umax[self._boundary_idx], bc[self._boundary_idx])
 
             u_iter = factor(rhs_base)  # low-order predictor
             for _ in range(self.max_iters):

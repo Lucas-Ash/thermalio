@@ -180,6 +180,7 @@ def main():
     print(f"wrote {out_path}")
 
     smoothness_demo()
+    mpp_demo()
 
 
 def _afc_smooth_error(sf, alpha, n=24, skew=0.3, dt=2e-5, t_end=0.004):
@@ -259,6 +260,70 @@ def smoothness_demo():
     print(f"  smooth error: strict(factor=0)={smooth_errs[0]:.3e} -> relaxed(factor=1)={smooth_errs[3]:.3e} "
           f"(high-order ref {recon_err:.3e})")
     print(f"  front overshoot vs h: {[f'{o:.2e}' for o in overshoots]} at h={[f'{h:.3f}' for h in hs]}")
+    print(f"wrote {out_path}")
+
+
+def _afc_block_excursion(limiter, sf, tiles=10):
+    alpha = anisotropic_tensor(ratio=20.0, angle=np.pi / 6)
+    v, p, c = generate_nonorthogonal_tiled_polygonal_mesh(nx_tiles=tiles, ny_tiles=tiles, bbox=(-1, 1, -1, 1), skew=0.4)
+    s = AFCMonotoneSolver(v, p, alpha, 1.5e-3, bc_func=lambda x, y, t: np.zeros_like(x),
+                          source_func=lambda x, y, t: np.zeros_like(x),
+                          flux_discretization="reconstructed", limiter=limiter, smoothness_factor=sf)
+    _, u = s.solve(_block_ic(c), 0.0, 9e-3)
+    be = bound_excursion(u, 0.0, 1.0)
+    return max(be["overshoot"], be["undershoot"])
+
+
+def _afc_smooth_error_lim(limiter, sf, alpha, n=24, skew=0.3, dt=2e-5, t_end=0.004):
+    from heat_solver.mms import manufactured_case
+
+    case = manufactured_case("exp(-t)*sin(pi*x)*sin(pi*y)", alpha=alpha.tolist(), model="diffusion")
+    v, p, c = generate_nonorthogonal_polygonal_mesh(nx=n, ny=n, bbox=(-1, 1, -1, 1), skew=skew)
+    areas = np.array([polygon_area_and_centroid(v[poly])[0] for poly in p])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    ue = case["solution"](c[:, 0], c[:, 1], t_end)
+    s = AFCMonotoneSolver(v, p, alpha, dt, bc_func=case["boundary"], source_func=case["source"],
+                          flux_discretization="reconstructed", limiter=limiter, smoothness_factor=sf)
+    _, u = s.solve(u0, 0.0, t_end)
+    return float(np.sqrt(np.sum(areas * (u - ue) ** 2) / np.sum(areas * ue**2)))
+
+
+def mpp_demo():
+    """PR4: the global maximum-principle limiter is the only variant that is BOTH
+    strictly bound-preserving at coarse resolution AND high-order on smooth data."""
+    import matplotlib.pyplot as plt
+
+    alpha_mild = anisotropic_tensor(ratio=5.0, angle=np.pi / 6)
+    variants = [
+        ("local strict\n(PR2)", "local", 0.0),
+        ("local relaxed\n(PR3)", "local", 1.0),
+        ("global MPP\n(PR4)", "global", 0.0),
+    ]
+    excursions = [_afc_block_excursion(lim, sf) for _, lim, sf in variants]
+    errors = [_afc_smooth_error_lim(lim, sf, alpha_mild) for _, lim, sf in variants]
+
+    labels = [v[0] for v in variants]
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    ax1.bar(labels, excursions, color=colors)
+    ax1.set_ylabel("max bound excursion (coarse mesh)")
+    ax1.set_title("Strict bound preservation at coarse resolution\n(anisotropic block, tiles=10)", fontsize=9)
+    for i, e in enumerate(excursions):
+        ax1.text(i, e, f"{e:.1e}", ha="center", va="bottom", fontsize=8)
+
+    ax2.bar(labels, errors, color=colors)
+    ax2.set_ylabel("smooth-solution relative L2 error")
+    ax2.set_title("Smooth-solution accuracy\n(anisotropic, skewed mesh)", fontsize=9)
+    for i, e in enumerate(errors):
+        ax2.text(i, e, f"{e:.2e}", ha="center", va="bottom", fontsize=8)
+
+    fig.suptitle("PR4: global maximum-principle limiter -- strict bounds AND high-order accuracy", fontsize=13)
+    out_path = OUTPUT_DIR / "mpp_limiter.png"
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print("\nPR4 global MPP limiter (coarse-front excursion | smooth error):")
+    for (lab, _, _), exc, err in zip(variants, excursions, errors):
+        print(f"  {lab.replace(chr(10), ' '):22s} excursion={exc:.3e}  error={err:.3e}")
     print(f"wrote {out_path}")
 
 
