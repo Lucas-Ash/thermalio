@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1/PR2 initial implementation
+- **Status:** PR1/PR2 plus sparse-observation and sensitivity diagnostics
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -25,6 +25,9 @@ reference?*
 - **Implemented second increment:** vector-parameter estimation, Tikhonov-style
   prior regularization, and Cartesian identifiability grid scans, verified on
   joint diffusivity/perfusion recovery.
+- **Implemented diagnostics increment:** sparse/multi-time observation operators,
+  finite-difference residual Jacobians, least-squares adjoint products `J.T r`,
+  and Gauss-Newton covariance diagnostics.
 - **Out of scope (later):** adjoint/auto-diff gradients; full Bayesian inversion;
   PINN implementation and head-to-head benchmark; field (spatially varying)
   parameter recovery.
@@ -57,14 +60,22 @@ reference?*
 - `test_plots/direction_D_inverse_problems/regularization_path_diagnostic.png`
   shows how the Tikhonov prior selects a stable solution in an underdetermined
   inverse problem.
+- `test_plots/direction_D_inverse_problems/sparse_multitime_sensor_recovery.png`
+  shows sparse sensor placement, noisy multi-time observations, and the recovered
+  perfusion fit.
+- `test_plots/direction_D_inverse_problems/sensitivity_adjoint_diagnostics.png`
+  shows finite-difference observation sensitivities, the adjoint product `J.T r`,
+  and a local covariance-derived parameter standard deviation.
 
 ## Further development priorities
-- **Sensitivity and adjoint support:** finite-difference gradients are adequate
-  for PR1/PR2, but cost grows quickly with parameter count. Add tangent-linear
-  sensitivities for scalar parameters first, then an adjoint for field recovery.
-- **Observation design:** support multi-time and sparse-sensor observation
-  operators instead of only full-field snapshots. Add sensor masks, time stacks,
-  and objective diagnostics for parameter identifiability.
+- **PDE adjoint support:** the current code provides finite-difference
+  sensitivities and least-squares adjoint products around black-box forward maps.
+  The next meaningful step is a discrete adjoint for the parabolic and Pennes
+  solvers so gradients cost roughly one forward plus one adjoint solve instead of
+  one forward solve per parameter.
+- **Observation design:** sparse-sensor and multi-time observation operators are
+  now available. Next, add sensor-design metrics such as D-optimality, time-window
+  comparisons, and automated observability/rank diagnostics.
 - **Uncertainty quantification:** estimate local covariance from the least-squares
   Jacobian, add profile-likelihood scans, and expose bootstrap/noise-ensemble
   utilities for confidence intervals.
@@ -87,7 +98,9 @@ reference?*
   `tests/test_inverse.py`.
 - PR2: multi-parameter estimation and regularization. Implemented in
   `heat_solver/inverse.py` with joint diffusivity/perfusion recovery tests.
-- PR2+: ML comparison.
+- PR3: sparse/multi-time observations and sensitivity diagnostics. Implemented in
+  `heat_solver/inverse.py` with solver-backed sparse perfusion recovery tests.
+- PR3+: discrete PDE adjoints, field inversion, and ML comparison.
 
 ## References
 - Pennes bioheat inverse problems (perfusion estimation); PINN inverse-problem
