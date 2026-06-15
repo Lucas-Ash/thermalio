@@ -1,23 +1,23 @@
 [
   {
     "beta": 0.4,
-    "err_coarse": 4.269038032883358e-05,
-    "err_fine": 1.4022354252083347e-05,
-    "observed_order": 1.6061824278509065,
+    "err_coarse": 4.2690380328835536e-05,
+    "err_fine": 1.4022354252043724e-05,
+    "observed_order": 1.6061824278550492,
     "expected_order": 1.6
   },
   {
     "beta": 0.6,
-    "err_coarse": 0.00012391106229394828,
-    "err_fine": 4.483312076142494e-05,
-    "observed_order": 1.4666681597086046,
+    "err_coarse": 0.0001239110622939352,
+    "err_fine": 4.4833120761418514e-05,
+    "observed_order": 1.466668159708659,
     "expected_order": 1.4
   },
   {
     "beta": 0.8,
-    "err_coarse": 0.0003125920477159557,
-    "err_fine": 0.00012576311584539164,
-    "observed_order": 1.3135722102506253,
+    "err_coarse": 0.00031259204771588207,
+    "err_fine": 0.00012576311584542286,
+    "observed_order": 1.3135722102499272,
     "expected_order": 1.2
   }
 ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Direction C parameter-sweep study runners (expansion targets 1-3).
+"""Direction C parameter-sweep study runners (expansion targets 1-3 and step 8).
 
 Turns the Direction C expansion diagnostics into reproducible, solver-backed
 parameter sweeps that write JSON + CSV + PNG artifacts:
@@ -14,6 +14,9 @@ parameter sweeps that write JSON + CSV + PNG artifacts:
 3. ``mushy_stiffness_map``   -- latent-heat / mushy-zone stiffness: a 2D failure
    map over latent heat x transition half-width recording nonlinear convergence
    and iteration counts.
+4. ``parameter_sweep_suite`` -- broad Direction C benchmark matrix over
+   relaxation time, fractional order, latent heat, mushy-zone width, front
+   speed, mesh resolution, and time resolution.
 
 Outputs go to ``test_plots/direction_C_nonfourier_phase_change/sweeps/``.
 
@@ -44,6 +47,7 @@ from heat_solver.cases import (
     fractional_stefan_apparent_capacity_case,
     hyperbolic_stefan_apparent_capacity_case,
 )
+from heat_solver import interface_diagnostics as idiag
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.meshes import generate_square_polygonal_mesh
 from heat_solver.transport import FractionalStefanSolver, HyperbolicStefanSolver
@@ -65,9 +69,17 @@ def _write_artifacts(name, rows, fieldnames):
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"{name}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     with (OUT / f"{name}.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = _csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = _csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+PARAMETER_SWEEP_FIELDS = [
+    "family", "variant", "swept_parameter", "tau", "beta", "latent_heat",
+    "transition_half_width", "front_speed", "mesh_n", "time_steps", "dt",
+    "wave_speed", "rel_l2", "solve_converged", "failed_steps",
+    "max_iterations", "mean_iterations", "max_residual", "max_capacity",
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -255,6 +267,184 @@ def mushy_stiffness_map(latents=(4.0, 12.0, 24.0), half_widths=(0.3, 0.12, 0.05)
     return rows
 
 
+# --------------------------------------------------------------------------- #
+# Step 8: broad parameter-sweep suite for reproducible Direction C datasets
+# --------------------------------------------------------------------------- #
+def _hyperbolic_parameter_row(variant, swept_parameter, tau=0.05, latent_heat=6.0,
+                             transition_half_width=0.25, front_speed=0.45,
+                             mesh_n=14, time_steps=48, alpha=0.08, t_end=0.03):
+    case = hyperbolic_stefan_apparent_capacity_case(
+        alpha=alpha, tau=float(tau), latent_heat=float(latent_heat),
+        transition_half_width=float(transition_half_width), speed=float(front_speed))
+    v, p, c, a = _square(int(mesh_n), case["bbox"])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    du0 = case["initial_rate"](c[:, 0], c[:, 1])
+    exact = case["solution"](c[:, 0], c[:, 1], t_end)
+    opts = {**case["phase_change_options"], "max_iters": 140,
+            "raise_on_nonconvergence": False}
+    solver = HyperbolicStefanSolver(
+        v, p, case["alpha"], t_end / int(time_steps), case["relaxation_time"],
+        case["phase_change_model"], bc_func=case["boundary"],
+        source_func=case["source"], phase_change_options=opts,
+    )
+    _, u = solver.solve(u0, 0.0, t_end, du0=du0)
+    rep = idiag.summarize_solve_report(solver.solve_report)
+    return {
+        "family": "hyperbolic_stefan",
+        "variant": variant,
+        "swept_parameter": swept_parameter,
+        "tau": float(tau),
+        "beta": "",
+        "latent_heat": float(latent_heat),
+        "transition_half_width": float(transition_half_width),
+        "front_speed": float(front_speed),
+        "mesh_n": int(mesh_n),
+        "time_steps": int(time_steps),
+        "dt": float(t_end / int(time_steps)),
+        "wave_speed": float(np.sqrt(alpha / float(tau))),
+        "rel_l2": _rel_l2(u, exact, a),
+        "solve_converged": rep["solve_converged"],
+        "failed_steps": rep["failed_steps"],
+        "max_iterations": rep["max_iterations"],
+        "mean_iterations": rep["mean_iterations"],
+        "max_residual": rep["max_residual"],
+        "max_capacity": rep["max_capacity"],
+    }
+
+
+def _fractional_parameter_row(variant, swept_parameter, beta=0.6, mesh_n=14,
+                              time_steps=40, alpha=0.08, t_end=0.12):
+    case = fractional_stefan_apparent_capacity_case(alpha=alpha, beta=float(beta))
+    v, p, c, a = _square(int(mesh_n), case["bbox"])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    exact = case["solution"](c[:, 0], c[:, 1], t_end)
+    opts = {**case["phase_change_options"], "max_iters": 140,
+            "raise_on_nonconvergence": False}
+    solver = FractionalStefanSolver(
+        v, p, case["alpha"], t_end / int(time_steps), case["beta"],
+        case["phase_change_model"], bc_func=case["boundary"],
+        source_func=case["source"], phase_change_options=opts,
+    )
+    _, u = solver.solve(u0, 0.0, t_end)
+    rep = idiag.summarize_solve_report(solver.solve_report)
+    return {
+        "family": "fractional_stefan",
+        "variant": variant,
+        "swept_parameter": swept_parameter,
+        "tau": "",
+        "beta": float(beta),
+        "latent_heat": case["phase_change_model"].latent_heat,
+        "transition_half_width": 0.5 * (
+            case["phase_change_model"].liquidus_temperature
+            - case["phase_change_model"].solidus_temperature
+        ),
+        "front_speed": "",
+        "mesh_n": int(mesh_n),
+        "time_steps": int(time_steps),
+        "dt": float(t_end / int(time_steps)),
+        "wave_speed": "",
+        "rel_l2": _rel_l2(u, exact, a),
+        "solve_converged": rep["solve_converged"],
+        "failed_steps": rep["failed_steps"],
+        "max_iterations": rep["max_iterations"],
+        "mean_iterations": rep["mean_iterations"],
+        "max_residual": rep["max_residual"],
+        "max_capacity": rep["max_capacity"],
+    }
+
+
+def parameter_sweep_suite(
+    hyperbolic_variants=(
+        ("baseline", "baseline", {}),
+        ("tau_low", "tau", {"tau": 0.035}),
+        ("tau_high", "tau", {"tau": 0.12}),
+        ("latent_low", "latent_heat", {"latent_heat": 3.0}),
+        ("latent_high", "latent_heat", {"latent_heat": 12.0}),
+        ("wide_mushy_zone", "transition_half_width", {"transition_half_width": 0.35}),
+        ("narrow_mushy_zone", "transition_half_width", {"transition_half_width": 0.12}),
+        ("slow_front", "front_speed", {"front_speed": 0.25}),
+        ("fast_front", "front_speed", {"front_speed": 0.70}),
+        ("coarse_mesh", "mesh_resolution", {"mesh_n": 10}),
+        ("fine_mesh", "mesh_resolution", {"mesh_n": 18}),
+        ("coarse_time", "time_resolution", {"time_steps": 30}),
+        ("fine_time", "time_resolution", {"time_steps": 72}),
+        ("stiff_fast_front", "combined", {
+            "tau": 0.035, "latent_heat": 12.0, "transition_half_width": 0.12,
+            "front_speed": 0.70, "time_steps": 72,
+        }),
+    ),
+    fractional_variants=(
+        ("beta_low", "beta", {"beta": 0.4}),
+        ("beta_mid", "beta", {"beta": 0.6}),
+        ("beta_high", "beta", {"beta": 0.8}),
+        ("fractional_coarse_mesh", "mesh_resolution", {"mesh_n": 10}),
+        ("fractional_fine_mesh", "mesh_resolution", {"mesh_n": 18}),
+        ("fractional_coarse_time", "time_resolution", {"time_steps": 24}),
+        ("fractional_fine_time", "time_resolution", {"time_steps": 64}),
+    ),
+):
+    """Run the Direction C step-8 sparse benchmark matrix.
+
+    The suite is intentionally sparse rather than a full Cartesian product: it
+    sweeps each key physical/numerical axis around a baseline and includes one
+    stiff combined hyperbolic case.  This gives a reusable research dataset
+    without making routine verification prohibitively expensive.
+    """
+    rows = []
+    for variant, swept_parameter, kwargs in hyperbolic_variants:
+        rows.append(_hyperbolic_parameter_row(variant, swept_parameter, **kwargs))
+    for variant, swept_parameter, kwargs in fractional_variants:
+        rows.append(_fractional_parameter_row(variant, swept_parameter, **kwargs))
+
+    _write_artifacts("parameter_sweep_suite", rows, PARAMETER_SWEEP_FIELDS)
+    _plot_parameter_sweep_suite(rows)
+    return rows
+
+
+def _plot_parameter_sweep_suite(rows):
+    labels = [r["variant"] for r in rows]
+    colors = ["tab:red" if r["family"] == "hyperbolic_stefan" else "tab:blue" for r in rows]
+    x = np.arange(len(rows))
+
+    fig, axes = plt.subplots(2, 2, figsize=(15, 8), constrained_layout=True)
+    axes[0, 0].bar(x, [r["rel_l2"] for r in rows], color=colors)
+    axes[0, 0].set_yscale("log")
+    axes[0, 0].set_xticks(x, labels, rotation=60, ha="right", fontsize=7)
+    axes[0, 0].set_ylabel("relative L2 error")
+    axes[0, 0].set_title("Manufactured-solution accuracy")
+
+    axes[0, 1].bar(x, [r["max_iterations"] for r in rows], color=colors, alpha=0.85, label="max iterations")
+    axes[0, 1].plot(x, [r["failed_steps"] for r in rows], "ko-", linewidth=1.0, label="failed steps")
+    axes[0, 1].set_xticks(x, labels, rotation=60, ha="right", fontsize=7)
+    axes[0, 1].set_title("Nonlinear work and failures")
+    axes[0, 1].legend(fontsize=8)
+
+    for family, marker, color in (("hyperbolic_stefan", "o", "tab:red"), ("fractional_stefan", "s", "tab:blue")):
+        sub = [r for r in rows if r["family"] == family]
+        axes[1, 0].scatter([r["max_capacity"] for r in sub],
+                           np.maximum([r["max_residual"] for r in sub], 1e-16),
+                           marker=marker, color=color, label=family)
+    axes[1, 0].set_xscale("log")
+    axes[1, 0].set_yscale("log")
+    axes[1, 0].set_xlabel("max apparent capacity sampled")
+    axes[1, 0].set_ylabel("max nonlinear residual")
+    axes[1, 0].set_title("Stiffness vs nonlinear residual")
+    axes[1, 0].legend(fontsize=8)
+
+    groups = sorted(set(r["swept_parameter"] for r in rows))
+    counts = [sum(1 for r in rows if r["swept_parameter"] == g) for g in groups]
+    failures = [sum(int(r["failed_steps"] > 0) for r in rows if r["swept_parameter"] == g) for g in groups]
+    axes[1, 1].bar(groups, counts, color="tab:gray", alpha=0.6, label="runs")
+    axes[1, 1].bar(groups, failures, color="tab:orange", label="runs with failures")
+    axes[1, 1].set_xticks(range(len(groups)), groups, rotation=35, ha="right")
+    axes[1, 1].set_title("Parameter-axis coverage")
+    axes[1, 1].legend(fontsize=8)
+
+    fig.suptitle("Direction C step 8: parameter sweep suite")
+    fig.savefig(OUT / "parameter_sweep_suite.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Direction C parameter-sweep studies.")
     parser.add_argument("--quick", action="store_true", help="smaller sweeps for speed")
@@ -265,10 +455,25 @@ def main():
         rel = relaxation_sweep(taus=(0.07, 0.15), nts=(48,), n=14)
         order_rows, mem_rows = fractional_memory_sweep(betas=(0.4, 0.8), windows=(None, 8, 2), n=14)
         mushy = mushy_stiffness_map(latents=(2.0, 12.0), half_widths=(0.3, 0.1), n=12, nt=32)
+        suite = parameter_sweep_suite(
+            hyperbolic_variants=(
+                ("baseline", "baseline", {}),
+                ("tau_high", "tau", {"tau": 0.12, "mesh_n": 12, "time_steps": 32}),
+                ("narrow_mushy_zone", "transition_half_width", {
+                    "transition_half_width": 0.12, "mesh_n": 12, "time_steps": 32}),
+                ("fast_front", "front_speed", {"front_speed": 0.70, "mesh_n": 12, "time_steps": 32}),
+            ),
+            fractional_variants=(
+                ("beta_low", "beta", {"beta": 0.4, "mesh_n": 12, "time_steps": 24}),
+                ("beta_high", "beta", {"beta": 0.8, "mesh_n": 12, "time_steps": 24}),
+                ("fractional_fine_time", "time_resolution", {"time_steps": 48, "mesh_n": 12}),
+            ),
+        )
     else:
         rel = relaxation_sweep()
         order_rows, mem_rows = fractional_memory_sweep()
         mushy = mushy_stiffness_map()
+        suite = parameter_sweep_suite()
 
     print("=== Direction C studies ===")
     print(f"[1] relaxation sweep: {len(rel)} runs; "
@@ -279,6 +484,9 @@ def main():
         f"{r['window']}:{r['rel_l2']:.2e}" for r in mem_rows))
     print(f"[3] mushy map: {sum(1 for r in mushy if r['converged'])}/{len(mushy)} converged; "
           f"max iters {max(r['max_iters'] for r in mushy)}")
+    print(f"[8] parameter suite: {len(suite)} runs across "
+          f"{len(set(r['swept_parameter'] for r in suite))} parameter axes; "
+          f"max error {max(r['rel_l2'] for r in suite):.2e}")
     print(f"wrote artifacts to {OUT}")
 
 

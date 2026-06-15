@@ -151,3 +151,30 @@ def test_mushy_stiffness_map_runner_smoke(tmp_path, monkeypatch):
     # Analytic capacity spike grows as the transition narrows / latent rises.
     by_key = {(r["latent_heat"], r["transition_half_width"]): r["analytic_peak_capacity"] for r in rows}
     assert by_key[(24.0, 0.08)] > by_key[(4.0, 0.3)]
+
+
+def test_parameter_sweep_suite_runner_smoke(tmp_path, monkeypatch):
+    import direction_c_studies as dcs
+
+    monkeypatch.setattr(dcs, "OUT", tmp_path)
+    rows = dcs.parameter_sweep_suite(
+        hyperbolic_variants=(
+            ("baseline", "baseline", {"mesh_n": 10, "time_steps": 20}),
+            ("fast_front", "front_speed", {"front_speed": 0.65, "mesh_n": 10, "time_steps": 20}),
+        ),
+        fractional_variants=(
+            ("beta_low", "beta", {"beta": 0.4, "mesh_n": 10, "time_steps": 16}),
+            ("beta_high", "beta", {"beta": 0.8, "mesh_n": 10, "time_steps": 16}),
+        ),
+    )
+    assert len(rows) == 4
+    assert {"hyperbolic_stefan", "fractional_stefan"} == {r["family"] for r in rows}
+    assert {"baseline", "front_speed", "beta"} == {r["swept_parameter"] for r in rows}
+    for row in rows:
+        assert set(dcs.PARAMETER_SWEEP_FIELDS) <= set(row)
+        assert row["rel_l2"] >= 0.0
+        assert row["max_iterations"] >= 1
+        assert row["mesh_n"] == 10
+    assert (tmp_path / "parameter_sweep_suite.csv").exists()
+    assert (tmp_path / "parameter_sweep_suite.json").exists()
+    assert (tmp_path / "parameter_sweep_suite.png").exists()

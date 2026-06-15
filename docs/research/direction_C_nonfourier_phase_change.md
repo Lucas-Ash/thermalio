@@ -1,6 +1,6 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners + computing-capability steps 4-5 (interface diagnostics & application runners)
+- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners + computing-capability steps 4-8
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -111,7 +111,7 @@ manufactured exactness, runner smoke test).
    width, Picard relaxation, and Anderson depth, with failure maps and
    enthalpy-based preconditioning.
 
-## Implemented computing capabilities (steps 4-7)
+## Implemented computing capabilities (steps 4-8)
 
 - **Step 4 — sharp-interface diagnostics** (`heat_solver/interface_diagnostics.py`):
   post-processing for a cell-centered field + apparent-capacity model —
@@ -165,6 +165,17 @@ manufactured exactness, runner smoke test).
   and relative closure residual.  Flux-driven laser/remelting studies use
   prescribed flux/source energy, while Dirichlet cooling/freezing studies report
   inferred extracted enthalpy as the boundary-energy audit.
+- **Step 8 — parameter sweep infrastructure** (`direction_c_studies.py`):
+  `parameter_sweep_suite` creates a sparse benchmark matrix over relaxation
+  time `tau`, fractional order `beta`, latent heat, transition half-width,
+  manufactured front speed, mesh resolution, and time resolution.  Each row
+  records the model family, variant name, swept parameter, manufactured
+  relative `L2` error, time step, wave speed where applicable, nonlinear
+  convergence status, failed steps, iteration statistics, maximum residual, and
+  maximum apparent capacity.  The suite writes
+  `parameter_sweep_suite.csv/json/png` under
+  `test_plots/direction_C_nonfourier_phase_change/sweeps/`, alongside a sweeps
+  README describing all Direction C sweep artifacts.
 
 ## Additional computing capabilities that would help
 
@@ -214,11 +225,11 @@ manufactured exactness, runner smoke test).
    audit would reconstruct conductive boundary fluxes from the finite-volume
    operator and compare those flux integrals against enthalpy removal directly.
 
-8. **Parameter sweep infrastructure.**  A small suite runner, similar in spirit
-   to the Direction D inverse-study runners, should sweep `tau`, `beta`, latent
-   heat, mushy-zone width, front speed, mesh resolution, and time resolution,
-   then write JSON/CSV/PNG artifacts.  This would turn exploratory Direction C
-   experiments into reproducible research datasets.
+8. **Higher-dimensional design-of-experiments sweeps.**  Step 8 now provides a
+   sparse one-at-a-time benchmark matrix over the main Direction C axes.  A
+   useful next increment would add Latin-hypercube or factorial designs with
+   parallel execution, resumable jobs, and aggregate sensitivity plots so broad
+   parameter studies can scale beyond the current lightweight matrix.
 
 ## Expansion plots
 
@@ -234,6 +245,10 @@ manufactured exactness, runner smoke test).
   shows apparent-capacity/enthalpy curves for several mushy-zone widths and a
   solver-backed centerline comparison demonstrating that omitting apparent
   capacity breaks the manufactured hyperbolic Stefan balance.
+- `test_plots/direction_C_nonfourier_phase_change/sweeps/parameter_sweep_suite.png`
+  shows the step-8 benchmark matrix: manufactured errors, nonlinear iteration
+  costs/failures, stiffness-vs-residual behavior, and coverage by swept
+  parameter axis.
 
 ## PR breakdown
 - PR1: hyperbolic Stefan solver + manufactured case + convergence test.
@@ -246,6 +261,9 @@ manufactured exactness, runner smoke test).
   relaxation/stability sweep, fractional-memory calibration + compression, and
   latent-heat/mushy-zone stiffness map -- plus the `memory_window`,
   convergence-metadata, and parameterized-case enhancements that back them.
+- PR2+ (done): computing-capability steps 4-8 -- interface diagnostics,
+  application runners, nonlinear convergence reporting, energy/enthalpy audits,
+  and the broad Direction C parameter-sweep suite.
 
 ## References
 - Non-Fourier Stefan problem (1D) literature; DPL bioheat phase-change

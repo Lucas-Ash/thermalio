@@ -1,5 +1,10 @@
 latent_heat,transition_half_width,analytic_peak_capacity,sampled_peak_capacity,resolved,max_iters,failed_steps,converged
-4.0,0.3,7.666666666666667,7.666666666666667,True,3,0,True
-4.0,0.08,26.0,1.0,False,2,0,True
-24.0,0.3,41.0,41.0,True,3,0,True
-24.0,0.08,151.0,1.0,False,2,0,True
+4.0,0.3,7.666666666666667,7.666666666666667,True,2,0,True
+4.0,0.12,17.666666666666668,17.666666666666668,True,2,0,True
+4.0,0.05,41.0,41.0,True,3,0,True
+12.0,0.3,21.0,21.0,True,2,0,True
+12.0,0.12,51.0,51.0,True,2,0,True
+12.0,0.05,121.0,121.0,True,2,0,True
+24.0,0.3,41.0,41.0,True,2,0,True
+24.0,0.12,101.0,101.0,True,2,0,True
+24.0,0.05,241.0,241.0,True,2,0,True
