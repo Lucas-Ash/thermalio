@@ -1,0 +1,33 @@
+{
+  "alpha": 0.1,
+  "basis_radius": 0.45,
+  "case": "Pennes perfusion field inverse",
+  "coefficient_rmse": 0.23517209228536248,
+  "data_residual_norm": 0.0202755004864892,
+  "dt": 0.002,
+  "field_rmse": 0.048452653212183255,
+  "nfev": 6,
+  "nx": 18,
+  "recovered_coefficients": [
+    2.7492773736796403,
+    4.940659422182069,
+    3.6300559692367083,
+    5.617978999126186
+  ],
+  "regularization_residual_norm": 0.03157186756091478,
+  "regularization_strength": 5e-05,
+  "relative_noise": 0.0005,
+  "relative_residual": 0.0016315921197583548,
+  "success": true,
+  "times": [
+    0.02,
+    0.05,
+    0.08
+  ],
+  "true_coefficients": [
+    2.8,
+    4.8,
+    3.4,
+    6.0
+  ]
+}

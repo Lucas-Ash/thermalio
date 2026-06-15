@@ -5,3 +5,7 @@
 # required only to build/verify MMS sources, not to run the solvers.
 pytest
 sympy
+# Optional PINN backend; install manually when running tests/test_pinn_jax.py
+# against the real backend:
+# jax
+# jaxlib
