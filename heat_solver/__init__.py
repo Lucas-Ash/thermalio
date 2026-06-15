@@ -66,6 +66,13 @@ from .meshes import (
     generate_nonorthogonal_tiled_polygonal_mesh,
     generate_square_polygonal_mesh,
 )
+from .pinn_jax import (
+    JaxPinnConfig,
+    JaxPinnResult,
+    jax_available,
+    run_pennes_jax_pinn_baseline,
+    train_pennes_inverse_pinn_jax,
+)
 from .plotting import create_delaunay_figure, create_polygonal_figure, create_curvilinear_figure, visualize_polygonal_mesh
 from .phase_change import ApparentHeatCapacityModel
 from .polygonal import PolygonalHeatSolver
@@ -92,6 +99,8 @@ __all__ = [
     "ApparentHeatCapacityModel",
     "GaussianFieldBasis",
     "InverseStudyResult",
+    "JaxPinnConfig",
+    "JaxPinnResult",
     "ObservationSet",
     "ParameterEstimate",
     "RbfRidgeSurrogate1D",
@@ -127,6 +136,7 @@ __all__ = [
     "gauss_newton_covariance",
     "identifiability_grid_scan",
     "identifiability_scan",
+    "jax_available",
     "least_squares_gradient",
     "make_synthetic_observations",
     "nearest_sensor_indices",
@@ -137,6 +147,8 @@ __all__ = [
     "regularization_residual",
     "residual_vector",
     "run_pennes_field_inverse_study",
+    "run_pennes_jax_pinn_baseline",
+    "train_pennes_inverse_pinn_jax",
     "run_pennes_ml_baseline_comparison",
     "run_mixed_polygonal_test",
     "run_nonorthogonal_polygonal_test",

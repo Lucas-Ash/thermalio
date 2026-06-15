@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1-PR6 initial implementation
+- **Status:** PR1-PR7 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -38,6 +38,9 @@ reference?*
   runner that reports trusted FV inverse, RBF-ridge ML surrogate, and training-
   grid lookup baselines with a shared schema that external PINN implementations
   can plug into.
+- **Implemented JAX PINN adapter increment:** optional `heat_solver.pinn_jax`
+  backend for source-free Pennes inverse PINNs, with lazy JAX imports, trainable
+  scalar perfusion, PDE/data/initial/boundary losses, and JSON/CSV report output.
 - **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
   full Bayesian inversion; PINN implementation and head-to-head benchmark;
   high-dimensional cellwise field recovery.
@@ -113,9 +116,10 @@ reference?*
   JSON/CSV/PNG artifacts. Generalize this into a suite runner with repeatable
   scenario definitions, noise ensembles, timing metadata, and comparison tables.
 - **Model comparison:** trusted FV, RBF-ridge surrogate, and grid-lookup baselines
-  are available with identical synthetic observations and error metrics. Next,
-  add a real PINN training adapter that consumes the same observation bundle and
-  writes rows into the same comparison schema.
+  are available with identical synthetic observations and error metrics. A JAX
+  PINN adapter is now available as an optional backend; next, run calibrated
+  larger PINN studies in a JAX-enabled environment and feed those report rows
+  into the comparison schema.
 
 ## Risks & open questions
 - Ill-posedness / non-identifiability (e.g. tau vs alpha trade-offs); regularization
@@ -137,7 +141,9 @@ reference?*
   recovery and report-writing tests.
 - PR6: PINN/ML comparison baselines. Implemented as a trusted-FV-vs-RBF-surrogate
   Pennes baseline runner with report-writing tests.
-- PR6+: real PINN adapter, broader PDE adjoints, and high-dimensional field
+- PR7: optional JAX PINN adapter. Implemented in `heat_solver/pinn_jax.py` with
+  lazy-import tests and backend execution tests that run when JAX is installed.
+- PR7+: calibrated PINN studies, broader PDE adjoints, and high-dimensional field
   inversion.
 
 ## References
