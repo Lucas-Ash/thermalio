@@ -1,6 +1,6 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners
+- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners + computing-capability steps 4-5 (interface diagnostics & application runners)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -110,6 +110,31 @@ manufactured exactness, runner smoke test).
    useful next increment would add systematic sweeps over latent heat, transition
    width, Picard relaxation, and Anderson depth, with failure maps and
    enthalpy-based preconditioning.
+
+## Implemented computing capabilities (steps 4-5)
+
+- **Step 4 — sharp-interface diagnostics** (`heat_solver/interface_diagnostics.py`):
+  post-processing for a cell-centered field + apparent-capacity model —
+  liquid-fraction field and area-weighted liquid volume fraction,
+  solid/mushy/liquid area fractions, sensible/latent enthalpy budget,
+  melt-isotherm interface position(s) along a centerline, mushy-zone thickness,
+  and front speed.  Verified against an analytic `tanh` front (interface
+  position and mushy thickness match to within a cell width).
+- **Step 5 — application-study runners** (`direction_c_applications.py`):
+  reproducible 2D scenarios beyond manufactured solutions, each writing
+  JSON/CSV/PNG to `test_plots/direction_C_nonfourier_phase_change/applications/`:
+    - `pulsed_laser_melting` — a boundary heat-flux pulse melts a cold solid slab
+      (hyperbolic/Cattaneo Stefan, finite wave speed); reports melt-front
+      advance, peak temperature, liquid fraction, mushy thickness, injected
+      energy, sensible/latent enthalpy, and an **energy-closure residual**
+      (enthalpy rise vs injected boundary energy ~0.3% at full resolution).
+    - `cryosurgery_freezing` — a cold cryoprobe Dirichlet boundary freezes a warm
+      domain; reports freezing-front margin, frozen volume fraction, minimum
+      temperature, and extracted enthalpy.
+  Both runners record nonlinear-convergence metadata and tolerate the onset
+  stiffness via the non-raising solve mode (motivating capabilities 1 & 3).
+  Verified by `tests/test_direction_c_applications.py` (analytic diagnostics +
+  runner physical-sanity / energy-closure checks).
 
 ## Additional computing capabilities that would help
 
