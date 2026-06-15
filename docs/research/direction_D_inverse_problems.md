@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** idea
+- **Status:** PR1 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-14
 
@@ -18,10 +18,10 @@ how do classical optimization and ML approaches compare against the same trusted
 reference?*
 
 ## Scope
-- **In scope (candidate first increment):** a thin parameter-estimation layer
-  (finite-difference-gradient or derivative-free optimization, e.g. SciPy
-  `least_squares`/`minimize`) wrapping the existing drivers; identifiability and
-  noise-robustness studies on a single parameter (e.g. perfusion `k`).
+- **Implemented first increment:** a thin parameter-estimation layer using SciPy
+  `least_squares` around arbitrary trusted forward maps, plus synthetic
+  observation/noise utilities, identifiability scans, and Pennes perfusion
+  recovery tests.
 - **Out of scope (later):** adjoint/auto-diff gradients; full Bayesian inversion;
   PINN implementation and head-to-head benchmark; field (spatially varying)
   parameter recovery.
@@ -46,7 +46,9 @@ reference?*
   needs. Finite-difference gradients are cost-heavy — motivates a later adjoint.
 
 ## PR breakdown
-- PR1: single-parameter estimation + identifiability/noise study.
+- PR1: single-parameter estimation + identifiability/noise study. Implemented in
+  `heat_solver/inverse.py` with perfusion-recovery verification in
+  `tests/test_inverse.py`.
 - PR2+: multi-parameter, regularization, ML comparison.
 
 ## References
