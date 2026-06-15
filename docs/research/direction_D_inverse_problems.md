@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1/PR2 plus Pennes adjoint and UQ diagnostics
+- **Status:** PR1-PR5 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -31,9 +31,12 @@ reference?*
 - **Implemented adjoint/UQ increment:** a discrete backward-Euler adjoint for
   scalar Pennes perfusion gradients, normal-approximation confidence intervals,
   and bootstrap/noise-ensemble summaries.
+- **Implemented field-inversion/runner increment:** normalized Gaussian perfusion
+  field bases, matrix/smoothness regularization, and a reproducible Pennes field
+  inverse runner that writes JSON/CSV/PNG study artifacts.
 - **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
-  full Bayesian inversion; PINN implementation and head-to-head benchmark; field
-  (spatially varying) parameter recovery.
+  full Bayesian inversion; PINN implementation and head-to-head benchmark;
+  high-dimensional cellwise field recovery.
 
 ## Design sketch
 - New: `heat_solver/inverse.py` — objective `J(theta) = ||u(theta) - u_obs||`,
@@ -75,6 +78,11 @@ reference?*
 - `test_plots/direction_D_inverse_problems/perfusion_uncertainty_intervals.png`
   compares local covariance confidence intervals and bootstrap intervals for a
   sparse multi-time perfusion fit.
+- `test_plots/direction_D_inverse_problems/pennes_field_inverse_study/`
+  contains the first regularized field-inversion runner output:
+  `pennes_field_inverse_summary.json`,
+  `pennes_field_inverse_coefficients.csv`, and
+  `pennes_field_inverse_fields.png`.
 
 ## Further development priorities
 - **Broader PDE adjoint support:** the current discrete adjoint covers scalar
@@ -88,12 +96,13 @@ reference?*
   summaries are available. Next add profile-likelihood scans, model-mismatch
   studies, and likelihood-aware reports that distinguish observation noise from
   discretization error.
-- **Regularized field inversion:** extend parameter vectors to low-dimensional
-  spatial bases for perfusion/conductivity fields, with smoothness penalties and
-  mesh-aware regularization.
-- **Inverse runners and reports:** add a reproducible driver similar to the
-  verification suite that writes JSON/CSV reports and plot bundles for each
-  inverse study.
+- **Regularized field inversion:** low-dimensional Gaussian perfusion-field
+  inversion is available. Next steps are mesh-aware Laplacian/TV penalties,
+  adaptive basis placement, bound constraints informed by physiology, and
+  extension to conductivity/source fields.
+- **Inverse runners and reports:** a Pennes field-inversion runner now writes
+  JSON/CSV/PNG artifacts. Generalize this into a suite runner with repeatable
+  scenario definitions, noise ensembles, timing metadata, and comparison tables.
 - **Model comparison:** use the trusted FV inverse results as baselines for later
   PINN/ML comparisons, with identical synthetic observations and error metrics.
 
@@ -112,7 +121,10 @@ reference?*
 - PR4: Pennes discrete adjoint and UQ diagnostics. Implemented in
   `heat_solver/inverse.py` with adjoint-vs-finite-difference and confidence/
   bootstrap tests.
-- PR4+: broader PDE adjoints, field inversion, and ML comparison.
+- PR5: regularized field inversion and inverse-study runner. Implemented in
+  `heat_solver/inverse.py` with low-dimensional Gaussian perfusion-field
+  recovery and report-writing tests.
+- PR5+: broader PDE adjoints, high-dimensional field inversion, and ML comparison.
 
 ## References
 - Pennes bioheat inverse problems (perfusion estimation); PINN inverse-problem

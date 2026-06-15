@@ -28,6 +28,8 @@ from .dmp import (
 from .afc import AFCMonotoneSolver
 from .geometry import polygon_area_and_centroid
 from .inverse import (
+    GaussianFieldBasis,
+    InverseStudyResult,
     ObservationSet,
     ParameterEstimate,
     ReactionDiffusionAdjointResult,
@@ -46,10 +48,12 @@ from .inverse import (
     least_squares_gradient,
     make_synthetic_observations,
     nearest_sensor_indices,
+    pairwise_difference_matrix,
     reaction_diffusion_perfusion_adjoint,
     residual_jacobian,
     regularization_residual,
     residual_vector,
+    run_pennes_field_inverse_study,
 )
 from .meshes import (
     generate_hexagonal_polygonal_mesh,
@@ -83,6 +87,8 @@ __all__ = [
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
     "ApparentHeatCapacityModel",
+    "GaussianFieldBasis",
+    "InverseStudyResult",
     "ObservationSet",
     "ParameterEstimate",
     "ReactionDiffusionAdjointResult",
@@ -119,11 +125,13 @@ __all__ = [
     "least_squares_gradient",
     "make_synthetic_observations",
     "nearest_sensor_indices",
+    "pairwise_difference_matrix",
     "polygon_area_and_centroid",
     "reaction_diffusion_perfusion_adjoint",
     "residual_jacobian",
     "regularization_residual",
     "residual_vector",
+    "run_pennes_field_inverse_study",
     "run_mixed_polygonal_test",
     "run_nonorthogonal_polygonal_test",
     "run_nonorthogonal_tiled_polygonal_test",

@@ -1,9 +1,12 @@
+import json
+
 import numpy as np
 import pytest
 
 from heat_solver.cases import pennes_bioheat_case
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.inverse import (
+    GaussianFieldBasis,
     add_observation_noise,
     bootstrap_parameter_estimates,
     bootstrap_summary,
@@ -18,10 +21,12 @@ from heat_solver.inverse import (
     least_squares_gradient,
     make_synthetic_observations,
     nearest_sensor_indices,
+    pairwise_difference_matrix,
     reaction_diffusion_perfusion_adjoint,
     residual_jacobian,
     regularization_residual,
     residual_vector,
+    run_pennes_field_inverse_study,
 )
 from heat_solver.meshes import generate_square_polygonal_mesh
 from heat_solver.transport import ReactionDiffusionHeatSolver
@@ -394,6 +399,55 @@ def test_regularization_selects_prior_in_underdetermined_problem():
     assert np.allclose(result.values, prior, atol=1e-8)
     assert result.data_residual_norm < 1e-10
     assert result.regularization_residual_norm < 1e-8
+
+
+def test_gaussian_field_basis_and_matrix_regularization():
+    basis = GaussianFieldBasis(np.array([[0.25, 0.5], [0.75, 0.5]]), radius=0.35)
+    x = np.array([0.25, 0.75])
+    y = np.array([0.5, 0.5])
+    design = basis.design_matrix(x, y)
+    assert design.shape == (2, 2)
+    assert np.allclose(np.sum(design, axis=1), 1.0)
+    values = basis.evaluate(np.array([2.0, 6.0]), x, y)
+    assert values[0] < values[1]
+
+    matrix = pairwise_difference_matrix(3)
+    assert matrix.shape == (3, 3)
+    residual = regularization_residual(
+        np.array([1.0, 2.0, 4.0]),
+        {"matrix": matrix, "strength": 4.0, "scale": np.ones(3)},
+    )
+    assert np.allclose(residual, 2.0 * (matrix @ np.array([1.0, 2.0, 4.0])))
+    with pytest.raises(ValueError):
+        GaussianFieldBasis(np.array([0.0, 1.0]), radius=0.5)
+    with pytest.raises(ValueError):
+        regularization_residual(np.ones(2), {"matrix": np.ones((2, 3))})
+
+
+def test_run_pennes_field_inverse_study_writes_reports(tmp_path):
+    result = run_pennes_field_inverse_study(
+        tmp_path,
+        nx=10,
+        times=(0.02, 0.05),
+        basis_centers=np.array([[0.3, 0.3], [0.7, 0.3], [0.5, 0.75]]),
+        basis_radius=0.45,
+        true_coefficients=np.array([2.8, 4.2, 5.0]),
+        initial_guess=np.array([4.0, 4.0, 4.0]),
+        regularization_strength=1e-6,
+        make_plot=False,
+    )
+    assert result.summary["success"]
+    assert result.summary["coefficient_rmse"] < 0.25
+    assert result.summary["field_rmse"] < 0.12
+
+    with open(result.summary_path, "r", encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    assert loaded["case"] == "Pennes perfusion field inverse"
+    assert loaded["coefficient_rmse"] == pytest.approx(result.summary["coefficient_rmse"])
+
+    coeff_text = open(result.coefficients_path, "r", encoding="utf-8").read()
+    assert "true,recovered,error" in coeff_text
+    assert result.plot_path is None
 
 
 def test_regularization_residual_validation():

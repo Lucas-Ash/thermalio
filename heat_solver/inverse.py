@@ -10,7 +10,10 @@ and finite-difference sensitivity utilities for least-squares diagnostics.
 
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -73,6 +76,62 @@ class ReactionDiffusionAdjointResult:
     snapshots: np.ndarray
     adjoint_states: np.ndarray
     observation_steps: np.ndarray
+
+
+@dataclass(frozen=True)
+class GaussianFieldBasis:
+    """Normalized Gaussian radial basis for low-dimensional scalar fields."""
+
+    centers: np.ndarray
+    radius: float
+    normalize: bool = True
+
+    def __post_init__(self):
+        centers = np.asarray(self.centers, dtype=float)
+        if centers.ndim != 2 or centers.shape[1] != 2 or centers.shape[0] == 0:
+            raise ValueError("centers must have shape (n_basis, 2).")
+        if float(self.radius) <= 0.0:
+            raise ValueError("radius must be positive.")
+        object.__setattr__(self, "centers", centers)
+        object.__setattr__(self, "radius", float(self.radius))
+
+    @property
+    def n_basis(self):
+        return int(self.centers.shape[0])
+
+    def design_matrix(self, x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        points = np.column_stack([x.reshape(-1), y.reshape(-1)])
+        diff = points[:, None, :] - self.centers[None, :, :]
+        phi = np.exp(-0.5 * np.sum(diff**2, axis=2) / (self.radius**2))
+        if self.normalize:
+            row_sum = np.sum(phi, axis=1, keepdims=True)
+            phi = phi / np.maximum(row_sum, 1e-15)
+        return phi
+
+    def evaluate(self, coefficients, x, y):
+        coeffs = np.broadcast_to(np.asarray(coefficients, dtype=float), (self.n_basis,))
+        values = self.design_matrix(x, y) @ coeffs
+        return values.reshape(np.asarray(x, dtype=float).shape)
+
+    def as_callable(self, coefficients):
+        coeffs = np.asarray(coefficients, dtype=float).copy()
+
+        def field(x, y):
+            return self.evaluate(coeffs, x, y)
+
+        return field
+
+
+@dataclass(frozen=True)
+class InverseStudyResult:
+    """Files and metrics written by an inverse-study runner."""
+
+    summary_path: str
+    coefficients_path: str
+    plot_path: str | None
+    summary: dict
 
 
 def _as_vector(values, name):
@@ -283,10 +342,14 @@ def regularization_residual(theta, regularization=None):
     ``regularization`` may contain:
 
     - ``prior``: parameter prior vector.
+    - ``matrix``: optional regularization operator applied to ``theta``.
+    - ``target``: target for ``matrix @ theta``; defaults to zeros.
     - ``scale``: component-wise parameter scale; defaults to ones.
     - ``strength``: non-negative Tikhonov weight; defaults to 1.
 
-    The returned residual is ``sqrt(strength) * (theta - prior) / scale``.
+    Without ``matrix``, the returned residual is
+    ``sqrt(strength) * (theta - prior) / scale``.  With ``matrix``, it is
+    ``sqrt(strength) * (matrix @ theta - target) / scale``.
     ``None`` or zero strength returns an empty vector.
     """
     if regularization is None:
@@ -297,17 +360,43 @@ def regularization_residual(theta, regularization=None):
         raise ValueError("regularization strength must be non-negative.")
     if strength == 0.0:
         return np.zeros(0, dtype=float)
-    prior = np.broadcast_to(
-        np.asarray(regularization.get("prior", np.zeros_like(theta)), dtype=float),
-        theta.shape,
-    )
+    matrix = regularization.get("matrix")
+    if matrix is None:
+        raw = theta - np.broadcast_to(
+            np.asarray(regularization.get("prior", np.zeros_like(theta)), dtype=float),
+            theta.shape,
+        )
+    else:
+        matrix = np.asarray(matrix, dtype=float)
+        if matrix.ndim != 2 or matrix.shape[1] != theta.size:
+            raise ValueError("regularization matrix must have shape (n_residuals, n_parameters).")
+        target = np.broadcast_to(
+            np.asarray(regularization.get("target", np.zeros(matrix.shape[0])), dtype=float),
+            (matrix.shape[0],),
+        )
+        raw = matrix @ theta - target
     scale = np.broadcast_to(
-        np.asarray(regularization.get("scale", np.ones_like(theta)), dtype=float),
-        theta.shape,
+        np.asarray(regularization.get("scale", np.ones_like(raw)), dtype=float),
+        raw.shape,
     )
     if np.any(scale <= 0.0):
         raise ValueError("regularization scale entries must be positive.")
-    return np.sqrt(strength) * (theta - prior) / scale
+    return np.sqrt(strength) * raw / scale
+
+
+def pairwise_difference_matrix(n_parameters):
+    """Return rows ``e_i - e_j`` for all pairwise coefficient differences."""
+    n_parameters = int(n_parameters)
+    if n_parameters < 2:
+        return np.zeros((0, n_parameters), dtype=float)
+    rows = []
+    for i in range(n_parameters):
+        for j in range(i + 1, n_parameters):
+            row = np.zeros(n_parameters, dtype=float)
+            row[i] = 1.0
+            row[j] = -1.0
+            rows.append(row)
+    return np.vstack(rows)
 
 
 def finite_difference_jacobian(
@@ -647,6 +736,191 @@ def bootstrap_summary(samples, confidence=0.95, parameter_names=None):
             }
         )
     return rows
+
+
+def run_pennes_field_inverse_study(
+    output_dir,
+    nx=14,
+    alpha=0.1,
+    dt=0.002,
+    times=(0.02, 0.05, 0.08),
+    basis_centers=None,
+    basis_radius=0.45,
+    true_coefficients=None,
+    initial_guess=None,
+    regularization_strength=1e-4,
+    relative_noise=0.0,
+    seed=0,
+    make_plot=True,
+):
+    """Run a reproducible regularized perfusion-field inversion study.
+
+    The unknown perfusion field is represented by a normalized Gaussian basis.
+    The study writes:
+
+    - ``pennes_field_inverse_summary.json``
+    - ``pennes_field_inverse_coefficients.csv``
+    - ``pennes_field_inverse_fields.png`` when ``make_plot`` is true
+    """
+    from .transport import ReactionDiffusionHeatSolver
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if basis_centers is None:
+        basis_centers = np.array(
+            [
+                [0.25, 0.25],
+                [0.75, 0.25],
+                [0.25, 0.75],
+                [0.75, 0.75],
+            ],
+            dtype=float,
+        )
+    basis = GaussianFieldBasis(np.asarray(basis_centers, dtype=float), radius=basis_radius)
+    if true_coefficients is None:
+        true_coefficients = np.array([2.8, 4.8, 3.4, 6.0], dtype=float)
+    true_coefficients = np.broadcast_to(np.asarray(true_coefficients, dtype=float), (basis.n_basis,)).copy()
+    if initial_guess is None:
+        initial_guess = np.full(basis.n_basis, float(np.mean(true_coefficients)))
+    initial_guess = np.broadcast_to(np.asarray(initial_guess, dtype=float), (basis.n_basis,)).copy()
+
+    from .meshes import generate_square_polygonal_mesh
+
+    vertices, polygons, centers = generate_square_polygonal_mesh(nx=nx, ny=nx, bbox=(0.0, 1.0, 0.0, 1.0))
+    x = centers[:, 0]
+    y = centers[:, 1]
+    u0 = (
+        np.sin(np.pi * x) * np.sin(np.pi * y)
+        + 0.35 * np.sin(2.0 * np.pi * x) * np.sin(np.pi * y)
+        + 0.25 * np.sin(np.pi * x) * np.sin(2.0 * np.pi * y)
+    )
+    times = np.asarray(times, dtype=float).reshape(-1)
+    if times.size == 0 or np.any(times <= 0.0) or np.any(np.diff(times) <= 0.0):
+        raise ValueError("times must be positive and strictly increasing.")
+
+    def snapshots_for(coefficients):
+        solver = ReactionDiffusionHeatSolver(
+            vertices,
+            polygons,
+            alpha,
+            dt,
+            reaction_rate=basis.as_callable(coefficients),
+            bc_func=lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float)),
+            source_func=lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float)),
+        )
+        snapshots = []
+        t = 0.0
+        u = u0.copy()
+        for t_next in times:
+            t, u = solver.solve(u, t, float(t_next))
+            snapshots.append(u.copy())
+        return np.asarray(snapshots)
+
+    def forward(coefficients):
+        return snapshots_for(coefficients).reshape(-1)
+
+    clean_observed = forward(true_coefficients)
+    observed = add_observation_noise(clean_observed, relative_level=relative_noise, seed=seed)
+    smoothness = pairwise_difference_matrix(basis.n_basis)
+    regularization = {
+        "matrix": smoothness,
+        "strength": float(regularization_strength),
+        "scale": np.ones(smoothness.shape[0]) if smoothness.size else np.ones(0),
+    }
+    result = estimate_parameters(
+        forward,
+        observed,
+        initial_guess=initial_guess,
+        bounds=(np.zeros(basis.n_basis), np.full(basis.n_basis, 12.0)),
+        parameter_names=tuple(f"k_{i}" for i in range(basis.n_basis)),
+        regularization=regularization,
+        optimizer_options={"max_nfev": 80},
+    )
+
+    recovered_field = basis.evaluate(result.values, x, y)
+    true_field = basis.evaluate(true_coefficients, x, y)
+    field_rmse = float(np.sqrt(np.mean((recovered_field - true_field) ** 2)))
+    coeff_rmse = float(np.sqrt(np.mean((result.values - true_coefficients) ** 2)))
+    summary = {
+        "case": "Pennes perfusion field inverse",
+        "nx": int(nx),
+        "alpha": float(alpha),
+        "dt": float(dt),
+        "times": [float(t) for t in times],
+        "basis_radius": float(basis_radius),
+        "regularization_strength": float(regularization_strength),
+        "relative_noise": float(relative_noise),
+        "success": bool(result.success),
+        "nfev": int(result.nfev),
+        "data_residual_norm": float(result.data_residual_norm),
+        "regularization_residual_norm": float(result.regularization_residual_norm),
+        "relative_residual": float(result.relative_residual),
+        "coefficient_rmse": coeff_rmse,
+        "field_rmse": field_rmse,
+        "true_coefficients": [float(v) for v in true_coefficients],
+        "recovered_coefficients": [float(v) for v in result.values],
+    }
+
+    summary_path = output_dir / "pennes_field_inverse_summary.json"
+    coefficients_path = output_dir / "pennes_field_inverse_coefficients.csv"
+    plot_path = output_dir / "pennes_field_inverse_fields.png" if make_plot else None
+
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2, sort_keys=True)
+    with coefficients_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=["index", "x", "y", "true", "recovered", "error"],
+        )
+        writer.writeheader()
+        for idx, (center, truth, recovered) in enumerate(zip(basis.centers, true_coefficients, result.values)):
+            writer.writerow(
+                {
+                    "index": idx,
+                    "x": float(center[0]),
+                    "y": float(center[1]),
+                    "true": float(truth),
+                    "recovered": float(recovered),
+                    "error": float(recovered - truth),
+                }
+            )
+
+    if make_plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.5), constrained_layout=True)
+        fields = [
+            (true_field, "true perfusion"),
+            (recovered_field, "recovered perfusion"),
+            (recovered_field - true_field, "recovery error"),
+        ]
+        vmin = min(float(np.min(true_field)), float(np.min(recovered_field)))
+        vmax = max(float(np.max(true_field)), float(np.max(recovered_field)))
+        for ax, (field, title) in zip(axes, fields):
+            if "error" in title:
+                limit = max(float(np.max(np.abs(field))), 1e-12)
+                contour = ax.tricontourf(x, y, field, levels=24, cmap="coolwarm", vmin=-limit, vmax=limit)
+            else:
+                contour = ax.tricontourf(x, y, field, levels=24, cmap="viridis", vmin=vmin, vmax=vmax)
+            ax.scatter(basis.centers[:, 0], basis.centers[:, 1], c="white", edgecolors="black", s=35)
+            ax.set_aspect("equal")
+            ax.set_title(title)
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            fig.colorbar(contour, ax=ax)
+        fig.suptitle("Direction D: regularized Pennes perfusion-field inversion")
+        fig.savefig(plot_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    return InverseStudyResult(
+        summary_path=str(summary_path),
+        coefficients_path=str(coefficients_path),
+        plot_path=None if plot_path is None else str(plot_path),
+        summary=summary,
+    )
 
 
 def estimate_parameters(
