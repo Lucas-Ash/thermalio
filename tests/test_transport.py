@@ -5,6 +5,8 @@ from heat_solver.cases import (
     advection_diffusion_case,
     cattaneo_wave_case,
     fractional_subdiffusion_case,
+    fractional_stefan_apparent_capacity_case,
+    hyperbolic_stefan_apparent_capacity_case,
     pennes_bioheat_case,
     transport_linear_boundary_case,
 )
@@ -13,7 +15,9 @@ from heat_solver.meshes import generate_square_polygonal_mesh
 from heat_solver.transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
+    FractionalStefanSolver,
     HyperbolicHeatSolver,
+    HyperbolicStefanSolver,
     ReactionDiffusionHeatSolver,
 )
 
@@ -62,6 +66,48 @@ def test_hyperbolic_manufactured_accuracy_and_convergence():
     assert errors[0] < 5e-3
     # Refinement reduces the error (close to second order).
     assert errors[1] < 0.6 * errors[0]
+
+
+def test_hyperbolic_stefan_manufactured_convergence_and_capacity_coupling():
+    case = hyperbolic_stefan_apparent_capacity_case(alpha=0.08, tau=0.05)
+    t_end = 0.04
+    errors = []
+    for n in (12, 24):
+        vertices, polygons, centers, areas = _square(n, case["bbox"])
+        dt = t_end / (4 * n)
+        solver = HyperbolicStefanSolver(
+            vertices, polygons, case["alpha"], dt, case["relaxation_time"],
+            case["phase_change_model"],
+            bc_func=case["boundary"], source_func=case["source"],
+            phase_change_options=case["phase_change_options"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        du0 = case["initial_rate"](centers[:, 0], centers[:, 1])
+        _, u = solver.solve(u0, 0.0, t_end, du0=du0)
+        u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+        errors.append(_rel_l2(u, u_exact, areas))
+
+    assert errors[0] < 4e-3
+    assert errors[1] < 0.35 * errors[0]
+
+    # The manufactured source includes c(T) T_t; omitting apparent capacity
+    # should be visibly wrong on the same mesh.
+    vertices, polygons, centers, areas = _square(18, case["bbox"])
+    solver = HyperbolicHeatSolver(
+        vertices, polygons, case["alpha"], t_end / 72, case["relaxation_time"],
+        bc_func=case["boundary"], source_func=case["source"],
+    )
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+    du0 = case["initial_rate"](centers[:, 0], centers[:, 1])
+    _, u_no_phase = solver.solve(u0, 0.0, t_end, du0=du0)
+    u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+    assert _rel_l2(u_no_phase, u_exact, areas) > 20.0 * errors[1]
+
+
+def test_hyperbolic_stefan_requires_phase_change_model():
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=4, ny=4)
+    with pytest.raises(ValueError):
+        HyperbolicStefanSolver(vertices, polygons, 0.1, 0.01, 0.05, None)
 
 
 # --------------------------------------------------------------------------- #
@@ -149,6 +195,43 @@ def test_fractional_manufactured_convergence(beta):
     # L1 scheme is order (2 - beta) in time; allow a tolerance band.
     assert observed_order > (2.0 - beta) - 0.4
     assert errors[1] < 1e-2
+
+
+def test_fractional_stefan_manufactured_convergence_and_capacity_coupling():
+    case = fractional_stefan_apparent_capacity_case(alpha=0.08, beta=0.6)
+    t_end = 0.2
+    errors = []
+    for n in (12, 24):
+        vertices, polygons, centers, areas = _square(n, case["bbox"])
+        solver = FractionalStefanSolver(
+            vertices, polygons, case["alpha"], t_end / 30, case["beta"],
+            case["phase_change_model"],
+            bc_func=case["boundary"], source_func=case["source"],
+            phase_change_options=case["phase_change_options"],
+        )
+        u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+        _, u = solver.solve(u0, 0.0, t_end)
+        u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+        errors.append(_rel_l2(u, u_exact, areas))
+
+    assert errors[0] < 7e-3
+    assert errors[1] < 0.4 * errors[0]
+
+    vertices, polygons, centers, areas = _square(18, case["bbox"])
+    solver = FractionalHeatSolver(
+        vertices, polygons, case["alpha"], t_end / 30, case["beta"],
+        bc_func=case["boundary"], source_func=case["source"],
+    )
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+    _, u_no_phase = solver.solve(u0, 0.0, t_end)
+    u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
+    assert _rel_l2(u_no_phase, u_exact, areas) > 10.0 * errors[1]
+
+
+def test_fractional_stefan_requires_phase_change_model():
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=4, ny=4)
+    with pytest.raises(ValueError):
+        FractionalStefanSolver(vertices, polygons, 0.1, 0.01, 0.6, None)
 
 
 # --------------------------------------------------------------------------- #

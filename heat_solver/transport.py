@@ -1,6 +1,6 @@
 """Extended thermal-transport models built on the polygonal finite-volume core.
 
-This module adds three transport models that go beyond the classical parabolic
+This module adds transport models that go beyond the classical parabolic
 Fourier heat equation handled by :class:`heat_solver.polygonal.PolygonalHeatSolver`.
 Each model is implemented by *composing* a base ``PolygonalHeatSolver`` so that the
 mesh geometry, the diffusion stiffness matrix ``A`` and the lumped mass matrix
@@ -39,6 +39,12 @@ mesh geometry, the diffusion stiffness matrix ``A`` and the lumped mass matrix
     (``beta < 1``) models heat conduction in fractal/disordered media and
     materials with long-memory (non-local-in-time) thermal response.
 
+``HyperbolicStefanSolver`` and ``FractionalStefanSolver``
+    Apparent-heat-capacity phase-change variants of the Cattaneo and Caputo
+    solvers, respectively.  These couple ``ApparentHeatCapacityModel`` into the
+    time term, yielding ``tau u_tt + c(u) u_t - div(alpha grad u) = Q`` and
+    ``c(u) D_t^beta u - div(alpha grad u) = Q``.
+
 ``ReactionDiffusionHeatSolver``
     Reaction-diffusion / Pennes bioheat equation with a linear reaction term::
 
@@ -63,7 +69,8 @@ import numpy as np
 from scipy.sparse import csr_matrix, diags, lil_matrix
 from scipy.sparse.linalg import factorized, spsolve
 
-from .polygonal import PolygonalHeatSolver
+from .phase_change import ApparentHeatCapacityModel
+from .polygonal import PolygonalHeatSolver, _AndersonAccelerator
 
 
 def _as_velocity_callable(velocity):
@@ -140,6 +147,13 @@ class _TransportBase:
         self._base._assemble_system()
         self.A = self._base.A.tocsr()
         self.area_diag = diags(self.cell_areas, format="csr")
+        self.phase_change_model = self._base.phase_change_model
+        if (
+            self.phase_change_model is not None
+            and not isinstance(self.phase_change_model, ApparentHeatCapacityModel)
+        ):
+            raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
+        self.phase_change_options = self._base.phase_change_options
         # Only Robin data can change the LHS matrix between steps; Dirichlet rows
         # are replaced and Neumann/flux data only feed the right-hand side.
         self._bc_lhs_constant = self.bc_type != "robin"
@@ -168,6 +182,35 @@ class _TransportBase:
 
     def _apply_dirichlet(self, lhs_csr):
         return self._base._apply_dirichlet_identity_rows(lhs_csr)
+
+    def _effective_heat_capacity(self, temperature):
+        if self.phase_change_model is None:
+            return np.ones_like(np.asarray(temperature, dtype=float))
+        temperature = np.asarray(temperature, dtype=float)
+        return np.broadcast_to(
+            np.asarray(self.phase_change_model.effective_heat_capacity(temperature), dtype=float),
+            temperature.shape,
+        )
+
+    def _picard_options(self):
+        opts = self.phase_change_options
+        return (
+            int(opts.get("max_iters", 30)),
+            float(opts.get("tol", 1e-9)),
+            float(opts.get("relaxation", 1.0)),
+            int(opts.get("anderson_depth", 0)),
+        )
+
+    @staticmethod
+    def _relaxed_picard_update(accel, u_iter, u_raw, relaxation):
+        if accel is not None:
+            u_next = accel.step(u_iter, u_raw)
+            if np.all(np.isfinite(u_next)):
+                return u_next
+            accel.reset()
+        if relaxation != 1.0:
+            return relaxation * u_raw + (1.0 - relaxation) * u_iter
+        return u_raw
 
     def _boundary_system(self, t):
         """Boundary closure ``(B, b)`` so that ``A_total = A + B`` and ``rhs += b``.
@@ -242,6 +285,9 @@ class HyperbolicHeatSolver(_TransportBase):
         ``du0`` is the initial time derivative ``du/dt`` at ``t0`` (defaults to
         zero).  It is used to build the second-order startup level ``u^{-1}``.
         """
+        if self.phase_change_model is not None:
+            return self._solve_phase_change(u0, t0, t_end, du0=du0)
+
         u_n = np.array(u0, dtype=float)
         v0 = np.zeros(self.M) if du0 is None else np.broadcast_to(
             np.asarray(du0, dtype=float), (self.M,)
@@ -290,6 +336,69 @@ class HyperbolicHeatSolver(_TransportBase):
                 else:
                     u_np1 = spsolve((base_lhs + B).tocsr(), rhs)
             u_nm1, u_n = u_n, u_np1
+            t = t_next
+        return t, u_n
+
+    def _solve_phase_change(self, u0, t0, t_end, du0=None):
+        """Picard solve for ``tau u_tt + c(u) u_t - div(alpha grad u) = Q``."""
+        u_n = np.array(u0, dtype=float)
+        v0 = np.zeros(self.M) if du0 is None else np.broadcast_to(
+            np.asarray(du0, dtype=float), (self.M,)
+        ).astype(float)
+
+        nsteps, dt = self._uniform_schedule(t0, t_end, self.dt)
+        if nsteps == 0:
+            return float(t0), u_n
+
+        q0 = self._source(t0)
+        B0, b0 = self._boundary_system(t0)
+        A0 = self.A if B0 is None else (self.A + B0).tocsr()
+        cp0 = self._effective_heat_capacity(u_n)
+        a0 = (q0 + (b0 - A0 @ u_n) / self.cell_areas - cp0 * v0) / self.tau
+        u_nm1 = u_n - dt * v0 + 0.5 * dt * dt * a0
+
+        c2 = self.tau / (dt * dt)
+        c1 = 1.0 / (2.0 * dt)
+        max_iters, tol, relaxation, anderson_depth = self._picard_options()
+        t = float(t0)
+        bidx = self._boundary_idx
+
+        for _ in range(nsteps):
+            t_next = t + dt
+            q_next = self._source(t_next)
+            rhs_base = self.cell_areas * q_next + self.cell_areas * (2.0 * c2 * u_n)
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs_base[bidx] = bc[bidx]
+            u_iter = u_n.copy()
+            accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
+
+            for _iter in range(max_iters):
+                cp_eff = self._effective_heat_capacity(u_iter)
+                lhs = (diags(self.cell_areas * (c2 + c1 * cp_eff), format="csr") + self.A).tocsr()
+                rhs = rhs_base + self.cell_areas * (c1 * cp_eff - c2) * u_nm1
+                if self.bc_type == "dirichlet":
+                    lhs = self._apply_dirichlet(lhs)
+                    rhs[bidx] = bc[bidx]
+                else:
+                    B, b = self._boundary_system(t_next)
+                    rhs = rhs + b
+                    if B is not None:
+                        lhs = (lhs + B).tocsr()
+                u_raw = spsolve(lhs, rhs)
+                u_next = self._relaxed_picard_update(accel, u_iter, u_raw, relaxation)
+                err = np.max(np.abs(u_next - u_iter))
+                scale = max(1.0, np.max(np.abs(u_next)))
+                u_iter = u_next
+                if err <= tol * scale:
+                    break
+            else:
+                raise RuntimeError(
+                    "Hyperbolic Stefan solve did not converge. "
+                    "Try smaller dt or larger phase_change_options['max_iters']."
+                )
+
+            u_nm1, u_n = u_n, u_iter
             t = t_next
         return t, u_n
 
@@ -470,6 +579,9 @@ class FractionalHeatSolver(_TransportBase):
         return (k + 1.0) ** (1.0 - self.beta) - k ** (1.0 - self.beta)
 
     def solve(self, u0, t0, t_end):
+        if self.phase_change_model is not None:
+            return self._solve_phase_change(u0, t0, t_end)
+
         u0 = np.array(u0, dtype=float)
         nsteps, dt = self._uniform_schedule(t0, t_end, self.dt)
         if nsteps == 0:
@@ -511,6 +623,107 @@ class FractionalHeatSolver(_TransportBase):
             history.append(u_np1)
             t = t_next
         return t, history[-1]
+
+    def _solve_phase_change(self, u0, t0, t_end):
+        """Picard solve for ``c(u) D_t^beta u - div(alpha grad u) = Q``."""
+        u0 = np.array(u0, dtype=float)
+        nsteps, dt = self._uniform_schedule(t0, t_end, self.dt)
+        if nsteps == 0:
+            return float(t0), u0
+
+        sigma = dt ** (-self.beta) / gamma(2.0 - self.beta)
+        history = [u0.copy()]
+        weights = self._l1_weights(nsteps)
+        max_iters, tol, relaxation, anderson_depth = self._picard_options()
+        t = float(t0)
+        bidx = self._boundary_idx
+
+        for n in range(nsteps):
+            t_next = t + dt
+            q_next = self._source(t_next)
+            hist_sum = np.zeros(self.M)
+            for k in range(1, n + 1):
+                hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
+            g = history[n] - hist_sum
+            rhs_base = self.cell_areas * q_next
+            if self.bc_type == "dirichlet":
+                bc = self._bc_values(t_next)
+                rhs_base[bidx] = bc[bidx]
+            u_iter = history[n].copy()
+            accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
+
+            for _iter in range(max_iters):
+                cp_eff = self._effective_heat_capacity(u_iter)
+                lhs = (diags(sigma * self.cell_areas * cp_eff, format="csr") + self.A).tocsr()
+                rhs = rhs_base + sigma * self.cell_areas * cp_eff * g
+                if self.bc_type == "dirichlet":
+                    lhs = self._apply_dirichlet(lhs)
+                    rhs[bidx] = bc[bidx]
+                else:
+                    B, b = self._boundary_system(t_next)
+                    rhs = rhs + b
+                    if B is not None:
+                        lhs = (lhs + B).tocsr()
+                u_raw = spsolve(lhs, rhs)
+                u_next = self._relaxed_picard_update(accel, u_iter, u_raw, relaxation)
+                err = np.max(np.abs(u_next - u_iter))
+                scale = max(1.0, np.max(np.abs(u_next)))
+                u_iter = u_next
+                if err <= tol * scale:
+                    break
+            else:
+                raise RuntimeError(
+                    "Fractional Stefan solve did not converge. "
+                    "Try smaller dt or larger phase_change_options['max_iters']."
+                )
+
+            history.append(u_iter)
+            t = t_next
+        return t, history[-1]
+
+
+class HyperbolicStefanSolver(HyperbolicHeatSolver):
+    """Cattaneo apparent-heat-capacity phase-change solver.
+
+    This is a named convenience wrapper around :class:`HyperbolicHeatSolver`
+    with ``phase_change_model`` required, solving
+    ``tau u_tt + c(u) u_t - div(alpha grad u) = Q``.
+    """
+
+    def __init__(self, vertices, polygons, alpha, dt, relaxation_time, phase_change_model, **kwargs):
+        if phase_change_model is None:
+            raise ValueError("HyperbolicStefanSolver requires phase_change_model.")
+        super().__init__(
+            vertices,
+            polygons,
+            alpha,
+            dt,
+            relaxation_time,
+            phase_change_model=phase_change_model,
+            **kwargs,
+        )
+
+
+class FractionalStefanSolver(FractionalHeatSolver):
+    """Caputo apparent-heat-capacity phase-change solver.
+
+    This is a named convenience wrapper around :class:`FractionalHeatSolver`
+    with ``phase_change_model`` required, solving
+    ``c(u) D_t^beta u - div(alpha grad u) = Q``.
+    """
+
+    def __init__(self, vertices, polygons, alpha, dt, beta, phase_change_model, **kwargs):
+        if phase_change_model is None:
+            raise ValueError("FractionalStefanSolver requires phase_change_model.")
+        super().__init__(
+            vertices,
+            polygons,
+            alpha,
+            dt,
+            beta,
+            phase_change_model=phase_change_model,
+            **kwargs,
+        )
 
 
 class ReactionDiffusionHeatSolver(_TransportBase):
