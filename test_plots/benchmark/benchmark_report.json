@@ -2,27 +2,32 @@
   "resolutions": [
     16,
     32,
-    64
+    48
   ],
   "entries": [
     {
       "name": "source_driven_sine (scalar diffusion)",
-      "observed_order": 1.9958638492052332,
-      "order_3grid": 1.9748807747517518,
-      "extrap_error": 0.0,
+      "observed_order": 1.9947492156383573,
+      "order_3grid": 1.972206356540635,
+      "extrap_error": -6.776263578034403e-21,
       "asymptotic": true,
+      "h": [
+        0.125,
+        0.0625,
+        0.041666666666666664
+      ],
       "L2_rel": [
         0.0004935352875461288,
         0.00012509142540403912,
-        3.136264306472794e-05
+        5.5714679991961646e-05
       ],
       "nversion_within_mesh": {
         "square_polygonal": 0.0004522036336046027,
         "nonorthogonal_tiled_polygonal": 0.008591100135653415
       },
       "nversion_cross_mesh": 0.011488692926086551,
-      "fd_reference_error": 3.237789848567293e-05,
-      "fv_be_error": 3.2347645832690204e-05,
+      "fd_reference_error": 5.6777291112472624e-05,
+      "fv_be_error": 5.669546459288647e-05,
       "checks": {
         "order_near_2": true,
         "nversion_agree": true,
@@ -31,14 +36,19 @@
     },
     {
       "name": "sine_mode (pure diffusion)",
-      "observed_order": 1.9959550462554088,
-      "order_3grid": 1.974872349324243,
+      "observed_order": 1.9948124452841216,
+      "order_3grid": 1.972197548649748,
       "extrap_error": 0.0,
       "asymptotic": true,
+      "h": [
+        0.125,
+        0.0625,
+        0.041666666666666664
+      ],
       "L2_rel": [
         0.0004983497839891717,
         0.00012631026364253828,
-        3.166622568862609e-05
+        5.6256098122032355e-05
       ],
       "nversion_within_mesh": {
         "square_polygonal": 0.00045654625829790883,
@@ -52,14 +62,19 @@
     },
     {
       "name": "anisotropic diffusion (MMS tensor alpha)",
-      "observed_order": 1.9654280437849914,
-      "order_3grid": 1.905379180441424,
-      "extrap_error": 3.3881317890172014e-21,
+      "observed_order": 1.9599919970230328,
+      "order_3grid": 1.8988824058798728,
+      "extrap_error": 0.0,
       "asymptotic": true,
+      "h": [
+        0.0625,
+        0.03125,
+        0.020833333333333332
+      ],
       "L2_rel": [
         0.0002392757111027933,
         6.318608581201727e-05,
-        1.617963266862917e-05
+        2.8541973229592737e-05
       ],
       "checks": {
         "order_near_2": true
