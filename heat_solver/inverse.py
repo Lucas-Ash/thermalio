@@ -3,7 +3,8 @@
 The functions in this module intentionally keep the inverse layer thin: callers
 provide a deterministic ``forward_map(theta) -> temperature`` built from any of
 Thermalio's verified solvers, and this module handles observation noise,
-weighted residuals, scalar optimization, and identifiability scans.
+weighted residuals, scalar/vector optimization, regularization, and
+identifiability scans.
 """
 
 from __future__ import annotations
@@ -24,6 +25,23 @@ class ScalarParameterEstimate:
     bounds: tuple[float, float]
     cost: float
     residual_norm: float
+    relative_residual: float
+    success: bool
+    nfev: int
+    message: str
+
+
+@dataclass(frozen=True)
+class ParameterEstimate:
+    """Result of a vector least-squares parameter-estimation run."""
+
+    parameter_names: tuple[str, ...]
+    values: np.ndarray
+    initial_guess: np.ndarray
+    bounds: tuple[np.ndarray, np.ndarray]
+    cost: float
+    data_residual_norm: float
+    regularization_residual_norm: float
     relative_residual: float
     success: bool
     nfev: int
@@ -100,7 +118,9 @@ def make_synthetic_observations(
     seed=None,
 ):
     """Evaluate a forward map at the truth and optionally perturb the data."""
-    clean = np.asarray(forward_map(float(true_parameter)), dtype=float)
+    true_parameter = np.asarray(true_parameter, dtype=float)
+    theta = float(true_parameter) if true_parameter.ndim == 0 else true_parameter
+    clean = np.asarray(forward_map(theta), dtype=float)
     noisy = add_observation_noise(
         clean,
         relative_level=relative_noise,
@@ -122,6 +142,135 @@ def _validate_bounds(bounds, initial_guess):
     if not (lower <= initial_guess <= upper):
         raise ValueError("initial_guess must lie within bounds.")
     return lower, upper
+
+
+def _as_parameter_vector(values, name):
+    arr = np.asarray(values, dtype=float).reshape(-1)
+    if arr.size == 0:
+        raise ValueError(f"{name} must contain at least one parameter.")
+    return arr
+
+
+def _validate_vector_bounds(bounds, initial_guess):
+    n_params = initial_guess.size
+    if bounds is None:
+        return np.full(n_params, -np.inf), np.full(n_params, np.inf)
+    if len(bounds) != 2:
+        raise ValueError("bounds must be a (lower, upper) pair.")
+    lower = np.broadcast_to(np.asarray(bounds[0], dtype=float), (n_params,)).copy()
+    upper = np.broadcast_to(np.asarray(bounds[1], dtype=float), (n_params,)).copy()
+    if np.any(lower >= upper):
+        raise ValueError("bounds must satisfy lower < upper for every parameter.")
+    if np.any((initial_guess < lower) | (initial_guess > upper)):
+        raise ValueError("initial_guess must lie within bounds.")
+    return lower, upper
+
+
+def regularization_residual(theta, regularization=None):
+    """Return prior/scale regularization residuals for a parameter vector.
+
+    ``regularization`` may contain:
+
+    - ``prior``: parameter prior vector.
+    - ``scale``: component-wise parameter scale; defaults to ones.
+    - ``strength``: non-negative Tikhonov weight; defaults to 1.
+
+    The returned residual is ``sqrt(strength) * (theta - prior) / scale``.
+    ``None`` or zero strength returns an empty vector.
+    """
+    if regularization is None:
+        return np.zeros(0, dtype=float)
+    theta = _as_parameter_vector(theta, "theta")
+    strength = float(regularization.get("strength", 1.0))
+    if strength < 0.0:
+        raise ValueError("regularization strength must be non-negative.")
+    if strength == 0.0:
+        return np.zeros(0, dtype=float)
+    prior = np.broadcast_to(
+        np.asarray(regularization.get("prior", np.zeros_like(theta)), dtype=float),
+        theta.shape,
+    )
+    scale = np.broadcast_to(
+        np.asarray(regularization.get("scale", np.ones_like(theta)), dtype=float),
+        theta.shape,
+    )
+    if np.any(scale <= 0.0):
+        raise ValueError("regularization scale entries must be positive.")
+    return np.sqrt(strength) * (theta - prior) / scale
+
+
+def estimate_parameters(
+    forward_map,
+    observed,
+    initial_guess,
+    bounds=None,
+    weights=None,
+    parameter_names=None,
+    normalize_residual=False,
+    regularization=None,
+    optimizer_options=None,
+):
+    """Estimate one or more parameters with SciPy least squares.
+
+    ``forward_map`` receives the full parameter vector.  Use
+    :func:`estimate_scalar_parameter` for the legacy scalar convenience wrapper.
+    """
+    observed_vec = _as_vector(observed, "observed")
+    initial = _as_parameter_vector(initial_guess, "initial_guess")
+    lower, upper = _validate_vector_bounds(bounds, initial)
+    if parameter_names is None:
+        parameter_names = tuple(f"theta_{i}" for i in range(initial.size))
+    else:
+        parameter_names = tuple(str(name) for name in parameter_names)
+    if len(parameter_names) != initial.size:
+        raise ValueError("parameter_names length must match initial_guess length.")
+    options = dict(optimizer_options or {})
+
+    def data_residual(theta):
+        return residual_vector(
+            forward_map(np.asarray(theta, dtype=float)),
+            observed_vec,
+            weights=weights,
+            normalize=normalize_residual,
+        )
+
+    def objective(theta):
+        return np.concatenate([data_residual(theta), regularization_residual(theta, regularization)])
+
+    result = least_squares(
+        objective,
+        x0=initial,
+        bounds=(lower, upper),
+        **options,
+    )
+    values = np.asarray(result.x, dtype=float)
+    data_res = residual_vector(
+        forward_map(values),
+        observed_vec,
+        weights=weights,
+        normalize=False,
+    )
+    reg_res = regularization_residual(values, regularization)
+    observed_norm = residual_vector(
+        np.zeros_like(observed_vec),
+        observed_vec,
+        weights=weights,
+        normalize=False,
+    )
+    data_residual_norm = float(np.linalg.norm(data_res))
+    return ParameterEstimate(
+        parameter_names=parameter_names,
+        values=values,
+        initial_guess=initial,
+        bounds=(lower, upper),
+        cost=float(result.cost),
+        data_residual_norm=data_residual_norm,
+        regularization_residual_norm=float(np.linalg.norm(reg_res)),
+        relative_residual=data_residual_norm / max(float(np.linalg.norm(observed_norm)), 1e-16),
+        success=bool(result.success),
+        nfev=int(result.nfev),
+        message=str(result.message),
+    )
 
 
 def estimate_scalar_parameter(
@@ -227,4 +376,49 @@ def identifiability_scan(
                 "residual_norm": residual_norm,
             }
         )
+    return rows
+
+
+def identifiability_grid_scan(
+    forward_map,
+    observed,
+    parameter_grids,
+    parameter_names=None,
+    weights=None,
+    normalize_residual=False,
+    regularization=None,
+):
+    """Evaluate least-squares cost on a Cartesian product of parameter grids."""
+    observed_vec = _as_vector(observed, "observed")
+    grids = [_as_parameter_vector(grid, "parameter_grid") for grid in parameter_grids]
+    if not grids:
+        raise ValueError("parameter_grids must contain at least one grid.")
+    if parameter_names is None:
+        parameter_names = tuple(f"theta_{i}" for i in range(len(grids)))
+    else:
+        parameter_names = tuple(str(name) for name in parameter_names)
+    if len(parameter_names) != len(grids):
+        raise ValueError("parameter_names length must match parameter_grids length.")
+
+    rows = []
+    for candidate in np.array(np.meshgrid(*grids, indexing="ij")).reshape(len(grids), -1).T:
+        data_res = residual_vector(
+            forward_map(candidate),
+            observed_vec,
+            weights=weights,
+            normalize=normalize_residual,
+        )
+        reg_res = regularization_residual(candidate, regularization)
+        residual_norm = float(np.linalg.norm(data_res))
+        reg_norm = float(np.linalg.norm(reg_res))
+        row = {name: float(value) for name, value in zip(parameter_names, candidate)}
+        row.update(
+            {
+                "parameters": tuple(float(value) for value in candidate),
+                "cost": 0.5 * (residual_norm**2 + reg_norm**2),
+                "data_residual_norm": residual_norm,
+                "regularization_residual_norm": reg_norm,
+            }
+        )
+        rows.append(row)
     return rows

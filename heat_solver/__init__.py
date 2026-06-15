@@ -28,11 +28,15 @@ from .dmp import (
 from .afc import AFCMonotoneSolver
 from .geometry import polygon_area_and_centroid
 from .inverse import (
+    ParameterEstimate,
     ScalarParameterEstimate,
     add_observation_noise,
+    estimate_parameters,
     estimate_scalar_parameter,
+    identifiability_grid_scan,
     identifiability_scan,
     make_synthetic_observations,
+    regularization_residual,
     residual_vector,
 )
 from .meshes import (
@@ -67,6 +71,7 @@ __all__ = [
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",
     "ApparentHeatCapacityModel",
+    "ParameterEstimate",
     "ScalarParameterEstimate",
     "add_observation_noise",
     "anisotropic_tensor",
@@ -87,10 +92,13 @@ __all__ = [
     "get_analytical_case",
     "harmonic_polynomial_solution",
     "heat_kernel",
+    "estimate_parameters",
     "estimate_scalar_parameter",
+    "identifiability_grid_scan",
     "identifiability_scan",
     "make_synthetic_observations",
     "polygon_area_and_centroid",
+    "regularization_residual",
     "residual_vector",
     "run_mixed_polygonal_test",
     "run_nonorthogonal_polygonal_test",

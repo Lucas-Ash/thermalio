@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1 initial implementation
+- **Status:** PR1/PR2 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-14
 
@@ -22,6 +22,9 @@ reference?*
   `least_squares` around arbitrary trusted forward maps, plus synthetic
   observation/noise utilities, identifiability scans, and Pennes perfusion
   recovery tests.
+- **Implemented second increment:** vector-parameter estimation, Tikhonov-style
+  prior regularization, and Cartesian identifiability grid scans, verified on
+  joint diffusivity/perfusion recovery.
 - **Out of scope (later):** adjoint/auto-diff gradients; full Bayesian inversion;
   PINN implementation and head-to-head benchmark; field (spatially varying)
   parameter recovery.
@@ -49,7 +52,9 @@ reference?*
 - PR1: single-parameter estimation + identifiability/noise study. Implemented in
   `heat_solver/inverse.py` with perfusion-recovery verification in
   `tests/test_inverse.py`.
-- PR2+: multi-parameter, regularization, ML comparison.
+- PR2: multi-parameter estimation and regularization. Implemented in
+  `heat_solver/inverse.py` with joint diffusivity/perfusion recovery tests.
+- PR2+: ML comparison.
 
 ## References
 - Pennes bioheat inverse problems (perfusion estimation); PINN inverse-problem
