@@ -12,6 +12,39 @@ with **Dirichlet**, **Neumann**, **Robin**, and **nonlinear radiative** boundary
 
 ---
 
+## Physics-system genealogy
+
+Thermalio covers a family of heat-transfer models that share the same thermal
+energy-balance root but represent different physical assumptions: Fourier
+diffusion, material response, transport, biological perfusion, and latent-heat
+interfaces.
+
+```mermaid
+flowchart TD
+    A["Thermal energy balance<br/>temperature field u(x,t)"]
+    A --> B["Fourier heat equation<br/>u_t - div(alpha grad u) = Q<br/>Applications: solid conduction, electronics cooling"]
+    B --> C["Anisotropic / graded / nonlinear conduction<br/>u_t - div(alpha(x,u) grad u) = Q<br/>Applications: composites, thermal-barrier coatings"]
+    B --> D["Heat-advection / advection-diffusion<br/>u_t + div(v u) - div(alpha grad u) = Q<br/>Applications: moving media, convective thermal transport"]
+    B --> E["Reaction-diffusion / Pennes bioheat<br/>u_t - div(alpha grad u) + k u = Q<br/>Applications: tissue perfusion, ablation planning"]
+    B --> F["Stefan and apparent-capacity phase change<br/>C_app(u) u_t - div(alpha grad u) = Q<br/>Applications: melting/freezing fronts, cryosurgery"]
+    B --> G["Time-fractional subdiffusion<br/>D_t^beta u - div(alpha grad u) = Q<br/>Applications: long-memory media, porous/disordered materials"]
+    B --> H["Non-Fourier / Cattaneo heat waves<br/>tau u_tt + u_t - div(alpha grad u) = Q<br/>Applications: ultrafast heating, second-sound materials"]
+    H --> I["Non-Fourier phase change<br/>C_app(u)(tau u_tt + u_t) - div(alpha grad u) = Q<br/>Applications: pulsed-laser melting, rapid solidification"]
+```
+
+| Physics system | Key equation form | Potential applications |
+|----------------|-------------------|------------------------|
+| **Classical Fourier heat equation** | $\partial_t u - \nabla\cdot(\alpha\nabla u)=Q$ | Solid heat conduction, cooling of mechanical/electronic components |
+| **Anisotropic, graded, or nonlinear conduction** | $\partial_t u - \nabla\cdot(\alpha(\mathbf{x},u)\nabla u)=Q$ | Composite laminates, thermal-barrier coatings, temperature-dependent materials |
+| **Heat-advection / advection-diffusion** | $\partial_t u + \nabla\cdot(\mathbf{v}u) - \nabla\cdot(\alpha\nabla u)=Q$ | Moving fluids or solids, convective heat transport, thermal plumes |
+| **Reaction-diffusion / Pennes bioheat** | $\partial_t u - \nabla\cdot(\alpha\nabla u)+k u=Q$ | Perfused biological tissue, hyperthermia, ablation or cryotherapy planning |
+| **Stefan / apparent-capacity phase change** | $C_{\mathrm{app}}(u)\,\partial_t u - \nabla\cdot(\alpha\nabla u)=Q$ | Melting and freezing fronts, latent-heat storage, cryosurgery margins |
+| **Time-fractional subdiffusion** | $D_t^\beta u - \nabla\cdot(\alpha\nabla u)=Q,\;0<\beta<1$ | Long-memory thermal response, porous or disordered media |
+| **Non-Fourier / Cattaneo heat waves** | $\tau\,\partial_{tt}u+\partial_t u-\nabla\cdot(\alpha\nabla u)=Q$ | Ultrafast laser heating, second-sound materials, finite-speed thermal pulses |
+| **Non-Fourier phase change** | $C_{\mathrm{app}}(u)(\tau\,\partial_{tt}u+\partial_t u)-\nabla\cdot(\alpha\nabla u)=Q$ | Pulsed-laser melting, rapid solidification, cryogenic shock with latent heat |
+
+---
+
 ## Meshing & discretizations
 
 The library couples the same physical cases to multiple mesh generators and solvers:
