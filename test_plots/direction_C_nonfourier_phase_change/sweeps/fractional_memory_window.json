@@ -1,0 +1,38 @@
+[
+  {
+    "beta": 0.6,
+    "window": "full",
+    "retained_lags": 40,
+    "rel_l2": 0.0023046924491505927
+  },
+  {
+    "beta": 0.6,
+    "window": 32,
+    "retained_lags": 32,
+    "rel_l2": 0.0024243224847609857
+  },
+  {
+    "beta": 0.6,
+    "window": 16,
+    "retained_lags": 16,
+    "rel_l2": 0.0028081295299189363
+  },
+  {
+    "beta": 0.6,
+    "window": 8,
+    "retained_lags": 8,
+    "rel_l2": 0.004025123043688865
+  },
+  {
+    "beta": 0.6,
+    "window": 4,
+    "retained_lags": 4,
+    "rel_l2": 0.006172423289575992
+  },
+  {
+    "beta": 0.6,
+    "window": 2,
+    "retained_lags": 2,
+    "rel_l2": 0.008760722586948932
+  }
+]

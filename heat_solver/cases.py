@@ -173,25 +173,37 @@ def stefan_apparent_capacity_source(alpha, phase_change_model, amplitude=0.8, in
     return source
 
 
-def hyperbolic_stefan_apparent_capacity_case(alpha=0.08, tau=0.05):
+def hyperbolic_stefan_apparent_capacity_case(
+    alpha=0.08,
+    tau=0.05,
+    latent_heat=6.0,
+    transition_half_width=0.25,
+    specific_heat=1.0,
+    speed=0.45,
+):
     """Manufactured Cattaneo-Stefan traveling ``tanh`` front.
 
     The exact field is the apparent-capacity Stefan profile
     ``T = A tanh((x - x0 - s t) / w)``.  The source closes
     ``tau T_tt + c(T) T_t - alpha T_xx = Q`` with
     ``c(T)`` supplied by :class:`ApparentHeatCapacityModel`.
+
+    ``latent_heat``, ``transition_half_width`` (so the phase interval is
+    ``[-hw, +hw]``), ``specific_heat`` and ``speed`` are exposed so latent-heat /
+    mushy-zone-stiffness sweeps stay manufactured-exact (the source is rebuilt
+    from the supplied capacity model).
     """
     alpha = float(alpha)
     tau = float(tau)
     amplitude = 0.8
     interface_width = 0.18
-    speed = 0.45
+    speed = float(speed)
     x0 = -0.35
     phase_change_model = ApparentHeatCapacityModel(
-        solidus_temperature=-0.25,
-        liquidus_temperature=0.25,
-        latent_heat=6.0,
-        specific_heat=1.0,
+        solidus_temperature=-float(transition_half_width),
+        liquidus_temperature=float(transition_half_width),
+        latent_heat=float(latent_heat),
+        specific_heat=float(specific_heat),
     )
 
     def solution(x, y, t):

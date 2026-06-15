@@ -201,6 +201,39 @@ class _TransportBase:
             int(opts.get("anderson_depth", 0)),
         )
 
+    def _raise_on_nonconvergence(self):
+        """Whether a non-converged Picard step raises (default) or is recorded.
+
+        Set ``phase_change_options['raise_on_nonconvergence'] = False`` to let
+        studies build convergence/failure maps without aborting the sweep.
+        """
+        return bool(self.phase_change_options.get("raise_on_nonconvergence", True))
+
+    def _init_solve_report(self):
+        """Reset per-solve nonlinear convergence metadata (capability: reporting)."""
+        self.solve_report = {
+            "converged": True,
+            "n_steps": 0,
+            "failed_steps": 0,
+            "iterations": [],
+            "max_iterations": 0,
+            "max_capacity": 1.0,
+        }
+
+    def _record_step(self, iters, converged, capacity_max=1.0):
+        report = getattr(self, "solve_report", None)
+        if report is None:
+            self._init_solve_report()
+            report = self.solve_report
+        report["n_steps"] += 1
+        report["iterations"].append(int(iters))
+        report["max_iterations"] = max(report["max_iterations"], int(iters))
+        report["max_capacity"] = max(report["max_capacity"], float(capacity_max))
+        if not converged:
+            report["converged"] = False
+            report["failed_steps"] += 1
+
+
     @staticmethod
     def _relaxed_picard_update(accel, u_iter, u_raw, relaxation):
         if accel is not None:
@@ -360,6 +393,7 @@ class HyperbolicHeatSolver(_TransportBase):
         c2 = self.tau / (dt * dt)
         c1 = 1.0 / (2.0 * dt)
         max_iters, tol, relaxation, anderson_depth = self._picard_options()
+        self._init_solve_report()
         t = float(t0)
         bidx = self._boundary_idx
 
@@ -373,6 +407,9 @@ class HyperbolicHeatSolver(_TransportBase):
             u_iter = u_n.copy()
             accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
 
+            converged = False
+            iters_done = max_iters
+            cp_eff = self._effective_heat_capacity(u_iter)
             for _iter in range(max_iters):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(self.cell_areas * (c2 + c1 * cp_eff), format="csr") + self.A).tocsr()
@@ -391,8 +428,12 @@ class HyperbolicHeatSolver(_TransportBase):
                 scale = max(1.0, np.max(np.abs(u_next)))
                 u_iter = u_next
                 if err <= tol * scale:
+                    converged = True
+                    iters_done = _iter + 1
                     break
-            else:
+
+            self._record_step(iters_done, converged, float(np.max(cp_eff)))
+            if not converged and self._raise_on_nonconvergence():
                 raise RuntimeError(
                     "Hyperbolic Stefan solve did not converge. "
                     "Try smaller dt or larger phase_change_options['max_iters']."
@@ -568,15 +609,29 @@ class FractionalHeatSolver(_TransportBase):
     diffusion (backward Euler).
     """
 
-    def __init__(self, vertices, polygons, alpha, dt, beta, **kwargs):
+    def __init__(self, vertices, polygons, alpha, dt, beta, memory_window=None, **kwargs):
         super().__init__(vertices, polygons, alpha, dt, **kwargs)
         self.beta = float(beta)
         if not (0.0 < self.beta < 1.0):
             raise ValueError("Fractional order beta must satisfy 0 < beta < 1.")
+        # Short-memory window: keep only the most recent ``memory_window`` L1
+        # history lags (None -> full history).  This bounds the per-step cost and
+        # storage of the Caputo sum at the price of dropping the oldest memory.
+        if memory_window is not None:
+            memory_window = int(memory_window)
+            if memory_window < 1:
+                raise ValueError("memory_window must be a positive integer or None.")
+        self.memory_window = memory_window
 
     def _l1_weights(self, n):
         k = np.arange(n + 1, dtype=float)
         return (k + 1.0) ** (1.0 - self.beta) - k ** (1.0 - self.beta)
+
+    def _history_lag_range(self, n):
+        """L1 history lags k = 1..kmax retained at step n (short-memory aware)."""
+        if self.memory_window is None:
+            return range(1, n + 1)
+        return range(1, min(n, self.memory_window) + 1)
 
     def solve(self, u0, t0, t_end):
         if self.phase_change_model is not None:
@@ -603,9 +658,10 @@ class FractionalHeatSolver(_TransportBase):
         for n in range(nsteps):
             t_next = t + dt
             q_next = self._source(t_next)
-            # Telescoping L1 history sum for k = 1 .. n (the k=0 term carries u^{n+1}).
+            # Telescoping L1 history sum (the k=0 term carries u^{n+1}); a short
+            # memory window keeps only the most recent lags.
             hist_sum = np.zeros(self.M)
-            for k in range(1, n + 1):
+            for k in self._history_lag_range(n):
                 hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
             g = history[n] - hist_sum  # = u^n - sum_{k>=1} b_k (u^{n+1-k} - u^{n-k})
             rhs = self.cell_areas * q_next + sigma * (self.cell_areas * g)
@@ -635,6 +691,7 @@ class FractionalHeatSolver(_TransportBase):
         history = [u0.copy()]
         weights = self._l1_weights(nsteps)
         max_iters, tol, relaxation, anderson_depth = self._picard_options()
+        self._init_solve_report()
         t = float(t0)
         bidx = self._boundary_idx
 
@@ -642,7 +699,7 @@ class FractionalHeatSolver(_TransportBase):
             t_next = t + dt
             q_next = self._source(t_next)
             hist_sum = np.zeros(self.M)
-            for k in range(1, n + 1):
+            for k in self._history_lag_range(n):
                 hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
             g = history[n] - hist_sum
             rhs_base = self.cell_areas * q_next
@@ -652,6 +709,9 @@ class FractionalHeatSolver(_TransportBase):
             u_iter = history[n].copy()
             accel = _AndersonAccelerator(anderson_depth) if anderson_depth > 0 else None
 
+            converged = False
+            iters_done = max_iters
+            cp_eff = self._effective_heat_capacity(u_iter)
             for _iter in range(max_iters):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(sigma * self.cell_areas * cp_eff, format="csr") + self.A).tocsr()
@@ -670,8 +730,12 @@ class FractionalHeatSolver(_TransportBase):
                 scale = max(1.0, np.max(np.abs(u_next)))
                 u_iter = u_next
                 if err <= tol * scale:
+                    converged = True
+                    iters_done = _iter + 1
                     break
-            else:
+
+            self._record_step(iters_done, converged, float(np.max(cp_eff)))
+            if not converged and self._raise_on_nonconvergence():
                 raise RuntimeError(
                     "Fractional Stefan solve did not converge. "
                     "Try smaller dt or larger phase_change_options['max_iters']."

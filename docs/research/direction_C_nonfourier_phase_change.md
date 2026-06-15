@@ -1,6 +1,6 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** PR1/PR2 initial implementation + expansion-study diagnostics
+- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners + computing-capability steps 4-5 (interface diagnostics & application runners)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -50,6 +50,40 @@ is its observed order?*
 - Nonlinear (c(T)) + hyperbolic/fractional coupling convergence; mushy-zone
   stiffness; need relaxation/Anderson tuning.
 
+## Expansion steps 1-3 — implemented study runners
+
+The three expansion targets below now have solver-backed **parameter-sweep
+runners** in `direction_c_studies.py`, writing JSON/CSV/PNG to
+`test_plots/direction_C_nonfourier_phase_change/sweeps/`:
+
+1. **`relaxation_sweep`** — sweeps relaxation time `tau` x time resolution,
+   recording manufactured error, the finite wave speed `sqrt(alpha/tau)`, and
+   nonlinear stability metadata (max Picard iterations, failed steps).
+2. **`fractional_memory_sweep`** — beta-calibration (observed temporal order via
+   fine-dt self-convergence matches `2-beta` to ~0.1: 1.61/1.47/1.31 vs
+   1.60/1.40/1.20) plus a **memory-compression** study using the new
+   `memory_window` short-memory option (error grows monotonically as the window
+   shrinks: full 2.3e-3 -> window-2 8.8e-3).
+3. **`mushy_stiffness_map`** — latent-heat x transition-half-width stiffness map
+   (analytic capacity spike 8 -> 241) with strict (no-Anderson) Picard
+   convergence metadata; also flags mushy zones the discrete mesh under-resolves.
+
+Supporting solver/case enhancements (in `heat_solver/transport.py`,
+`heat_solver/cases.py`):
+
+- `FractionalHeatSolver(..., memory_window=K)` short-memory L1 truncation
+  (capability 2: fractional memory compression).
+- `solve_report` nonlinear-convergence metadata (iteration counts, failed steps,
+  peak capacity) + `phase_change_options['raise_on_nonconvergence']=False` for
+  building failure/stability maps (capability 6).
+- `hyperbolic_stefan_apparent_capacity_case(..., latent_heat,
+  transition_half_width, specific_heat, speed)` parameterized to keep
+  latent-heat/mushy sweeps manufactured-exact.
+
+Verification: `tests/test_direction_c.py` (memory-window accuracy/validation,
+convergence metadata, non-raising failure recording, parameterized-case
+manufactured exactness, runner smoke test).
+
 ## Three important expansion targets
 
 1. **Relaxation-aware hyperbolic Stefan physics.**  Non-Fourier phase change is
@@ -76,6 +110,31 @@ is its observed order?*
    useful next increment would add systematic sweeps over latent heat, transition
    width, Picard relaxation, and Anderson depth, with failure maps and
    enthalpy-based preconditioning.
+
+## Implemented computing capabilities (steps 4-5)
+
+- **Step 4 — sharp-interface diagnostics** (`heat_solver/interface_diagnostics.py`):
+  post-processing for a cell-centered field + apparent-capacity model —
+  liquid-fraction field and area-weighted liquid volume fraction,
+  solid/mushy/liquid area fractions, sensible/latent enthalpy budget,
+  melt-isotherm interface position(s) along a centerline, mushy-zone thickness,
+  and front speed.  Verified against an analytic `tanh` front (interface
+  position and mushy thickness match to within a cell width).
+- **Step 5 — application-study runners** (`direction_c_applications.py`):
+  reproducible 2D scenarios beyond manufactured solutions, each writing
+  JSON/CSV/PNG to `test_plots/direction_C_nonfourier_phase_change/applications/`:
+    - `pulsed_laser_melting` — a boundary heat-flux pulse melts a cold solid slab
+      (hyperbolic/Cattaneo Stefan, finite wave speed); reports melt-front
+      advance, peak temperature, liquid fraction, mushy thickness, injected
+      energy, sensible/latent enthalpy, and an **energy-closure residual**
+      (enthalpy rise vs injected boundary energy ~0.3% at full resolution).
+    - `cryosurgery_freezing` — a cold cryoprobe Dirichlet boundary freezes a warm
+      domain; reports freezing-front margin, frozen volume fraction, minimum
+      temperature, and extracted enthalpy.
+  Both runners record nonlinear-convergence metadata and tolerate the onset
+  stiffness via the non-raising solve mode (motivating capabilities 1 & 3).
+  Verified by `tests/test_direction_c_applications.py` (analytic diagnostics +
+  runner physical-sanity / energy-closure checks).
 
 ## Additional computing capabilities that would help
 
@@ -151,8 +210,10 @@ is its observed order?*
 - PR2: fractional Stefan solver + manufactured case + convergence test.
   Implemented as `FractionalStefanSolver` and
   `fractional_stefan_apparent_capacity`.
-- PR2+: relaxation/front-speed studies, fractional-memory compression and
-  calibration, and latent-heat/mushy-zone nonlinear robustness studies.
+- PR2+ (done): expansion steps 1-3 study runners (`direction_c_studies.py`) --
+  relaxation/stability sweep, fractional-memory calibration + compression, and
+  latent-heat/mushy-zone stiffness map -- plus the `memory_window`,
+  convergence-metadata, and parameterized-case enhancements that back them.
 
 ## References
 - Non-Fourier Stefan problem (1D) literature; DPL bioheat phase-change

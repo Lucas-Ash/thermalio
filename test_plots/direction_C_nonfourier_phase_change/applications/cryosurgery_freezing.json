@@ -1,0 +1,11 @@
+{
+  "scenario": "cryosurgery_freezing",
+  "alpha": 0.08,
+  "T_probe": -0.8,
+  "T_far": 0.6,
+  "t_end": 0.4,
+  "latent_heat": 4.0,
+  "final_freezing_margin": 0.1024454545881514,
+  "final_frozen_fraction": 0.09000000000000002,
+  "enthalpy_removed": 0.6109100453643541
+}
