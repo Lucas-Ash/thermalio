@@ -2,7 +2,7 @@
 
 - **Status:** PR1/PR2 initial implementation
 - **Owner:** —
-- **Last updated:** 2026-06-14
+- **Last updated:** 2026-06-15
 
 ## Motivation & V&V question
 Thermalio has no adjoint/sensitivity machinery, but its *verified, fast* forward
@@ -43,6 +43,39 @@ reference?*
 - Recover known manufactured parameters from noise-free synthetic data to high
   accuracy; degrade noise and report recovery error vs noise level; show the
   objective is convex/identifiable near the truth for single parameters.
+
+## Progress plots
+- `test_plots/direction_D_inverse_problems/pennes_perfusion_inverse_study.png`
+  shows the original PR1 scalar perfusion objective scan and noise response.
+- `test_plots/direction_D_inverse_problems/alpha_perfusion_identifiability_grid.png`
+  shows the PR2 joint diffusivity/perfusion cost surface with the recovered
+  least-squares point.
+- `test_plots/direction_D_inverse_problems/perfusion_noise_ensemble.png`
+  shows scalar perfusion recovery over a small ensemble of noise realizations.
+- `test_plots/direction_D_inverse_problems/alpha_perfusion_noise_recovery.png`
+  shows joint diffusivity/perfusion recovery as observation noise increases.
+- `test_plots/direction_D_inverse_problems/regularization_path_diagnostic.png`
+  shows how the Tikhonov prior selects a stable solution in an underdetermined
+  inverse problem.
+
+## Further development priorities
+- **Sensitivity and adjoint support:** finite-difference gradients are adequate
+  for PR1/PR2, but cost grows quickly with parameter count. Add tangent-linear
+  sensitivities for scalar parameters first, then an adjoint for field recovery.
+- **Observation design:** support multi-time and sparse-sensor observation
+  operators instead of only full-field snapshots. Add sensor masks, time stacks,
+  and objective diagnostics for parameter identifiability.
+- **Uncertainty quantification:** estimate local covariance from the least-squares
+  Jacobian, add profile-likelihood scans, and expose bootstrap/noise-ensemble
+  utilities for confidence intervals.
+- **Regularized field inversion:** extend parameter vectors to low-dimensional
+  spatial bases for perfusion/conductivity fields, with smoothness penalties and
+  mesh-aware regularization.
+- **Inverse runners and reports:** add a reproducible driver similar to the
+  verification suite that writes JSON/CSV reports and plot bundles for each
+  inverse study.
+- **Model comparison:** use the trusted FV inverse results as baselines for later
+  PINN/ML comparisons, with identical synthetic observations and error metrics.
 
 ## Risks & open questions
 - Ill-posedness / non-identifiability (e.g. tau vs alpha trade-offs); regularization
