@@ -211,27 +211,49 @@ class _TransportBase:
 
     def _init_solve_report(self):
         """Reset per-solve nonlinear convergence metadata (capability: reporting)."""
+        max_iters, tol, relaxation, anderson_depth = self._picard_options()
         self.solve_report = {
             "converged": True,
             "n_steps": 0,
             "failed_steps": 0,
+            "failed_step_indices": [],
             "iterations": [],
             "max_iterations": 0,
+            "max_allowed_iterations": int(max_iters),
+            "mean_iterations": 0.0,
+            "residuals": [],
+            "final_residual": 0.0,
+            "max_residual": 0.0,
+            "tolerance": float(tol),
+            "relaxation": float(relaxation),
+            "anderson_depth": int(anderson_depth),
+            "min_capacity": 1.0,
             "max_capacity": 1.0,
         }
 
-    def _record_step(self, iters, converged, capacity_max=1.0):
+    def _record_step(self, iters, converged, capacity_max=1.0, capacity_min=None, residual=None):
         report = getattr(self, "solve_report", None)
         if report is None:
             self._init_solve_report()
             report = self.solve_report
+        step_index = report["n_steps"] + 1
+        if capacity_min is None:
+            capacity_min = capacity_max
+        residual_value = float("nan") if residual is None else float(residual)
         report["n_steps"] += 1
         report["iterations"].append(int(iters))
         report["max_iterations"] = max(report["max_iterations"], int(iters))
+        report["mean_iterations"] = float(np.mean(report["iterations"]))
+        report["residuals"].append(residual_value)
+        report["final_residual"] = residual_value
+        if np.isfinite(residual_value):
+            report["max_residual"] = max(report["max_residual"], residual_value)
+        report["min_capacity"] = min(report["min_capacity"], float(capacity_min))
         report["max_capacity"] = max(report["max_capacity"], float(capacity_max))
         if not converged:
             report["converged"] = False
             report["failed_steps"] += 1
+            report["failed_step_indices"].append(int(step_index))
 
 
     @staticmethod
@@ -410,6 +432,7 @@ class HyperbolicHeatSolver(_TransportBase):
             converged = False
             iters_done = max_iters
             cp_eff = self._effective_heat_capacity(u_iter)
+            final_residual = float("inf")
             for _iter in range(max_iters):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(self.cell_areas * (c2 + c1 * cp_eff), format="csr") + self.A).tocsr()
@@ -426,13 +449,19 @@ class HyperbolicHeatSolver(_TransportBase):
                 u_next = self._relaxed_picard_update(accel, u_iter, u_raw, relaxation)
                 err = np.max(np.abs(u_next - u_iter))
                 scale = max(1.0, np.max(np.abs(u_next)))
+                final_residual = float(err / scale)
                 u_iter = u_next
                 if err <= tol * scale:
                     converged = True
                     iters_done = _iter + 1
                     break
 
-            self._record_step(iters_done, converged, float(np.max(cp_eff)))
+            self._record_step(
+                iters_done, converged,
+                capacity_max=float(np.max(cp_eff)),
+                capacity_min=float(np.min(cp_eff)),
+                residual=final_residual,
+            )
             if not converged and self._raise_on_nonconvergence():
                 raise RuntimeError(
                     "Hyperbolic Stefan solve did not converge. "
@@ -712,6 +741,7 @@ class FractionalHeatSolver(_TransportBase):
             converged = False
             iters_done = max_iters
             cp_eff = self._effective_heat_capacity(u_iter)
+            final_residual = float("inf")
             for _iter in range(max_iters):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(sigma * self.cell_areas * cp_eff, format="csr") + self.A).tocsr()
@@ -728,13 +758,19 @@ class FractionalHeatSolver(_TransportBase):
                 u_next = self._relaxed_picard_update(accel, u_iter, u_raw, relaxation)
                 err = np.max(np.abs(u_next - u_iter))
                 scale = max(1.0, np.max(np.abs(u_next)))
+                final_residual = float(err / scale)
                 u_iter = u_next
                 if err <= tol * scale:
                     converged = True
                     iters_done = _iter + 1
                     break
 
-            self._record_step(iters_done, converged, float(np.max(cp_eff)))
+            self._record_step(
+                iters_done, converged,
+                capacity_max=float(np.max(cp_eff)),
+                capacity_min=float(np.min(cp_eff)),
+                residual=final_residual,
+            )
             if not converged and self._raise_on_nonconvergence():
                 raise RuntimeError(
                     "Fractional Stefan solve did not converge. "

@@ -54,6 +54,18 @@ from heat_solver.transport import HyperbolicStefanSolver
 
 OUT = ROOT / "test_plots" / "direction_C_nonfourier_phase_change" / "applications"
 
+CONVERGENCE_FIELDS = [
+    "solve_converged", "solve_steps", "failed_steps", "max_iterations",
+    "mean_iterations", "final_residual", "max_residual", "min_capacity",
+    "max_capacity", "tolerance", "relaxation", "anderson_depth",
+]
+ENERGY_AUDIT_FIELDS = [
+    "energy_in", "energy_out", "initial_total_enthalpy", "sensible_enthalpy",
+    "latent_enthalpy", "total_enthalpy", "enthalpy_change",
+    "expected_enthalpy_change", "energy_closure_residual",
+    "relative_energy_closure_residual",
+]
+
 
 def _mesh(nx, ny, bbox):
     vertices, polygons, centers = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
@@ -65,9 +77,35 @@ def _write(name, summary, rows, fieldnames):
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"{name}.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     with (OUT / f"{name}.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = _csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = _csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _fieldnames(names):
+    ordered = []
+    for name in [*names, *ENERGY_AUDIT_FIELDS, *CONVERGENCE_FIELDS]:
+        if name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
+def _attach_audit_and_report(row, solver, audit):
+    row.update(audit)
+    row.update(idiag.summarize_solve_report(getattr(solver, "solve_report", None)))
+    return row
+
+
+def _final_diagnostics(rows):
+    final = rows[-1]
+    return {
+        "nonconverged_steps": int(final["failed_steps"]),
+        "final_max_iterations": int(final["max_iterations"]),
+        "final_mean_iterations": float(final["mean_iterations"]),
+        "final_max_residual": float(final["max_residual"]),
+        "final_max_capacity": float(final["max_capacity"]),
+        "final_relative_energy_closure_residual": float(final["relative_energy_closure_residual"]),
+    }
 
 
 def _source_energy(centers, areas, source_func, t_end, n_steps):
@@ -105,6 +143,46 @@ def _plot_generic_application(name, rows, final_field, title, metric_specs, cmap
     plt.close(fig)
 
 
+def _plot_diagnostics_dashboard(name, rows, title):
+    times = [r["time"] for r in rows]
+    max_residual = np.maximum([r["max_residual"] for r in rows], 1e-16)
+    final_residual = np.maximum([r["final_residual"] for r in rows], 1e-16)
+    tolerance = [r["tolerance"] for r in rows]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7.0), constrained_layout=True)
+    axes[0, 0].plot(times, [r["max_iterations"] for r in rows], "o-", label="max iterations")
+    axes[0, 0].plot(times, [r["mean_iterations"] for r in rows], "s--", label="mean iterations")
+    axes[0, 0].set_xlabel("time")
+    axes[0, 0].set_title("Nonlinear Picard/Anderson work")
+    axes[0, 0].legend(fontsize=8)
+
+    axes[0, 1].semilogy(times, max_residual, "o-", label="max step residual")
+    axes[0, 1].semilogy(times, final_residual, "s--", label="final step residual")
+    axes[0, 1].semilogy(times, tolerance, "k:", label="tolerance")
+    axes[0, 1].set_xlabel("time")
+    axes[0, 1].set_title("Normalized nonlinear residual")
+    axes[0, 1].legend(fontsize=8)
+
+    axes[1, 0].plot(times, [r["energy_closure_residual"] for r in rows], "o-", label="absolute")
+    axes[1, 0].plot(times, [r["relative_energy_closure_residual"] for r in rows], "s--", label="relative")
+    axes[1, 0].axhline(0.0, color="black", linewidth=0.8)
+    axes[1, 0].set_xlabel("time")
+    axes[1, 0].set_title("Energy closure residual")
+    axes[1, 0].legend(fontsize=8)
+
+    axes[1, 1].plot(times, [r["sensible_enthalpy"] for r in rows], "o-", label="sensible")
+    axes[1, 1].plot(times, [r["latent_enthalpy"] for r in rows], "s-", label="latent")
+    axes[1, 1].plot(times, [r["energy_in"] for r in rows], "^-", label="energy in")
+    axes[1, 1].plot(times, [r["energy_out"] for r in rows], "v-", label="energy out")
+    axes[1, 1].set_xlabel("time")
+    axes[1, 1].set_title("Enthalpy and boundary/source energy")
+    axes[1, 1].legend(fontsize=8)
+
+    fig.suptitle(f"{title}: convergence and energy audit")
+    fig.savefig(OUT / f"{name}_diagnostics.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
 # --------------------------------------------------------------------------- #
 # Scenario 1: pulsed-laser melting of a cold slab (flux-driven hyperbolic Stefan)
 # --------------------------------------------------------------------------- #
@@ -132,7 +210,6 @@ def pulsed_laser_melting(nx=48, ny=12, bbox=(0.0, 1.5, 0.0, 0.3), alpha=0.06, ta
     rows = []
     snaps = np.linspace(t_end / n_snapshots, t_end, n_snapshots)
     final_field = None
-    failed_steps_total = 0
     for t_k in snaps:
         steps = max(2, int(round(nt * t_k / t_end)))
         solver = HyperbolicStefanSolver(
@@ -140,20 +217,19 @@ def pulsed_laser_melting(nx=48, ny=12, bbox=(0.0, 1.5, 0.0, 0.3), alpha=0.06, ta
             bc_type="flux", bc_func=pulse_flux, phase_change_options=opts,
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
-        failed_steps_total = max(failed_steps_total, solver.solve_report["failed_steps"])
         budget = idiag.enthalpy_budget(pcm, u, areas)
         front = idiag.interface_position(centers, u, pcm, axis="x", coord=y_mid, pick="last")
         injected = q0 * left_len * min(float(t_k), t_pulse)
-        rows.append({
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_in=injected)
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "front_position": float("nan") if front is None else float(front),
             "peak_temperature": float(np.max(u)),
             "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
             "mushy_thickness": idiag.mushy_zone_thickness(centers, u, pcm, axis="x", coord=y_mid),
-            "sensible_enthalpy": budget["sensible"], "latent_enthalpy": budget["latent"],
-            "enthalpy_rise": budget["total"] - H0, "injected_energy": injected,
-            "energy_closure_residual": (budget["total"] - H0) - injected,
-        })
+            "enthalpy_rise": budget["total"] - H0,
+            "injected_energy": injected,
+        }, solver, audit))
         final_field = (centers, u)
 
     summary = {
@@ -164,13 +240,13 @@ def pulsed_laser_melting(nx=48, ny=12, bbox=(0.0, 1.5, 0.0, 0.3), alpha=0.06, ta
         "final_liquid_fraction": rows[-1]["liquid_fraction"],
         "final_energy_closure_residual": rows[-1]["energy_closure_residual"],
         "final_injected_energy": rows[-1]["injected_energy"],
-        "nonconverged_steps": int(failed_steps_total),
     }
+    summary.update(_final_diagnostics(rows))
     _write("pulsed_laser_melting", summary, rows,
-           ["time", "front_position", "peak_temperature", "liquid_fraction", "mushy_thickness",
-            "sensible_enthalpy", "latent_enthalpy", "enthalpy_rise", "injected_energy",
-            "energy_closure_residual"])
+           _fieldnames(["time", "front_position", "peak_temperature", "liquid_fraction",
+                        "mushy_thickness", "enthalpy_rise", "injected_energy"]))
     _plot_melting(rows, final_field, summary)
+    _plot_diagnostics_dashboard("pulsed_laser_melting", rows, "Pulsed-laser melting")
     return summary, rows
 
 
@@ -229,18 +305,20 @@ def cryosurgery_freezing(nx=40, ny=40, bbox=(0.0, 1.0, 0.0, 1.0), alpha=0.08, ta
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
+        energy_out = max(H0 - budget["total"], 0.0)
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
         # Freezing front = solidus isotherm distance from the cold probe.
         front = idiag.interface_position(centers, u, pcm, axis="x", coord=y_mid,
                                          level=pcm.solidus_temperature, pick="first")
         frozen = float(np.sum(areas[u < pcm.solidus_temperature]) / np.sum(areas))
-        rows.append({
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "freezing_margin": float("nan") if front is None else float(front - x_left),
             "min_temperature": float(np.min(u)),
             "frozen_fraction": frozen,
             "solid_liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
-            "latent_enthalpy": budget["latent"], "enthalpy_change": budget["total"] - H0,
-        })
+            "enthalpy_removed": energy_out,
+        }, solver, audit))
         final_field = (centers, u)
 
     summary = {
@@ -250,10 +328,12 @@ def cryosurgery_freezing(nx=40, ny=40, bbox=(0.0, 1.0, 0.0, 1.0), alpha=0.08, ta
         "final_frozen_fraction": rows[-1]["frozen_fraction"],
         "enthalpy_removed": -rows[-1]["enthalpy_change"],
     }
+    summary.update(_final_diagnostics(rows))
     _write("cryosurgery_freezing", summary, rows,
-           ["time", "freezing_margin", "min_temperature", "frozen_fraction",
-            "solid_liquid_fraction", "latent_enthalpy", "enthalpy_change"])
+           _fieldnames(["time", "freezing_margin", "min_temperature", "frozen_fraction",
+                        "solid_liquid_fraction", "enthalpy_removed"]))
     _plot_freezing(rows, final_field, summary, pcm)
+    _plot_diagnostics_dashboard("cryosurgery_freezing", rows, "Cryosurgery freezing")
     return summary, rows
 
 
@@ -313,6 +393,8 @@ def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, 
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
+        source_energy = _source_energy(centers, areas, moving_source, t_k, steps)
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_in=source_energy)
         liquid = pcm.liquid_fraction(u) > 0.05
         if np.any(liquid):
             xs = centers[liquid, 0]
@@ -322,7 +404,7 @@ def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, 
         else:
             pool_length = 0.0
             pool_width = 0.0
-        rows.append({
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "laser_x": scan_start + (scan_end - scan_start) * float(t_k) / t_end,
             "peak_temperature": float(np.max(u)),
@@ -330,10 +412,9 @@ def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, 
             "melt_pool_length": pool_length,
             "melt_pool_width": pool_width,
             "mushy_thickness": idiag.mushy_zone_thickness(centers, u, pcm, axis="x", coord=scan_y),
-            "latent_enthalpy": budget["latent"],
             "enthalpy_rise": budget["total"] - H0,
-            "source_energy": _source_energy(centers, areas, moving_source, t_k, steps),
-        })
+            "source_energy": source_energy,
+        }, solver, audit))
         final_field = (centers, u)
     summary = {
         "scenario": "moving_scan_melt_pool", "alpha": alpha, "tau": tau,
@@ -344,10 +425,11 @@ def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, 
         "final_melt_pool_width": rows[-1]["melt_pool_width"],
         "final_source_energy": rows[-1]["source_energy"],
     }
+    summary.update(_final_diagnostics(rows))
     _write("moving_scan_melt_pool", summary, rows,
-           ["time", "laser_x", "peak_temperature", "liquid_fraction", "melt_pool_length",
-            "melt_pool_width", "mushy_thickness", "latent_enthalpy", "enthalpy_rise",
-            "source_energy"])
+           _fieldnames(["time", "laser_x", "peak_temperature", "liquid_fraction",
+                        "melt_pool_length", "melt_pool_width", "mushy_thickness",
+                        "enthalpy_rise", "source_energy"]))
     _plot_generic_application(
         "moving_scan_melt_pool", rows, final_field,
         "Direction C application: moving scan melt pool",
@@ -359,6 +441,7 @@ def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, 
             ("source_energy", "source energy", "black", "^-"),
         ],
     )
+    _plot_diagnostics_dashboard("moving_scan_melt_pool", rows, "Moving scan melt pool")
     return summary, rows
 
 
@@ -400,16 +483,17 @@ def dual_pulse_remelting(nx=40, ny=10, bbox=(0.0, 1.4, 0.0, 0.28), alpha=0.06, t
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
+        injected = injected_energy(t_k)
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_in=injected)
         front = idiag.interface_position(centers, u, pcm, axis="x", coord=y_mid, pick="last")
-        rows.append({
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "front_position": float("nan") if front is None else float(front),
             "peak_temperature": float(np.max(u)),
             "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
-            "latent_enthalpy": budget["latent"],
             "enthalpy_rise": budget["total"] - H0,
-            "injected_energy": injected_energy(t_k),
-        })
+            "injected_energy": injected,
+        }, solver, audit))
         final_field = (centers, u)
     summary = {
         "scenario": "dual_pulse_remelting", "alpha": alpha, "tau": tau,
@@ -419,9 +503,10 @@ def dual_pulse_remelting(nx=40, ny=10, bbox=(0.0, 1.4, 0.0, 0.28), alpha=0.06, t
         "final_front_position": rows[-1]["front_position"],
         "final_injected_energy": rows[-1]["injected_energy"],
     }
+    summary.update(_final_diagnostics(rows))
     _write("dual_pulse_remelting", summary, rows,
-           ["time", "front_position", "peak_temperature", "liquid_fraction",
-            "latent_enthalpy", "enthalpy_rise", "injected_energy"])
+           _fieldnames(["time", "front_position", "peak_temperature", "liquid_fraction",
+                        "enthalpy_rise", "injected_energy"]))
     _plot_generic_application(
         "dual_pulse_remelting", rows, final_field,
         "Direction C application: dual-pulse remelting",
@@ -433,6 +518,7 @@ def dual_pulse_remelting(nx=40, ny=10, bbox=(0.0, 1.4, 0.0, 0.28), alpha=0.06, t
             ("injected_energy", "injected energy", "black", "^-"),
         ],
     )
+    _plot_diagnostics_dashboard("dual_pulse_remelting", rows, "Dual-pulse remelting")
     return summary, rows
 
 
@@ -467,17 +553,18 @@ def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
+        energy_out = max(H0 - budget["total"], 0.0)
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
         phases = idiag.phase_fractions(pcm, u, areas)
-        rows.append({
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "peak_temperature": float(np.max(u)),
             "min_temperature": float(np.min(u)),
             "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
             "solid_fraction": phases["solid"],
             "mushy_fraction": phases["mushy"],
-            "enthalpy_removed": H0 - budget["total"],
-            "latent_enthalpy": budget["latent"],
-        })
+            "enthalpy_removed": energy_out,
+        }, solver, audit))
         final_field = (centers, u)
     summary = {
         "scenario": "rapid_solidification_quench", "alpha": alpha, "tau": tau,
@@ -487,9 +574,10 @@ def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0
         "final_solid_fraction": rows[-1]["solid_fraction"],
         "enthalpy_removed": rows[-1]["enthalpy_removed"],
     }
+    summary.update(_final_diagnostics(rows))
     _write("rapid_solidification_quench", summary, rows,
-           ["time", "peak_temperature", "min_temperature", "liquid_fraction",
-            "solid_fraction", "mushy_fraction", "enthalpy_removed", "latent_enthalpy"])
+           _fieldnames(["time", "peak_temperature", "min_temperature", "liquid_fraction",
+                        "solid_fraction", "mushy_fraction", "enthalpy_removed"]))
     _plot_generic_application(
         "rapid_solidification_quench", rows, final_field,
         "Direction C application: rapid solidification quench",
@@ -501,6 +589,7 @@ def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0
         ],
         cmap="coolwarm",
     )
+    _plot_diagnostics_dashboard("rapid_solidification_quench", rows, "Rapid solidification quench")
     return summary, rows
 
 
@@ -539,16 +628,17 @@ def buried_hot_inclusion_relaxation(nx=42, ny=42, bbox=(0.0, 1.0, 0.0, 1.0), alp
         )
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
+        energy_out = max(H0 - budget["total"], 0.0)
+        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
         liquid = pcm.liquid_fraction(u) > 0.5
         melted_area = float(np.sum(areas[liquid]))
-        rows.append({
+        rows.append(_attach_audit_and_report({
             "time": float(t_k),
             "peak_temperature": float(np.max(u)),
             "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
             "melted_area": melted_area,
-            "latent_enthalpy": budget["latent"],
-            "enthalpy_removed": H0 - budget["total"],
-        })
+            "enthalpy_removed": energy_out,
+        }, solver, audit))
         final_field = (centers, u)
     summary = {
         "scenario": "buried_hot_inclusion_relaxation", "alpha": alpha, "tau": tau,
@@ -558,9 +648,10 @@ def buried_hot_inclusion_relaxation(nx=42, ny=42, bbox=(0.0, 1.0, 0.0, 1.0), alp
         "final_melted_area": rows[-1]["melted_area"],
         "enthalpy_removed": rows[-1]["enthalpy_removed"],
     }
+    summary.update(_final_diagnostics(rows))
     _write("buried_hot_inclusion_relaxation", summary, rows,
-           ["time", "peak_temperature", "liquid_fraction", "melted_area",
-            "latent_enthalpy", "enthalpy_removed"])
+           _fieldnames(["time", "peak_temperature", "liquid_fraction", "melted_area",
+                        "enthalpy_removed"]))
     _plot_generic_application(
         "buried_hot_inclusion_relaxation", rows, final_field,
         "Direction C application: buried hot inclusion relaxation",
@@ -572,6 +663,8 @@ def buried_hot_inclusion_relaxation(nx=42, ny=42, bbox=(0.0, 1.0, 0.0, 1.0), alp
         ],
         cmap="coolwarm",
     )
+    _plot_diagnostics_dashboard(
+        "buried_hot_inclusion_relaxation", rows, "Buried hot inclusion relaxation")
     return summary, rows
 
 

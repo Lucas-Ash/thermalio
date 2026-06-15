@@ -4,10 +4,16 @@
   "tau": 0.025,
   "source_power": 18.0,
   "source_sigma": 0.1,
-  "t_end": 0.28,
-  "final_peak_temperature": -0.1865989646136214,
-  "final_liquid_fraction": 0.025793419297460388,
-  "final_melt_pool_length": 0.9600000000000001,
-  "final_melt_pool_width": 0.24000000000000205,
-  "final_source_energy": 0.3164046036052325
+  "t_end": 0.45,
+  "final_peak_temperature": -0.06783604301905935,
+  "final_liquid_fraction": 0.06757713319452592,
+  "final_melt_pool_length": 1.1999999999999988,
+  "final_melt_pool_width": 0.3111111111111189,
+  "final_source_energy": 0.508469976744028,
+  "nonconverged_steps": 13,
+  "final_max_iterations": 180,
+  "final_mean_iterations": 26.42222222222222,
+  "final_max_residual": 0.002437603983272585,
+  "final_max_capacity": 6.357142857142857,
+  "final_relative_energy_closure_residual": -0.12853431499208745
 }

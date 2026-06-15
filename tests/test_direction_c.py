@@ -71,7 +71,11 @@ def test_solve_report_metadata_populated():
     assert rep["converged"] is True
     assert rep["n_steps"] == 24
     assert len(rep["iterations"]) == 24
+    assert len(rep["residuals"]) == 24
     assert rep["max_iterations"] >= 1
+    assert rep["mean_iterations"] >= 1.0
+    assert rep["max_residual"] <= rep["tolerance"]
+    assert rep["min_capacity"] > 0.0
     assert rep["failed_steps"] == 0
 
 
@@ -89,6 +93,8 @@ def test_non_raising_mode_records_failures():
     _, u = solver.solve(u0, 0.0, 0.03, du0=du0)
     assert solver.solve_report["converged"] is False
     assert solver.solve_report["failed_steps"] > 0
+    assert len(solver.solve_report["failed_step_indices"]) == solver.solve_report["failed_steps"]
+    assert solver.solve_report["max_residual"] > solver.solve_report["tolerance"]
     assert np.all(np.isfinite(u))
 
 
@@ -133,9 +139,10 @@ def test_parameterized_hyperbolic_case_is_manufactured_exact():
 # --------------------------------------------------------------------------- #
 # Study-runner smoke test
 # --------------------------------------------------------------------------- #
-def test_mushy_stiffness_map_runner_smoke():
+def test_mushy_stiffness_map_runner_smoke(tmp_path, monkeypatch):
     import direction_c_studies as dcs
 
+    monkeypatch.setattr(dcs, "OUT", tmp_path)
     rows = dcs.mushy_stiffness_map(latents=(4.0, 24.0), half_widths=(0.3, 0.08), n=12, nt=24)
     assert len(rows) == 4
     for r in rows:

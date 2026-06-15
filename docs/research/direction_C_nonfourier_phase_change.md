@@ -111,7 +111,7 @@ manufactured exactness, runner smoke test).
    width, Picard relaxation, and Anderson depth, with failure maps and
    enthalpy-based preconditioning.
 
-## Implemented computing capabilities (steps 4-5)
+## Implemented computing capabilities (steps 4-7)
 
 - **Step 4 — sharp-interface diagnostics** (`heat_solver/interface_diagnostics.py`):
   post-processing for a cell-centered field + apparent-capacity model —
@@ -149,6 +149,22 @@ manufactured exactness, runner smoke test).
   stiffness via the non-raising solve mode (motivating capabilities 1 & 3).
   Verified by `tests/test_direction_c_applications.py` (analytic diagnostics +
   runner physical-sanity / energy-closure checks).
+- **Step 6 — nonlinear convergence reporting** (`heat_solver/transport.py`,
+  `heat_solver/interface_diagnostics.py`): phase-change solvers now retain
+  per-step Picard/Anderson iteration counts, normalized final update residuals,
+  failed-step indices, tolerance/relaxation/Anderson settings, and effective
+  heat-capacity minima/maxima.  `summarize_solve_report(...)` compresses the
+  full report into CSV/JSON-friendly fields used by all Direction C application
+  runners.
+- **Step 7 — energy and enthalpy conservation audits**
+  (`heat_solver/interface_diagnostics.py`, `direction_c_applications.py`):
+  `enthalpy_audit(...)` standardizes the apparent-capacity balance
+  `observed enthalpy change - (energy_in - energy_out)`.  All six application
+  runners now write sensible, latent, total, and initial enthalpy; expected
+  enthalpy change; injected/source/extracted energy; absolute closure residual;
+  and relative closure residual.  Flux-driven laser/remelting studies use
+  prescribed flux/source energy, while Dirichlet cooling/freezing studies report
+  inferred extracted enthalpy as the boundary-energy audit.
 
 ## Additional computing capabilities that would help
 
@@ -186,17 +202,17 @@ manufactured exactness, runner smoke test).
    benchmark matrix with controlled sweeps over pulse spacing, scan speed,
    quench strength, inclusion size, `tau`, latent heat, and mushy-zone width.
 
-6. **Nonlinear convergence reporting.**  The current solvers raise convergence
-   failures, but research studies need richer metadata: Picard/Anderson
-   iteration counts per time step, residual histories, capacity extrema, failed
-   cells, and relaxation factors.  This would support failure maps over `tau`,
-   `beta`, latent heat, and transition width.
+6. **Localized nonlinear failure diagnostics.**  Step 6 now records run-level
+   residual and iteration histories.  A useful refinement would identify the
+   cells responsible for the largest nonlinear update, so failure maps can show
+   whether convergence loss is tied to the moving front, a boundary layer, or a
+   volumetric heat-source hot spot.
 
-7. **Energy and enthalpy conservation audits.**  Since Direction C is centered
-   on latent heat, every application runner should track injected heat, boundary
-   fluxes, sensible enthalpy, latent enthalpy, and numerical residuals.  This is
-   especially important for flux-driven Cattaneo pulses and cryosurgery-style
-   freezing fronts.
+7. **Explicit boundary-flux reconstruction for Dirichlet audits.**  Step 7 now
+   audits enthalpy changes and known injected/source energies.  Cryosurgery and
+   quench cases still infer boundary extraction from enthalpy loss; a stronger
+   audit would reconstruct conductive boundary fluxes from the finite-volume
+   operator and compare those flux integrals against enthalpy removal directly.
 
 8. **Parameter sweep infrastructure.**  A small suite runner, similar in spirit
    to the Direction D inverse-study runners, should sweep `tau`, `beta`, latent

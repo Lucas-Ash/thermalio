@@ -3,9 +3,15 @@
   "alpha": 0.08,
   "T_probe": -0.8,
   "T_far": 0.6,
-  "t_end": 0.4,
+  "t_end": 0.5,
   "latent_heat": 4.0,
-  "final_freezing_margin": 0.1024454545881514,
-  "final_frozen_fraction": 0.09000000000000002,
-  "enthalpy_removed": 0.6109100453643541
+  "final_freezing_margin": 0.09612374169875146,
+  "final_frozen_fraction": 0.08500000000000002,
+  "enthalpy_removed": 0.6034246138723134,
+  "nonconverged_steps": 12,
+  "final_max_iterations": 200,
+  "final_mean_iterations": 36.45,
+  "final_max_residual": 0.0002537660358838123,
+  "final_max_capacity": 14.333333333333334,
+  "final_relative_energy_closure_residual": 0.0
 }

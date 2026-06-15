@@ -52,6 +52,40 @@ def test_enthalpy_budget_splits_total():
     assert 0.0 <= lf <= 1.0
 
 
+def test_enthalpy_audit_closure_residual():
+    pcm = ApparentHeatCapacityModel(-0.25, 0.25, 4.0, 1.0)
+    _, _, c, a = _mesh(20, 5)
+    u0 = -0.3 * np.ones(c.shape[0])
+    u1 = 0.1 * np.ones(c.shape[0])
+    h0 = idiag.enthalpy_budget(pcm, u0, a)["total"]
+    h1 = idiag.enthalpy_budget(pcm, u1, a)["total"]
+    audit = idiag.enthalpy_audit(pcm, u0, u1, a, energy_in=h1 - h0)
+    assert np.isclose(audit["energy_closure_residual"], 0.0, atol=1e-12)
+    assert audit["latent_enthalpy"] > 0.0
+
+
+def test_summarize_solve_report_compacts_metadata():
+    report = {
+        "converged": False,
+        "n_steps": 3,
+        "failed_steps": 1,
+        "iterations": [2, 5, 3],
+        "residuals": [1e-9, 2e-5, 4e-8],
+        "max_iterations": 5,
+        "min_capacity": 1.0,
+        "max_capacity": 14.0,
+        "tolerance": 1e-8,
+        "relaxation": 0.45,
+        "anderson_depth": 6,
+    }
+    summary = idiag.summarize_solve_report(report)
+    assert summary["solve_converged"] is False
+    assert summary["failed_steps"] == 1
+    assert np.isclose(summary["mean_iterations"], 10.0 / 3.0)
+    assert summary["max_residual"] == 2e-5
+    assert summary["max_capacity"] == 14.0
+
+
 def test_phase_fractions_sum_to_one():
     pcm = ApparentHeatCapacityModel(-0.25, 0.25, 4.0, 1.0)
     _, _, c, a = _mesh(30, 6)
@@ -70,12 +104,39 @@ def test_front_speed_constant_velocity():
 # --------------------------------------------------------------------------- #
 # Step 5: application-study runners (physical sanity, small configs)
 # --------------------------------------------------------------------------- #
-def test_pulsed_laser_melting_runner():
+def _application_module(tmp_path, monkeypatch):
     import direction_c_applications as dca
+
+    monkeypatch.setattr(dca, "OUT", tmp_path)
+    return dca
+
+
+def _assert_step6_step7_fields(summary, rows):
+    for key in ("nonconverged_steps", "final_max_iterations", "final_max_residual",
+                "final_max_capacity", "final_relative_energy_closure_residual"):
+        assert key in summary
+    required = {
+        "solve_converged", "solve_steps", "failed_steps", "max_iterations",
+        "mean_iterations", "final_residual", "max_residual", "min_capacity",
+        "max_capacity", "energy_in", "energy_out", "total_enthalpy",
+        "enthalpy_change", "expected_enthalpy_change", "energy_closure_residual",
+        "relative_energy_closure_residual",
+    }
+    for row in rows:
+        assert required <= set(row)
+        assert row["solve_steps"] > 0
+        assert row["max_iterations"] >= 1
+        assert row["max_capacity"] >= row["min_capacity"] > 0.0
+        assert np.isfinite(row["energy_closure_residual"])
+
+
+def test_pulsed_laser_melting_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.pulsed_laser_melting(
         nx=24, ny=6, nt=80, n_snapshots=3, t_end=0.4, t_pulse=0.2)
     assert summary["scenario"] == "pulsed_laser_melting"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_injected_energy"] > 0.0
     # Energy closure: enthalpy rise should match injected boundary energy well.
     assert abs(summary["final_energy_closure_residual"]) < 0.15 * summary["final_injected_energy"]
@@ -85,58 +146,63 @@ def test_pulsed_laser_melting_runner():
     assert summary["final_liquid_fraction"] > 0.0
 
 
-def test_cryosurgery_freezing_runner():
-    import direction_c_applications as dca
+def test_cryosurgery_freezing_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.cryosurgery_freezing(
         nx=20, ny=20, nt=48, n_snapshots=3, t_end=0.4)
     assert summary["scenario"] == "cryosurgery_freezing"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_frozen_fraction"] > 0.0      # the probe freezes some tissue
     assert summary["enthalpy_removed"] > 0.0           # energy is extracted
     frozen = [r["frozen_fraction"] for r in rows]
     assert frozen[-1] >= frozen[0]                     # freezing advances in time
 
 
-def test_moving_scan_melt_pool_runner():
-    import direction_c_applications as dca
+def test_moving_scan_melt_pool_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.moving_scan_melt_pool(
         nx=20, ny=10, nt=36, n_snapshots=3, t_end=0.28)
     assert summary["scenario"] == "moving_scan_melt_pool"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_source_energy"] > 0.0
     assert summary["final_liquid_fraction"] > 0.0
     assert summary["final_melt_pool_length"] > 0.0
     assert rows[-1]["laser_x"] > rows[0]["laser_x"]
 
 
-def test_dual_pulse_remelting_runner():
-    import direction_c_applications as dca
+def test_dual_pulse_remelting_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.dual_pulse_remelting(
         nx=22, ny=6, nt=42, n_snapshots=4, t_end=0.42)
     assert summary["scenario"] == "dual_pulse_remelting"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_injected_energy"] > 0.0
     assert summary["peak_liquid_fraction"] > 0.0
     assert max(r["peak_temperature"] for r in rows) > rows[0]["peak_temperature"]
 
 
-def test_rapid_solidification_quench_runner():
-    import direction_c_applications as dca
+def test_rapid_solidification_quench_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.rapid_solidification_quench(
         nx=18, ny=10, nt=34, n_snapshots=3, t_end=0.24)
     assert summary["scenario"] == "rapid_solidification_quench"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_liquid_fraction"] < summary["initial_liquid_fraction"]
     assert summary["enthalpy_removed"] > 0.0
     assert rows[-1]["solid_fraction"] >= rows[0]["solid_fraction"]
 
 
-def test_buried_hot_inclusion_relaxation_runner():
-    import direction_c_applications as dca
+def test_buried_hot_inclusion_relaxation_runner(tmp_path, monkeypatch):
+    dca = _application_module(tmp_path, monkeypatch)
 
     summary, rows = dca.buried_hot_inclusion_relaxation(
         nx=20, ny=20, nt=36, n_snapshots=3, t_end=0.24)
     assert summary["scenario"] == "buried_hot_inclusion_relaxation"
+    _assert_step6_step7_fields(summary, rows)
     assert summary["final_liquid_fraction"] < summary["initial_liquid_fraction"]
     assert summary["enthalpy_removed"] > 0.0
     assert rows[-1]["peak_temperature"] <= rows[0]["peak_temperature"]

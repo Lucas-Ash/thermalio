@@ -4,9 +4,15 @@
   "tau": 0.006,
   "T_initial": 0.68,
   "T_wall": -0.65,
-  "t_end": 0.24,
+  "t_end": 0.36,
   "initial_liquid_fraction": 1.0,
-  "final_liquid_fraction": 0.5679677769819571,
-  "final_solid_fraction": 0.3111111111111111,
-  "enthalpy_removed": 1.6657222564144603
+  "final_liquid_fraction": 0.5391779219709818,
+  "final_solid_fraction": 0.32716049382716056,
+  "enthalpy_removed": 1.7404129478793866,
+  "nonconverged_steps": 14,
+  "final_max_iterations": 200,
+  "final_mean_iterations": 37.1,
+  "final_max_residual": 0.00018956163702882334,
+  "final_max_capacity": 11.0,
+  "final_relative_energy_closure_residual": 0.0
 }

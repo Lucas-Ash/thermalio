@@ -3,9 +3,14 @@
 This directory contains reproducible example scenarios for non-Fourier
 phase-change studies.  Each scenario writes:
 
-- `<scenario>.png` — summary plot with time histories and final temperature field.
-- `<scenario>.csv` — sampled diagnostic time history.
-- `<scenario>.json` — run parameters and final diagnostic summary.
+- `<scenario>.png` — summary plot with scenario-specific time histories and final
+  temperature field.
+- `<scenario>_diagnostics.png` — Step 6/7 dashboard with nonlinear convergence
+  and energy/enthalpy audit histories.
+- `<scenario>.csv` — sampled diagnostic time history, including convergence
+  metadata and energy/enthalpy audit columns.
+- `<scenario>.json` — run parameters and final diagnostic summary, including
+  final convergence and relative closure-residual metrics.
 
 Regenerate all artifacts from the repository root with:
 
@@ -34,3 +39,16 @@ MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python direction_c_a
   showing liquid-fraction collapse and solid-fraction growth.
 - `buried_hot_inclusion_relaxation`: localized hot inclusion relaxing inside a
   colder matrix, showing refreezing, melted-area decay, and enthalpy removal.
+
+## Shared Diagnostics
+
+Every CSV includes the same Step 6/7 audit columns:
+
+- Nonlinear convergence: `solve_converged`, `solve_steps`, `failed_steps`,
+  `max_iterations`, `mean_iterations`, `final_residual`, `max_residual`,
+  `min_capacity`, `max_capacity`, `tolerance`, `relaxation`, and
+  `anderson_depth`.
+- Energy/enthalpy balance: `energy_in`, `energy_out`,
+  `initial_total_enthalpy`, `total_enthalpy`, `sensible_enthalpy`,
+  `latent_enthalpy`, `enthalpy_change`, `expected_enthalpy_change`,
+  `energy_closure_residual`, and `relative_energy_closure_residual`.

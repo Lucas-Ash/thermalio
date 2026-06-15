@@ -3,9 +3,15 @@
   "alpha": 0.065,
   "tau": 0.012,
   "inclusion_radius": 0.18,
-  "t_end": 0.24,
-  "initial_liquid_fraction": 0.11496365662311128,
-  "final_liquid_fraction": 0.10237853086338425,
-  "final_melted_area": 0.11000000000000001,
-  "enthalpy_removed": 0.013198365220678507
+  "t_end": 0.42,
+  "initial_liquid_fraction": 0.10936136948743547,
+  "final_liquid_fraction": 0.0879545166055717,
+  "final_melted_area": 0.08390022675736974,
+  "enthalpy_removed": 0.029445800588911955,
+  "nonconverged_steps": 10,
+  "final_max_iterations": 200,
+  "final_mean_iterations": 20.48,
+  "final_max_residual": 0.000157414916664933,
+  "final_max_capacity": 8.5,
+  "final_relative_energy_closure_residual": 0.0
 }
