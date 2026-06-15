@@ -1,0 +1,42 @@
+[
+  {
+    "latent_heat": 4.0,
+    "transition_half_width": 0.3,
+    "analytic_peak_capacity": 7.666666666666667,
+    "sampled_peak_capacity": 7.666666666666667,
+    "resolved": true,
+    "max_iters": 3,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "latent_heat": 4.0,
+    "transition_half_width": 0.08,
+    "analytic_peak_capacity": 26.0,
+    "sampled_peak_capacity": 1.0,
+    "resolved": false,
+    "max_iters": 2,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "latent_heat": 24.0,
+    "transition_half_width": 0.3,
+    "analytic_peak_capacity": 41.0,
+    "sampled_peak_capacity": 41.0,
+    "resolved": true,
+    "max_iters": 3,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "latent_heat": 24.0,
+    "transition_half_width": 0.08,
+    "analytic_peak_capacity": 151.0,
+    "sampled_peak_capacity": 1.0,
+    "resolved": false,
+    "max_iters": 2,
+    "failed_steps": 0,
+    "converged": true
+  }
+]

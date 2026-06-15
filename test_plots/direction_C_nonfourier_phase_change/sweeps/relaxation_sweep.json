@@ -1,0 +1,74 @@
+[
+  {
+    "tau": 0.04,
+    "nt": 48,
+    "wave_speed": 1.4142135623730951,
+    "rel_l2": 0.0006263164113494721,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.04,
+    "nt": 72,
+    "wave_speed": 1.4142135623730951,
+    "rel_l2": 0.0007237786128746967,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.07,
+    "nt": 48,
+    "wave_speed": 1.0690449676496976,
+    "rel_l2": 0.0004036262970911055,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.07,
+    "nt": 72,
+    "wave_speed": 1.0690449676496976,
+    "rel_l2": 0.00047168893828131267,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.12,
+    "nt": 48,
+    "wave_speed": 0.816496580927726,
+    "rel_l2": 0.0004174051367285832,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.12,
+    "nt": 72,
+    "wave_speed": 0.816496580927726,
+    "rel_l2": 0.0004243923398122944,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.2,
+    "nt": 48,
+    "wave_speed": 0.6324555320336759,
+    "rel_l2": 0.0002781023741775041,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  },
+  {
+    "tau": 0.2,
+    "nt": 72,
+    "wave_speed": 0.6324555320336759,
+    "rel_l2": 0.00028252138976473366,
+    "max_iters": 4,
+    "failed_steps": 0,
+    "converged": true
+  }
+]
