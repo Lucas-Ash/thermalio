@@ -7,9 +7,9 @@
   "t_end": 0.4,
   "latent_heat": 3.0,
   "wave_speed": 1.224744871391589,
-  "final_front_position": 0.09583315934273531,
+  "final_front_position": 0.0958331593427354,
   "final_liquid_fraction": 0.06399006784983466,
-  "final_energy_closure_residual": -0.004724413139287231,
+  "final_energy_closure_residual": -0.004724413139287148,
   "final_injected_energy": 0.132,
   "nonconverged_steps": 0
 }

@@ -1,0 +1,12 @@
+{
+  "scenario": "rapid_solidification_quench",
+  "alpha": 0.075,
+  "tau": 0.006,
+  "T_initial": 0.68,
+  "T_wall": -0.65,
+  "t_end": 0.24,
+  "initial_liquid_fraction": 1.0,
+  "final_liquid_fraction": 0.5679677769819571,
+  "final_solid_fraction": 0.3111111111111111,
+  "enthalpy_removed": 1.6657222564144603
+}

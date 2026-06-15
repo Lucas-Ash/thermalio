@@ -1,0 +1,21 @@
+{
+  "scenario": "dual_pulse_remelting",
+  "alpha": 0.06,
+  "tau": 0.035,
+  "q0": 2.6,
+  "pulses": [
+    [
+      0.0,
+      0.14
+    ],
+    [
+      0.28,
+      0.4
+    ]
+  ],
+  "t_end": 0.42,
+  "peak_liquid_fraction": 0.09217541163679292,
+  "final_liquid_fraction": 0.09217541163679292,
+  "final_front_position": 0.12842181810711417,
+  "final_injected_energy": 0.18928000000000003
+}

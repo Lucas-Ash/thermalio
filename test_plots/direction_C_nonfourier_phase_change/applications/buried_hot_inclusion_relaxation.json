@@ -1,0 +1,11 @@
+{
+  "scenario": "buried_hot_inclusion_relaxation",
+  "alpha": 0.065,
+  "tau": 0.012,
+  "inclusion_radius": 0.18,
+  "t_end": 0.24,
+  "initial_liquid_fraction": 0.11496365662311128,
+  "final_liquid_fraction": 0.10237853086338425,
+  "final_melted_area": 0.11000000000000001,
+  "enthalpy_removed": 0.013198365220678507
+}

@@ -131,7 +131,21 @@ manufactured exactness, runner smoke test).
     - `cryosurgery_freezing` — a cold cryoprobe Dirichlet boundary freezes a warm
       domain; reports freezing-front margin, frozen volume fraction, minimum
       temperature, and extracted enthalpy.
-  Both runners record nonlinear-convergence metadata and tolerate the onset
+    - `moving_scan_melt_pool` — a moving volumetric Gaussian heat source creates
+      an additive-manufacturing-like melt-pool track; reports source energy,
+      peak temperature, melt-pool length/width, liquid fraction, mushy thickness,
+      and latent/sensible enthalpy.
+    - `dual_pulse_remelting` — two separated laser pulses reheat an already
+      partially transformed slab; reports remelting amplitude, injected energy,
+      peak liquid fraction, interface advance, and the latent-heat state retained
+      between pulses.
+    - `rapid_solidification_quench` — a hot liquid slab is quenched by cold
+      boundaries; reports liquid-fraction collapse, solid-fraction growth,
+      peak-temperature decay, and enthalpy removed from the domain.
+    - `buried_hot_inclusion_relaxation` — a localized hot inclusion relaxes and
+      refreezes inside a colder matrix; reports melted area, peak temperature,
+      liquid-fraction decay, and extracted enthalpy.
+  These runners record nonlinear-convergence metadata and tolerate the onset
   stiffness via the non-raising solve mode (motivating capabilities 1 & 3).
   Verified by `tests/test_direction_c_applications.py` (analytic diagnostics +
   runner physical-sanity / energy-closure checks).
@@ -164,11 +178,13 @@ manufactured exactness, runner smoke test).
    These diagnostics would make comparisons against Stefan theory and
    experimental front-position data much clearer.
 
-5. **Application-study runners.**  Direction C needs reproducible 2D scenarios
-   beyond manufactured solutions: pulsed-laser melting, cryosurgery freezing
-   margins, and additive-manufacturing-like melt pools.  Each runner should
-   report front position, peak temperature, liquid fraction, injected energy,
-   and latent/sensible heat budgets.
+5. **Application-study runners.**  Direction C now has six reproducible 2D
+   scenarios beyond manufactured solutions: pulsed-laser melting, cryosurgery
+   freezing margins, additive-manufacturing-like scan tracks, dual-pulse
+   remelting, rapid solidification quenching, and buried hot-inclusion
+   relaxation.  The next useful increment would turn these seeds into a
+   benchmark matrix with controlled sweeps over pulse spacing, scan speed,
+   quench strength, inclusion size, `tau`, latent heat, and mushy-zone width.
 
 6. **Nonlinear convergence reporting.**  The current solvers raise convergence
    failures, but research studies need richer metadata: Picard/Anderson

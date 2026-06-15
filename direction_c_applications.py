@@ -4,7 +4,7 @@
 Reproducible 2D non-Fourier phase-change scenarios beyond manufactured
 solutions, each reporting front position, peak temperature, liquid fraction,
 injected/extracted energy, and the sensible/latent enthalpy budget via the
-sharp-interface diagnostics (step 4).  Two scenarios:
+sharp-interface diagnostics (step 4).  Six scenarios:
 
 * ``pulsed_laser_melting``   -- a boundary heat-flux pulse melts a cold solid
   slab (Cattaneo/hyperbolic Stefan; the classic finite-speed laser-heating
@@ -12,6 +12,14 @@ sharp-interface diagnostics (step 4).  Two scenarios:
   rise).
 * ``cryosurgery_freezing``   -- a cold cryoprobe boundary freezes a warm domain,
   tracking the freezing-front margin and frozen volume fraction.
+* ``moving_scan_melt_pool``  -- a moving volumetric heat source creates a
+  melt-pool track, mimicking a small additive-manufacturing scan.
+* ``dual_pulse_remelting``   -- two separated boundary pulses show remelting
+  and latent-heat retention between pulses.
+* ``rapid_solidification_quench`` -- a hot liquid slab cools against cold
+  boundaries, tracking liquid-fraction collapse.
+* ``buried_hot_inclusion_relaxation`` -- a localized hot inclusion melts and
+  then refreezes inside a colder matrix.
 
 Outputs go to ``test_plots/direction_C_nonfourier_phase_change/applications/``.
 
@@ -60,6 +68,41 @@ def _write(name, summary, rows, fieldnames):
         writer = _csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _source_energy(centers, areas, source_func, t_end, n_steps):
+    times = np.linspace(0.0, float(t_end), max(int(n_steps), 2) + 1)
+    values = []
+    for t in times:
+        q = np.asarray(source_func(centers[:, 0], centers[:, 1], float(t)), dtype=float)
+        values.append(float(np.sum(areas * q)))
+    return float(np.trapezoid(values, times))
+
+
+def _plot_generic_application(name, rows, final_field, title, metric_specs, cmap="inferno"):
+    times = [r["time"] for r in rows]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.0), constrained_layout=True)
+    for key, label, color, style in metric_specs[:2]:
+        axes[0].plot(times, [r[key] for r in rows], style, color=color, label=label)
+    axes[0].set_xlabel("time")
+    axes[0].set_title(metric_specs[0][1] if len(metric_specs) == 1 else "Front / phase metrics")
+    axes[0].legend(fontsize=8)
+
+    for key, label, color, style in metric_specs[2:]:
+        axes[1].plot(times, [r[key] for r in rows], style, color=color, label=label)
+    if len(metric_specs) > 2:
+        axes[1].legend(fontsize=8)
+    axes[1].set_xlabel("time")
+    axes[1].set_title("Thermal / enthalpy metrics")
+
+    centers, u = final_field
+    tcf = axes[2].tripcolor(centers[:, 0], centers[:, 1], u, shading="gouraud", cmap=cmap)
+    axes[2].set_aspect("equal")
+    axes[2].set_title("Final temperature field")
+    fig.colorbar(tcf, ax=axes[2], shrink=0.8)
+    fig.suptitle(title)
+    fig.savefig(OUT / f"{name}.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 
 # --------------------------------------------------------------------------- #
@@ -233,6 +276,305 @@ def _plot_freezing(rows, final_field, summary, pcm):
     plt.close(fig)
 
 
+# --------------------------------------------------------------------------- #
+# Scenario 3: additive-manufacturing-like moving scan melt pool
+# --------------------------------------------------------------------------- #
+def moving_scan_melt_pool(nx=36, ny=18, bbox=(0.0, 1.6, 0.0, 0.8), alpha=0.055, tau=0.025,
+                          source_power=18.0, source_sigma=0.10, scan_y=0.4,
+                          scan_start=0.2, scan_end=1.35, T0=-0.45, t_end=0.45,
+                          nt=180, n_snapshots=5, latent_heat=3.0, half_width=0.28):
+    pcm = ApparentHeatCapacityModel(
+        solidus_temperature=-half_width, liquidus_temperature=half_width,
+        latent_heat=latent_heat, specific_heat=1.0,
+    )
+    vertices, polygons, centers, areas = _mesh(nx, ny, bbox)
+
+    def ambient_boundary(x, y, t):
+        return T0 * np.ones_like(np.asarray(x, dtype=float))
+
+    def moving_source(x, y, t):
+        x_laser = scan_start + (scan_end - scan_start) * min(max(float(t) / t_end, 0.0), 1.0)
+        r2 = (np.asarray(x) - x_laser) ** 2 + (np.asarray(y) - scan_y) ** 2
+        return source_power * np.exp(-0.5 * r2 / (source_sigma**2))
+
+    u0 = np.full(centers.shape[0], float(T0))
+    H0 = idiag.enthalpy_budget(pcm, u0, areas)["total"]
+    opts = {"max_iters": 180, "tol": 1e-8, "relaxation": 0.45, "anderson_depth": 6,
+            "raise_on_nonconvergence": False}
+    rows = []
+    final_field = None
+    snaps = np.linspace(t_end / n_snapshots, t_end, n_snapshots)
+    for t_k in snaps:
+        steps = max(2, int(round(nt * t_k / t_end)))
+        solver = HyperbolicStefanSolver(
+            vertices, polygons, alpha, t_k / steps, tau, pcm,
+            bc_type="dirichlet", bc_func=ambient_boundary, source_func=moving_source,
+            phase_change_options=opts,
+        )
+        _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
+        budget = idiag.enthalpy_budget(pcm, u, areas)
+        liquid = pcm.liquid_fraction(u) > 0.05
+        if np.any(liquid):
+            xs = centers[liquid, 0]
+            ys = centers[liquid, 1]
+            pool_length = float(np.max(xs) - np.min(xs))
+            pool_width = float(np.max(ys) - np.min(ys))
+        else:
+            pool_length = 0.0
+            pool_width = 0.0
+        rows.append({
+            "time": float(t_k),
+            "laser_x": scan_start + (scan_end - scan_start) * float(t_k) / t_end,
+            "peak_temperature": float(np.max(u)),
+            "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
+            "melt_pool_length": pool_length,
+            "melt_pool_width": pool_width,
+            "mushy_thickness": idiag.mushy_zone_thickness(centers, u, pcm, axis="x", coord=scan_y),
+            "latent_enthalpy": budget["latent"],
+            "enthalpy_rise": budget["total"] - H0,
+            "source_energy": _source_energy(centers, areas, moving_source, t_k, steps),
+        })
+        final_field = (centers, u)
+    summary = {
+        "scenario": "moving_scan_melt_pool", "alpha": alpha, "tau": tau,
+        "source_power": source_power, "source_sigma": source_sigma, "t_end": t_end,
+        "final_peak_temperature": rows[-1]["peak_temperature"],
+        "final_liquid_fraction": rows[-1]["liquid_fraction"],
+        "final_melt_pool_length": rows[-1]["melt_pool_length"],
+        "final_melt_pool_width": rows[-1]["melt_pool_width"],
+        "final_source_energy": rows[-1]["source_energy"],
+    }
+    _write("moving_scan_melt_pool", summary, rows,
+           ["time", "laser_x", "peak_temperature", "liquid_fraction", "melt_pool_length",
+            "melt_pool_width", "mushy_thickness", "latent_enthalpy", "enthalpy_rise",
+            "source_energy"])
+    _plot_generic_application(
+        "moving_scan_melt_pool", rows, final_field,
+        "Direction C application: moving scan melt pool",
+        [
+            ("laser_x", "laser x", "tab:gray", "o-"),
+            ("melt_pool_length", "melt-pool length", "tab:red", "s-"),
+            ("peak_temperature", "peak temperature", "tab:orange", "o-"),
+            ("liquid_fraction", "liquid fraction", "tab:blue", "s--"),
+            ("source_energy", "source energy", "black", "^-"),
+        ],
+    )
+    return summary, rows
+
+
+# --------------------------------------------------------------------------- #
+# Scenario 4: dual-pulse remelting from separated boundary heat pulses
+# --------------------------------------------------------------------------- #
+def dual_pulse_remelting(nx=40, ny=10, bbox=(0.0, 1.4, 0.0, 0.28), alpha=0.06, tau=0.035,
+                         q0=2.6, pulses=((0.0, 0.14), (0.28, 0.40)), T0=-0.58,
+                         t_end=0.55, nt=220, n_snapshots=7, latent_heat=3.2,
+                         half_width=0.34):
+    pcm = ApparentHeatCapacityModel(
+        solidus_temperature=-half_width, liquidus_temperature=half_width,
+        latent_heat=latent_heat, specific_heat=1.0,
+    )
+    vertices, polygons, centers, areas = _mesh(nx, ny, bbox)
+    x_left, y_mid = bbox[0], 0.5 * (bbox[2] + bbox[3])
+    left_len = bbox[3] - bbox[2]
+
+    def pulse_flux(x, y, t, nx_, ny_):
+        active = any(start <= float(t) <= stop for start, stop in pulses)
+        return np.where(np.isclose(x, x_left), q0 if active else 0.0, 0.0)
+
+    def injected_energy(t):
+        active_time = sum(max(0.0, min(float(t), stop) - start) for start, stop in pulses)
+        return q0 * left_len * active_time
+
+    u0 = np.full(centers.shape[0], float(T0))
+    H0 = idiag.enthalpy_budget(pcm, u0, areas)["total"]
+    opts = {"max_iters": 200, "tol": 1e-8, "relaxation": 0.4, "anderson_depth": 6,
+            "raise_on_nonconvergence": False}
+    rows = []
+    final_field = None
+    snaps = np.linspace(t_end / n_snapshots, t_end, n_snapshots)
+    for t_k in snaps:
+        steps = max(2, int(round(nt * t_k / t_end)))
+        solver = HyperbolicStefanSolver(
+            vertices, polygons, alpha, t_k / steps, tau, pcm,
+            bc_type="flux", bc_func=pulse_flux, phase_change_options=opts,
+        )
+        _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
+        budget = idiag.enthalpy_budget(pcm, u, areas)
+        front = idiag.interface_position(centers, u, pcm, axis="x", coord=y_mid, pick="last")
+        rows.append({
+            "time": float(t_k),
+            "front_position": float("nan") if front is None else float(front),
+            "peak_temperature": float(np.max(u)),
+            "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
+            "latent_enthalpy": budget["latent"],
+            "enthalpy_rise": budget["total"] - H0,
+            "injected_energy": injected_energy(t_k),
+        })
+        final_field = (centers, u)
+    summary = {
+        "scenario": "dual_pulse_remelting", "alpha": alpha, "tau": tau,
+        "q0": q0, "pulses": [[float(a), float(b)] for a, b in pulses], "t_end": t_end,
+        "peak_liquid_fraction": float(max(r["liquid_fraction"] for r in rows)),
+        "final_liquid_fraction": rows[-1]["liquid_fraction"],
+        "final_front_position": rows[-1]["front_position"],
+        "final_injected_energy": rows[-1]["injected_energy"],
+    }
+    _write("dual_pulse_remelting", summary, rows,
+           ["time", "front_position", "peak_temperature", "liquid_fraction",
+            "latent_enthalpy", "enthalpy_rise", "injected_energy"])
+    _plot_generic_application(
+        "dual_pulse_remelting", rows, final_field,
+        "Direction C application: dual-pulse remelting",
+        [
+            ("front_position", "melt front", "tab:red", "o-"),
+            ("liquid_fraction", "liquid fraction", "tab:blue", "s--"),
+            ("peak_temperature", "peak temperature", "tab:orange", "o-"),
+            ("latent_enthalpy", "latent enthalpy", "tab:purple", "s-"),
+            ("injected_energy", "injected energy", "black", "^-"),
+        ],
+    )
+    return summary, rows
+
+
+# --------------------------------------------------------------------------- #
+# Scenario 5: rapid solidification quench of a hot liquid slab
+# --------------------------------------------------------------------------- #
+def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0.075,
+                                tau=0.006, T_initial=0.68, T_wall=-0.65, t_end=0.36,
+                                nt=120, n_snapshots=6, latent_heat=3.6,
+                                half_width=0.18):
+    pcm = ApparentHeatCapacityModel(
+        solidus_temperature=-half_width, liquidus_temperature=half_width,
+        latent_heat=latent_heat, specific_heat=1.0,
+    )
+    vertices, polygons, centers, areas = _mesh(nx, ny, bbox)
+
+    def cold_wall(x, y, t):
+        return T_wall * np.ones_like(np.asarray(x, dtype=float))
+
+    u0 = np.full(centers.shape[0], float(T_initial))
+    H0 = idiag.enthalpy_budget(pcm, u0, areas)["total"]
+    opts = {"max_iters": 200, "tol": 1e-8, "relaxation": 0.45, "anderson_depth": 6,
+            "raise_on_nonconvergence": False}
+    rows = []
+    final_field = None
+    snaps = np.linspace(t_end / n_snapshots, t_end, n_snapshots)
+    for t_k in snaps:
+        steps = max(2, int(round(nt * t_k / t_end)))
+        solver = HyperbolicStefanSolver(
+            vertices, polygons, alpha, t_k / steps, tau, pcm,
+            bc_type="dirichlet", bc_func=cold_wall, phase_change_options=opts,
+        )
+        _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
+        budget = idiag.enthalpy_budget(pcm, u, areas)
+        phases = idiag.phase_fractions(pcm, u, areas)
+        rows.append({
+            "time": float(t_k),
+            "peak_temperature": float(np.max(u)),
+            "min_temperature": float(np.min(u)),
+            "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
+            "solid_fraction": phases["solid"],
+            "mushy_fraction": phases["mushy"],
+            "enthalpy_removed": H0 - budget["total"],
+            "latent_enthalpy": budget["latent"],
+        })
+        final_field = (centers, u)
+    summary = {
+        "scenario": "rapid_solidification_quench", "alpha": alpha, "tau": tau,
+        "T_initial": T_initial, "T_wall": T_wall, "t_end": t_end,
+        "initial_liquid_fraction": idiag.liquid_volume_fraction(pcm, u0, areas),
+        "final_liquid_fraction": rows[-1]["liquid_fraction"],
+        "final_solid_fraction": rows[-1]["solid_fraction"],
+        "enthalpy_removed": rows[-1]["enthalpy_removed"],
+    }
+    _write("rapid_solidification_quench", summary, rows,
+           ["time", "peak_temperature", "min_temperature", "liquid_fraction",
+            "solid_fraction", "mushy_fraction", "enthalpy_removed", "latent_enthalpy"])
+    _plot_generic_application(
+        "rapid_solidification_quench", rows, final_field,
+        "Direction C application: rapid solidification quench",
+        [
+            ("liquid_fraction", "liquid fraction", "tab:blue", "o-"),
+            ("solid_fraction", "solid fraction", "tab:cyan", "s-"),
+            ("peak_temperature", "peak temperature", "tab:orange", "o-"),
+            ("enthalpy_removed", "enthalpy removed", "tab:purple", "s--"),
+        ],
+        cmap="coolwarm",
+    )
+    return summary, rows
+
+
+# --------------------------------------------------------------------------- #
+# Scenario 6: buried hot inclusion relaxation in a cold matrix
+# --------------------------------------------------------------------------- #
+def buried_hot_inclusion_relaxation(nx=42, ny=42, bbox=(0.0, 1.0, 0.0, 1.0), alpha=0.065,
+                                    tau=0.012, inclusion_center=(0.5, 0.5),
+                                    inclusion_radius=0.18, T_matrix=-0.55,
+                                    T_inclusion=0.82, t_end=0.42, nt=150,
+                                    n_snapshots=6, latent_heat=3.3, half_width=0.22):
+    pcm = ApparentHeatCapacityModel(
+        solidus_temperature=-half_width, liquidus_temperature=half_width,
+        latent_heat=latent_heat, specific_heat=1.0,
+    )
+    vertices, polygons, centers, areas = _mesh(nx, ny, bbox)
+
+    def cold_boundary(x, y, t):
+        return T_matrix * np.ones_like(np.asarray(x, dtype=float))
+
+    r = np.hypot(centers[:, 0] - inclusion_center[0], centers[:, 1] - inclusion_center[1])
+    transition = 0.03
+    inclusion_profile = 0.5 * (1.0 - np.tanh((r - inclusion_radius) / transition))
+    u0 = T_matrix + (T_inclusion - T_matrix) * inclusion_profile
+    H0 = idiag.enthalpy_budget(pcm, u0, areas)["total"]
+    opts = {"max_iters": 200, "tol": 1e-8, "relaxation": 0.45, "anderson_depth": 6,
+            "raise_on_nonconvergence": False}
+    rows = []
+    final_field = None
+    snaps = np.linspace(t_end / n_snapshots, t_end, n_snapshots)
+    for t_k in snaps:
+        steps = max(2, int(round(nt * t_k / t_end)))
+        solver = HyperbolicStefanSolver(
+            vertices, polygons, alpha, t_k / steps, tau, pcm,
+            bc_type="dirichlet", bc_func=cold_boundary, phase_change_options=opts,
+        )
+        _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
+        budget = idiag.enthalpy_budget(pcm, u, areas)
+        liquid = pcm.liquid_fraction(u) > 0.5
+        melted_area = float(np.sum(areas[liquid]))
+        rows.append({
+            "time": float(t_k),
+            "peak_temperature": float(np.max(u)),
+            "liquid_fraction": idiag.liquid_volume_fraction(pcm, u, areas),
+            "melted_area": melted_area,
+            "latent_enthalpy": budget["latent"],
+            "enthalpy_removed": H0 - budget["total"],
+        })
+        final_field = (centers, u)
+    summary = {
+        "scenario": "buried_hot_inclusion_relaxation", "alpha": alpha, "tau": tau,
+        "inclusion_radius": inclusion_radius, "t_end": t_end,
+        "initial_liquid_fraction": idiag.liquid_volume_fraction(pcm, u0, areas),
+        "final_liquid_fraction": rows[-1]["liquid_fraction"],
+        "final_melted_area": rows[-1]["melted_area"],
+        "enthalpy_removed": rows[-1]["enthalpy_removed"],
+    }
+    _write("buried_hot_inclusion_relaxation", summary, rows,
+           ["time", "peak_temperature", "liquid_fraction", "melted_area",
+            "latent_enthalpy", "enthalpy_removed"])
+    _plot_generic_application(
+        "buried_hot_inclusion_relaxation", rows, final_field,
+        "Direction C application: buried hot inclusion relaxation",
+        [
+            ("melted_area", "melted area", "tab:red", "o-"),
+            ("liquid_fraction", "liquid fraction", "tab:blue", "s--"),
+            ("peak_temperature", "peak temperature", "tab:orange", "o-"),
+            ("enthalpy_removed", "enthalpy removed", "tab:purple", "s-"),
+        ],
+        cmap="coolwarm",
+    )
+    return summary, rows
+
+
 def main():
     parser = argparse.ArgumentParser(description="Direction C application studies.")
     parser.add_argument("--quick", action="store_true", help="smaller/faster runs")
@@ -242,9 +584,17 @@ def main():
     if args.quick:
         laser, _ = pulsed_laser_melting(nx=32, ny=8, nt=48, n_snapshots=4, t_end=0.5)
         cryo, _ = cryosurgery_freezing(nx=24, ny=24, nt=40, n_snapshots=4, t_end=0.4)
+        scan, _ = moving_scan_melt_pool(nx=24, ny=12, nt=48, n_snapshots=3, t_end=0.32)
+        remelt, _ = dual_pulse_remelting(nx=24, ny=6, nt=54, n_snapshots=4, t_end=0.45)
+        quench, _ = rapid_solidification_quench(nx=22, ny=12, nt=42, n_snapshots=3, t_end=0.28)
+        inclusion, _ = buried_hot_inclusion_relaxation(nx=24, ny=24, nt=48, n_snapshots=3, t_end=0.3)
     else:
         laser, _ = pulsed_laser_melting()
         cryo, _ = cryosurgery_freezing()
+        scan, _ = moving_scan_melt_pool()
+        remelt, _ = dual_pulse_remelting()
+        quench, _ = rapid_solidification_quench()
+        inclusion, _ = buried_hot_inclusion_relaxation()
 
     print("=== Direction C application studies ===")
     print(f"[pulsed-laser melting] front={laser['final_front_position']:.3f} "
@@ -254,6 +604,14 @@ def main():
     print(f"[cryosurgery freezing] margin={cryo['final_freezing_margin']:.3f} "
           f"frozen_frac={cryo['final_frozen_fraction']:.3f} "
           f"enthalpy_removed={cryo['enthalpy_removed']:.3f}")
+    print(f"[moving scan melt pool] length={scan['final_melt_pool_length']:.3f} "
+          f"width={scan['final_melt_pool_width']:.3f} liquid_frac={scan['final_liquid_fraction']:.3f}")
+    print(f"[dual-pulse remelting] peak_liquid_frac={remelt['peak_liquid_fraction']:.3f} "
+          f"final_front={remelt['final_front_position']:.3f}")
+    print(f"[rapid solidification quench] liquid {quench['initial_liquid_fraction']:.3f}->"
+          f"{quench['final_liquid_fraction']:.3f} enthalpy_removed={quench['enthalpy_removed']:.3f}")
+    print(f"[buried hot inclusion] liquid {inclusion['initial_liquid_fraction']:.3f}->"
+          f"{inclusion['final_liquid_fraction']:.3f} melted_area={inclusion['final_melted_area']:.3f}")
     print(f"wrote artifacts to {OUT}")
 
 

@@ -1,0 +1,13 @@
+{
+  "scenario": "moving_scan_melt_pool",
+  "alpha": 0.055,
+  "tau": 0.025,
+  "source_power": 18.0,
+  "source_sigma": 0.1,
+  "t_end": 0.28,
+  "final_peak_temperature": -0.1865989646136214,
+  "final_liquid_fraction": 0.025793419297460388,
+  "final_melt_pool_length": 0.9600000000000001,
+  "final_melt_pool_width": 0.24000000000000205,
+  "final_source_energy": 0.3164046036052325
+}

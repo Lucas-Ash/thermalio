@@ -95,3 +95,48 @@ def test_cryosurgery_freezing_runner():
     assert summary["enthalpy_removed"] > 0.0           # energy is extracted
     frozen = [r["frozen_fraction"] for r in rows]
     assert frozen[-1] >= frozen[0]                     # freezing advances in time
+
+
+def test_moving_scan_melt_pool_runner():
+    import direction_c_applications as dca
+
+    summary, rows = dca.moving_scan_melt_pool(
+        nx=20, ny=10, nt=36, n_snapshots=3, t_end=0.28)
+    assert summary["scenario"] == "moving_scan_melt_pool"
+    assert summary["final_source_energy"] > 0.0
+    assert summary["final_liquid_fraction"] > 0.0
+    assert summary["final_melt_pool_length"] > 0.0
+    assert rows[-1]["laser_x"] > rows[0]["laser_x"]
+
+
+def test_dual_pulse_remelting_runner():
+    import direction_c_applications as dca
+
+    summary, rows = dca.dual_pulse_remelting(
+        nx=22, ny=6, nt=42, n_snapshots=4, t_end=0.42)
+    assert summary["scenario"] == "dual_pulse_remelting"
+    assert summary["final_injected_energy"] > 0.0
+    assert summary["peak_liquid_fraction"] > 0.0
+    assert max(r["peak_temperature"] for r in rows) > rows[0]["peak_temperature"]
+
+
+def test_rapid_solidification_quench_runner():
+    import direction_c_applications as dca
+
+    summary, rows = dca.rapid_solidification_quench(
+        nx=18, ny=10, nt=34, n_snapshots=3, t_end=0.24)
+    assert summary["scenario"] == "rapid_solidification_quench"
+    assert summary["final_liquid_fraction"] < summary["initial_liquid_fraction"]
+    assert summary["enthalpy_removed"] > 0.0
+    assert rows[-1]["solid_fraction"] >= rows[0]["solid_fraction"]
+
+
+def test_buried_hot_inclusion_relaxation_runner():
+    import direction_c_applications as dca
+
+    summary, rows = dca.buried_hot_inclusion_relaxation(
+        nx=20, ny=20, nt=36, n_snapshots=3, t_end=0.24)
+    assert summary["scenario"] == "buried_hot_inclusion_relaxation"
+    assert summary["final_liquid_fraction"] < summary["initial_liquid_fraction"]
+    assert summary["enthalpy_removed"] > 0.0
+    assert rows[-1]["peak_temperature"] <= rows[0]["peak_temperature"]
