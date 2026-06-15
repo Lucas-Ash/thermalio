@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1-PR5 initial implementation
+- **Status:** PR1-PR6 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -34,6 +34,10 @@ reference?*
 - **Implemented field-inversion/runner increment:** normalized Gaussian perfusion
   field bases, matrix/smoothness regularization, and a reproducible Pennes field
   inverse runner that writes JSON/CSV/PNG study artifacts.
+- **Implemented PINN/ML baseline increment:** a dependency-light comparison
+  runner that reports trusted FV inverse, RBF-ridge ML surrogate, and training-
+  grid lookup baselines with a shared schema that external PINN implementations
+  can plug into.
 - **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
   full Bayesian inversion; PINN implementation and head-to-head benchmark;
   high-dimensional cellwise field recovery.
@@ -83,6 +87,11 @@ reference?*
   `pennes_field_inverse_summary.json`,
   `pennes_field_inverse_coefficients.csv`, and
   `pennes_field_inverse_fields.png`.
+- `test_plots/direction_D_inverse_problems/pinn_ml_baseline_comparison/`
+  contains the first baseline-comparison runner output:
+  `pennes_ml_baseline_summary.json`,
+  `pennes_ml_baseline_metrics.csv`, and
+  `pennes_ml_baseline_comparison.png`.
 
 ## Further development priorities
 - **Broader PDE adjoint support:** the current discrete adjoint covers scalar
@@ -103,8 +112,10 @@ reference?*
 - **Inverse runners and reports:** a Pennes field-inversion runner now writes
   JSON/CSV/PNG artifacts. Generalize this into a suite runner with repeatable
   scenario definitions, noise ensembles, timing metadata, and comparison tables.
-- **Model comparison:** use the trusted FV inverse results as baselines for later
-  PINN/ML comparisons, with identical synthetic observations and error metrics.
+- **Model comparison:** trusted FV, RBF-ridge surrogate, and grid-lookup baselines
+  are available with identical synthetic observations and error metrics. Next,
+  add a real PINN training adapter that consumes the same observation bundle and
+  writes rows into the same comparison schema.
 
 ## Risks & open questions
 - Ill-posedness / non-identifiability (e.g. tau vs alpha trade-offs); regularization
@@ -124,7 +135,10 @@ reference?*
 - PR5: regularized field inversion and inverse-study runner. Implemented in
   `heat_solver/inverse.py` with low-dimensional Gaussian perfusion-field
   recovery and report-writing tests.
-- PR5+: broader PDE adjoints, high-dimensional field inversion, and ML comparison.
+- PR6: PINN/ML comparison baselines. Implemented as a trusted-FV-vs-RBF-surrogate
+  Pennes baseline runner with report-writing tests.
+- PR6+: real PINN adapter, broader PDE adjoints, and high-dimensional field
+  inversion.
 
 ## References
 - Pennes bioheat inverse problems (perfusion estimation); PINN inverse-problem

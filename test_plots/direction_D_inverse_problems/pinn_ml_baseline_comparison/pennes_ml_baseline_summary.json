@@ -1,0 +1,68 @@
+{
+  "alpha": 0.1,
+  "baselines": [
+    {
+      "absolute_error": 0.001608671632774783,
+      "estimate": 3.998391328367225,
+      "kind": "trusted_fv",
+      "name": "trusted_fv_inverse",
+      "relative_error": 0.00040216790819369574,
+      "relative_residual": 0.00115889792900925,
+      "residual_norm": 0.002452773337112102
+    },
+    {
+      "absolute_error": 0.0016175878367361562,
+      "estimate": 3.998382412163264,
+      "kind": "ml_surrogate",
+      "name": "rbf_ridge_surrogate",
+      "relative_error": 0.00040439695918403906,
+      "relative_residual": 0.0011589141864130578,
+      "residual_norm": 0.002452807745428479
+    },
+    {
+      "absolute_error": 0.0,
+      "estimate": 4.0,
+      "kind": "ml_lookup",
+      "name": "training_grid_lookup",
+      "relative_error": 0.0,
+      "relative_residual": 0.0011615136016424454,
+      "residual_norm": 0.002458309331208493
+    }
+  ],
+  "case": "Pennes PINN/ML baseline comparison",
+  "dt": 0.002,
+  "pinn_plugin_schema": {
+    "metric_function": "compare_scalar_inverse_baselines",
+    "required_fields": [
+      "name",
+      "kind",
+      "estimate",
+      "predicted"
+    ]
+  },
+  "relative_noise": 0.001,
+  "sensor_indices": [
+    45,
+    105,
+    94,
+    130,
+    149
+  ],
+  "times": [
+    0.02,
+    0.05,
+    0.08
+  ],
+  "training_parameters": [
+    2.0,
+    2.5,
+    3.0,
+    3.5,
+    4.0,
+    4.5,
+    5.0,
+    5.5,
+    6.0
+  ],
+  "true_perfusion": 4.0
+}

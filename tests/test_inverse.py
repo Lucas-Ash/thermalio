@@ -14,6 +14,7 @@ from heat_solver.inverse import (
     confidence_intervals,
     estimate_parameters,
     estimate_scalar_parameter,
+    fit_rbf_ridge_surrogate_1d,
     finite_difference_jacobian,
     gauss_newton_covariance,
     identifiability_grid_scan,
@@ -27,6 +28,7 @@ from heat_solver.inverse import (
     regularization_residual,
     residual_vector,
     run_pennes_field_inverse_study,
+    run_pennes_ml_baseline_comparison,
 )
 from heat_solver.meshes import generate_square_polygonal_mesh
 from heat_solver.transport import ReactionDiffusionHeatSolver
@@ -447,6 +449,43 @@ def test_run_pennes_field_inverse_study_writes_reports(tmp_path):
 
     coeff_text = open(result.coefficients_path, "r", encoding="utf-8").read()
     assert "true,recovered,error" in coeff_text
+    assert result.plot_path is None
+
+
+def test_rbf_ridge_surrogate_interpolates_scalar_forward_data():
+    params = np.linspace(2.0, 6.0, 9)
+    observations = np.column_stack([np.exp(-0.1 * params), params**2])
+    surrogate = fit_rbf_ridge_surrogate_1d(params, observations, ridge=1e-12)
+    predicted = surrogate.predict(params)
+    assert predicted.shape == observations.shape
+    assert np.max(np.abs(predicted - observations)) < 1e-6
+    single = surrogate.predict(4.0)
+    assert single.shape == (2,)
+    with pytest.raises(ValueError):
+        fit_rbf_ridge_surrogate_1d(params, observations[:-1])
+
+
+def test_run_pennes_ml_baseline_comparison_writes_reports(tmp_path):
+    result = run_pennes_ml_baseline_comparison(
+        tmp_path,
+        nx=9,
+        times=(0.02, 0.05),
+        training_parameters=np.linspace(2.0, 6.0, 7),
+        relative_noise=0.0,
+        make_plot=False,
+    )
+    assert result.summary["case"] == "Pennes PINN/ML baseline comparison"
+    baselines = {row["name"]: row for row in result.summary["baselines"]}
+    assert {"trusted_fv_inverse", "rbf_ridge_surrogate", "training_grid_lookup"} <= set(baselines)
+    assert baselines["trusted_fv_inverse"]["absolute_error"] < 1e-4
+    assert baselines["rbf_ridge_surrogate"]["absolute_error"] < 5e-2
+    assert "pinn_plugin_schema" in result.summary
+
+    with open(result.summary_path, "r", encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    assert loaded["true_perfusion"] == pytest.approx(4.0)
+    csv_text = open(result.coefficients_path, "r", encoding="utf-8").read()
+    assert "relative_residual" in csv_text
     assert result.plot_path is None
 
 

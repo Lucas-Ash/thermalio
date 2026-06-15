@@ -134,6 +134,21 @@ class InverseStudyResult:
     summary: dict
 
 
+@dataclass(frozen=True)
+class RbfRidgeSurrogate1D:
+    """Dependency-light scalar-parameter RBF ridge surrogate."""
+
+    centers: np.ndarray
+    length_scale: float
+    coefficients: np.ndarray
+
+    def predict(self, parameter):
+        theta = np.asarray(parameter, dtype=float).reshape(-1)
+        features = _rbf_1d_features(theta, self.centers, self.length_scale)
+        predicted = features @ self.coefficients
+        return predicted[0] if np.asarray(parameter).ndim == 0 else predicted
+
+
 def _as_vector(values, name):
     arr = np.asarray(values, dtype=float)
     if arr.size == 0:
@@ -397,6 +412,70 @@ def pairwise_difference_matrix(n_parameters):
             row[j] = -1.0
             rows.append(row)
     return np.vstack(rows)
+
+
+def _rbf_1d_features(parameter_values, centers, length_scale):
+    values = np.asarray(parameter_values, dtype=float).reshape(-1)
+    centers = np.asarray(centers, dtype=float).reshape(-1)
+    length_scale = float(length_scale)
+    if length_scale <= 0.0:
+        raise ValueError("length_scale must be positive.")
+    rbf = np.exp(-0.5 * ((values[:, None] - centers[None, :]) / length_scale) ** 2)
+    return np.column_stack([np.ones(values.size), rbf])
+
+
+def fit_rbf_ridge_surrogate_1d(parameter_values, observations, length_scale=None, ridge=1e-8):
+    """Fit a scalar-parameter RBF ridge surrogate for observation vectors."""
+    values = _as_vector(parameter_values, "parameter_values")
+    observations = np.asarray(observations, dtype=float)
+    if observations.ndim == 1:
+        observations = observations[:, None]
+    if observations.ndim != 2 or observations.shape[0] != values.size:
+        raise ValueError("observations must have shape (n_parameter_values, n_outputs).")
+    if length_scale is None:
+        unique = np.unique(np.sort(values))
+        if unique.size > 1:
+            length_scale = 2.0 * float(np.median(np.diff(unique)))
+        else:
+            length_scale = 1.0
+    ridge = float(ridge)
+    if ridge < 0.0:
+        raise ValueError("ridge must be non-negative.")
+    features = _rbf_1d_features(values, values, length_scale)
+    reg = ridge * np.eye(features.shape[1])
+    reg[0, 0] = 0.0
+    coefficients = np.linalg.solve(features.T @ features + reg, features.T @ observations)
+    return RbfRidgeSurrogate1D(centers=values.copy(), length_scale=float(length_scale), coefficients=coefficients)
+
+
+def compare_scalar_inverse_baselines(
+    observed,
+    true_parameter,
+    baselines,
+    weights=None,
+):
+    """Create common metrics for inverse/PINN/ML baseline comparisons."""
+    observed_vec = _as_vector(observed, "observed")
+    rows = []
+    for baseline in baselines:
+        name = str(baseline["name"])
+        estimate = float(baseline["estimate"])
+        predicted = _as_vector(baseline["predicted"], f"{name}.predicted")
+        residual = residual_vector(predicted, observed_vec, weights=weights)
+        residual_norm = float(np.linalg.norm(residual))
+        observed_norm = residual_vector(np.zeros_like(observed_vec), observed_vec, weights=weights)
+        rows.append(
+            {
+                "name": name,
+                "estimate": estimate,
+                "absolute_error": abs(estimate - float(true_parameter)),
+                "relative_error": abs(estimate - float(true_parameter)) / max(abs(float(true_parameter)), 1e-16),
+                "residual_norm": residual_norm,
+                "relative_residual": residual_norm / max(float(np.linalg.norm(observed_norm)), 1e-16),
+                "kind": str(baseline.get("kind", "unspecified")),
+            }
+        )
+    return rows
 
 
 def finite_difference_jacobian(
@@ -918,6 +997,193 @@ def run_pennes_field_inverse_study(
     return InverseStudyResult(
         summary_path=str(summary_path),
         coefficients_path=str(coefficients_path),
+        plot_path=None if plot_path is None else str(plot_path),
+        summary=summary,
+    )
+
+
+def run_pennes_ml_baseline_comparison(
+    output_dir,
+    nx=12,
+    alpha=0.1,
+    dt=0.002,
+    true_perfusion=4.0,
+    times=(0.02, 0.05, 0.08),
+    sensor_locations=None,
+    training_parameters=None,
+    relative_noise=1e-3,
+    seed=0,
+    make_plot=True,
+):
+    """Compare trusted FV inversion against simple ML surrogate baselines.
+
+    This is intentionally dependency-light.  The ML baseline is an RBF ridge
+    surrogate trained on trusted FV forward snapshots.  The report format is
+    designed so a future PINN implementation can add rows with the same fields.
+    """
+    from .cases import pennes_bioheat_case
+    from .meshes import generate_square_polygonal_mesh
+    from .transport import ReactionDiffusionHeatSolver
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if sensor_locations is None:
+        sensor_locations = np.array(
+            [[0.25, 0.25], [0.5, 0.5], [0.75, 0.5], [0.35, 0.7], [0.7, 0.75]],
+            dtype=float,
+        )
+    if training_parameters is None:
+        training_parameters = np.linspace(2.0, 6.0, 9)
+    training_parameters = _as_vector(training_parameters, "training_parameters")
+    times = np.asarray(times, dtype=float).reshape(-1)
+    if times.size == 0 or np.any(times <= 0.0) or np.any(np.diff(times) <= 0.0):
+        raise ValueError("times must be positive and strictly increasing.")
+
+    case = pennes_bioheat_case(alpha=alpha, perfusion=true_perfusion)
+    vertices, polygons, centers = generate_square_polygonal_mesh(nx=nx, ny=nx, bbox=case["bbox"])
+    sensor_indices = nearest_sensor_indices(centers, np.asarray(sensor_locations, dtype=float))
+    u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
+
+    def snapshots_for(perfusion):
+        solver = ReactionDiffusionHeatSolver(
+            vertices,
+            polygons,
+            alpha,
+            dt,
+            reaction_rate=float(perfusion),
+            bc_func=case["boundary"],
+            source_func=lambda x, y, t: np.zeros_like(np.asarray(x, dtype=float)),
+        )
+        snapshots = []
+        t = 0.0
+        u = u0.copy()
+        for t_next in times:
+            t, u = solver.solve(u, t, float(t_next))
+            snapshots.append(u.copy())
+        return np.asarray(snapshots)
+
+    def observe(perfusion):
+        return collect_observations(
+            snapshots_for(perfusion),
+            sensor_indices=sensor_indices,
+            time_indices=np.arange(times.size),
+            time_values=times,
+        ).values
+
+    clean_observed = observe(float(true_perfusion))
+    observed = add_observation_noise(clean_observed, relative_level=relative_noise, seed=seed)
+    trusted = estimate_scalar_parameter(
+        observe,
+        observed,
+        initial_guess=float(np.mean(training_parameters)),
+        bounds=(float(np.min(training_parameters)), float(np.max(training_parameters))),
+        parameter_name="perfusion",
+    )
+
+    train_outputs = np.vstack([observe(value) for value in training_parameters])
+    surrogate = fit_rbf_ridge_surrogate_1d(training_parameters, train_outputs, ridge=1e-8)
+    surrogate_estimate = estimate_scalar_parameter(
+        lambda value: surrogate.predict(float(value)),
+        observed,
+        initial_guess=float(np.mean(training_parameters)),
+        bounds=(float(np.min(training_parameters)), float(np.max(training_parameters))),
+        parameter_name="perfusion",
+    )
+    lookup_residuals = [
+        float(np.linalg.norm(residual_vector(train_output, observed)))
+        for train_output in train_outputs
+    ]
+    lookup_idx = int(np.argmin(lookup_residuals))
+    lookup_estimate = float(training_parameters[lookup_idx])
+
+    baseline_rows = compare_scalar_inverse_baselines(
+        observed,
+        true_perfusion,
+        [
+            {
+                "name": "trusted_fv_inverse",
+                "kind": "trusted_fv",
+                "estimate": trusted.value,
+                "predicted": observe(trusted.value),
+            },
+            {
+                "name": "rbf_ridge_surrogate",
+                "kind": "ml_surrogate",
+                "estimate": surrogate_estimate.value,
+                "predicted": surrogate.predict(surrogate_estimate.value),
+            },
+            {
+                "name": "training_grid_lookup",
+                "kind": "ml_lookup",
+                "estimate": lookup_estimate,
+                "predicted": train_outputs[lookup_idx],
+            },
+        ],
+    )
+    summary = {
+        "case": "Pennes PINN/ML baseline comparison",
+        "true_perfusion": float(true_perfusion),
+        "alpha": float(alpha),
+        "dt": float(dt),
+        "times": [float(t) for t in times],
+        "training_parameters": [float(v) for v in training_parameters],
+        "relative_noise": float(relative_noise),
+        "sensor_indices": [int(i) for i in sensor_indices],
+        "baselines": baseline_rows,
+        "pinn_plugin_schema": {
+            "required_fields": ["name", "kind", "estimate", "predicted"],
+            "metric_function": "compare_scalar_inverse_baselines",
+        },
+    }
+
+    summary_path = output_dir / "pennes_ml_baseline_summary.json"
+    csv_path = output_dir / "pennes_ml_baseline_metrics.csv"
+    plot_path = output_dir / "pennes_ml_baseline_comparison.png" if make_plot else None
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2, sort_keys=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=["name", "kind", "estimate", "absolute_error", "relative_error", "residual_norm", "relative_residual"],
+        )
+        writer.writeheader()
+        writer.writerows(baseline_rows)
+
+    if make_plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        names = [row["name"] for row in baseline_rows]
+        estimates = [row["estimate"] for row in baseline_rows]
+        errors = [row["absolute_error"] for row in baseline_rows]
+        residuals = [row["relative_residual"] for row in baseline_rows]
+        fig, axes = plt.subplots(1, 3, figsize=(12.0, 3.8), constrained_layout=True)
+        axes[0].plot(training_parameters, train_outputs[:, 0], "o-", color="tab:gray", label="training output[0]")
+        axes[0].axvline(true_perfusion, color="tab:red", ls="--", label="truth")
+        axes[0].axvline(surrogate_estimate.value, color="tab:blue", ls=":", label="surrogate estimate")
+        axes[0].set_xlabel("perfusion k")
+        axes[0].set_ylabel("first observation")
+        axes[0].set_title("FV training sweep")
+        axes[0].legend(fontsize=8)
+        axes[1].bar(names, estimates, color=["tab:green", "tab:blue", "tab:orange"])
+        axes[1].axhline(true_perfusion, color="tab:red", ls="--")
+        axes[1].tick_params(axis="x", rotation=25)
+        axes[1].set_ylabel("estimated k")
+        axes[1].set_title("Recovered parameter")
+        axes[2].bar(names, residuals, color=["tab:green", "tab:blue", "tab:orange"], label="relative residual")
+        axes[2].plot(names, errors, "ko-", label="absolute error")
+        axes[2].tick_params(axis="x", rotation=25)
+        axes[2].set_title("Error metrics")
+        axes[2].legend(fontsize=8)
+        fig.suptitle("Direction D: trusted FV vs ML surrogate inverse baselines")
+        fig.savefig(plot_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    return InverseStudyResult(
+        summary_path=str(summary_path),
+        coefficients_path=str(csv_path),
         plot_path=None if plot_path is None else str(plot_path),
         summary=summary,
     )
