@@ -179,6 +179,88 @@ def main():
         print(f"  {SCHEME_LABELS[k]:32s} {errors[k]:.3e}")
     print(f"wrote {out_path}")
 
+    smoothness_demo()
+
+
+def _afc_smooth_error(sf, alpha, n=24, skew=0.3, dt=2e-5, t_end=0.004):
+    from heat_solver.mms import manufactured_case
+
+    case = manufactured_case("exp(-t)*sin(pi*x)*sin(pi*y)", alpha=alpha.tolist(), model="diffusion")
+    v, p, c = generate_nonorthogonal_polygonal_mesh(nx=n, ny=n, bbox=(-1, 1, -1, 1), skew=skew)
+    areas = np.array([polygon_area_and_centroid(v[poly])[0] for poly in p])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    ue = case["solution"](c[:, 0], c[:, 1], t_end)
+    s = AFCMonotoneSolver(v, p, alpha, dt, bc_func=case["boundary"], source_func=case["source"],
+                          flux_discretization="reconstructed", smoothness_factor=sf)
+    _, u = s.solve(u0, 0.0, t_end)
+    return float(np.sqrt(np.sum(areas * (u - ue) ** 2) / np.sum(areas * ue**2)))
+
+
+def _afc_front_overshoot(sf, tiles, dt=1.5e-3, t_end=9e-3):
+    alpha = anisotropic_tensor(ratio=20.0, angle=np.pi / 6)
+    v, p, c = generate_nonorthogonal_tiled_polygonal_mesh(nx_tiles=tiles, ny_tiles=tiles, bbox=(-1, 1, -1, 1), skew=0.4)
+    s = AFCMonotoneSolver(v, p, alpha, dt, bc_func=lambda x, y, t: np.zeros_like(x),
+                          source_func=lambda x, y, t: np.zeros_like(x),
+                          flux_discretization="reconstructed", smoothness_factor=sf)
+    _, u = s.solve(_block_ic(c), 0.0, t_end)
+    be = bound_excursion(u, 0.0, 1.0)
+    return max(be["overshoot"], be["undershoot"]), 2.0 / (3 * tiles)
+
+
+def smoothness_demo():
+    """PR3: smoothness relaxation recovers high-order accuracy on smooth solutions
+    while the steep-front overshoot stays essentially non-oscillatory."""
+    import matplotlib.pyplot as plt
+    from heat_solver.polygonal import PolygonalHeatSolver
+
+    alpha = anisotropic_tensor(ratio=5.0, angle=np.pi / 6)
+    factors = [0.0, 0.25, 0.5, 1.0, 2.0]
+    smooth_errs = [_afc_smooth_error(sf, alpha) for sf in factors]
+    # High-order reference (no limiting).
+    from heat_solver.mms import manufactured_case
+    case = manufactured_case("exp(-t)*sin(pi*x)*sin(pi*y)", alpha=alpha.tolist(), model="diffusion")
+    v, p, c = generate_nonorthogonal_polygonal_mesh(nx=24, ny=24, bbox=(-1, 1, -1, 1), skew=0.3)
+    areas = np.array([polygon_area_and_centroid(v[poly])[0] for poly in p])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    s = PolygonalHeatSolver(v, p, alpha, 2e-5, bc_type="dirichlet", bc_func=case["boundary"],
+                            source_func=case["source"], flux_discretization="reconstructed", nonorthogonal_correction=True)
+    _, u = s.solve(u0, 0.0, 0.004)
+    recon_err = float(np.sqrt(np.sum(areas * (u - case["solution"](c[:, 0], c[:, 1], 0.004)) ** 2)
+                              / np.sum(areas * case["solution"](c[:, 0], c[:, 1], 0.004) ** 2)))
+
+    tiles_list = [10, 16, 24, 32]
+    ov_h = [_afc_front_overshoot(1.0, t) for t in tiles_list]
+    overshoots = [o for o, _ in ov_h]
+    hs = [h for _, h in ov_h]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    ax1.plot(factors, smooth_errs, "o-", color="#2ca02c", label="AFC (relaxed)")
+    ax1.axhline(recon_err, color="#d62728", ls="--", label="high-order reference")
+    ax1.set_xlabel("smoothness_factor")
+    ax1.set_ylabel("smooth-solution relative L2 error")
+    ax1.set_title("PR3: relaxation recovers high-order accuracy\n(strict limiter at factor=0 clips the smooth peak)", fontsize=9)
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    ax2.loglog(hs, overshoots, "o-", color="#1f77b4", label="AFC relaxed (factor=1)")
+    href = np.array([min(hs), max(hs)])
+    ax2.loglog(href, overshoots[-1] * (href / hs[-1]) ** 1.5, "k--", alpha=0.6, label="slope 1.5 (reference)")
+    ax2.set_xlabel("mesh size h")
+    ax2.set_ylabel("steep-front max overshoot")
+    ax2.set_title("PR3: front overshoot is essentially non-oscillatory\n(vanishes under refinement)", fontsize=9)
+    ax2.legend(fontsize=8)
+    ax2.grid(True, which="both", alpha=0.3)
+
+    fig.suptitle("PR3: smoothness-relaxed (linearity-preserving) AFC limiter", fontsize=13)
+    out_path = OUTPUT_DIR / "smoothness_relaxation.png"
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print("\nPR3 smoothness relaxation:")
+    print(f"  smooth error: strict(factor=0)={smooth_errs[0]:.3e} -> relaxed(factor=1)={smooth_errs[3]:.3e} "
+          f"(high-order ref {recon_err:.3e})")
+    print(f"  front overshoot vs h: {[f'{o:.2e}' for o in overshoots]} at h={[f'{h:.3f}' for h in hs]}")
+    print(f"wrote {out_path}")
+
 
 if __name__ == "__main__":
     main()

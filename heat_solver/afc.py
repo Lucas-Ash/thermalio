@@ -55,6 +55,7 @@ class AFCMonotoneSolver:
         source_func=None,
         flux_discretization="reconstructed",
         nonorthogonal_correction=True,
+        smoothness_factor=0.0,
         max_iters=50,
         tol=1e-10,
     ):
@@ -72,6 +73,13 @@ class AFCMonotoneSolver:
         self._boundary_idx = np.where(self.is_boundary)[0]
         self.max_iters = int(max_iters)
         self.tol = float(tol)
+        # Venkatakrishnan-style smoothness relaxation: a mesh-vanishing tolerance
+        # eps ~ factor * U_ref * h^1.5 lets small (smooth) anti-diffusive fluxes
+        # pass unlimited so smooth extrema are not clipped, while O(1) front jumps
+        # are still strictly limited.  factor=0 recovers the strict PR2 limiter.
+        self.smoothness_factor = float(smoothness_factor)
+        self._h = np.sqrt(self.cell_areas)
+        self._eps = np.zeros(self.M)
 
         self._base._assemble_system()
         self.A_H = self._base.A.tocsr()
@@ -130,8 +138,10 @@ class AFCMonotoneSolver:
         np.add.at(P_minus, ej, np.minimum(0.0, -f))
 
         scale = self.cell_areas / self.dt
-        Q_plus = scale * (umax - u_iter)
-        Q_minus = scale * (umin - u_iter)
+        # Relax the bounds by the (mesh-vanishing) smoothness tolerance so that
+        # smooth extrema are not clipped; eps == 0 gives the strict limiter.
+        Q_plus = scale * np.maximum(umax - u_iter, self._eps)
+        Q_minus = scale * np.minimum(umin - u_iter, -self._eps)
 
         with np.errstate(divide="ignore", invalid="ignore"):
             R_plus = np.where(P_plus > 0.0, np.minimum(1.0, Q_plus / P_plus), 1.0)
@@ -157,6 +167,13 @@ class AFCMonotoneSolver:
         u = np.array(u0, dtype=float)
         nsteps = max(int(round((t_end - t0) / self.dt)), 1)
         dt = (t_end - t0) / nsteps
+
+        # Smoothness tolerance from the solution scale (range of the initial data).
+        if self.smoothness_factor > 0.0:
+            u_ref = max(float(u.max() - u.min()), abs(float(u.max())), 1e-300)
+            self._eps = self.smoothness_factor * u_ref * self._h**1.5
+        else:
+            self._eps = np.zeros(self.M)
 
         sys_L = (diags(self.cell_areas, format="csr") + dt * self.A_L).tocsr()
         _apply_dirichlet_rows_csr(sys_L, self._boundary_idx)

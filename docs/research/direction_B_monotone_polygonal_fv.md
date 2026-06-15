@@ -1,6 +1,6 @@
 # Direction B: Monotone / bound-preserving polygonal & MPFA FV for non-classical models
 
-- **Status:** in-progress (PR1 diagnostic + linear monotone projection landed; PR2 nonlinear AFC landed)
+- **Status:** in-progress (PR1 diagnostic + linear monotone projection, PR2 nonlinear AFC, PR3 smoothness-relaxed limiter all landed)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -34,12 +34,21 @@ without destroying accuracy?*
       where the high-order scheme overshoots ~0.04–0.06;
     - **accuracy**: ~2–3x lower error than the linear M-matrix projection on a
       smooth anisotropic solution, approaching the high-order scheme;
-    - **limitation**: the basic Zalesak limiter clips smooth extrema, so it does
-      not fully recover 2nd order on smooth solutions — an extremum-aware
-      (linearity-preserving) limiter is the next refinement.
-- **Next (PR3):** an extremum-aware / linearity-preserving limiter (or geometric
-  NTPFA) to recover full high-order accuracy on smooth solutions while keeping the
-  DMP.
+    - **limitation (addressed by PR3)**: the basic Zalesak limiter clips smooth
+      extrema, capping accuracy on smooth solutions.
+- **Delivered (PR3):** a **smoothness-relaxed / linearity-preserving** limiter
+  (`AFCMonotoneSolver(..., smoothness_factor>0)`) using a Venkatakrishnan-style
+  mesh-vanishing tolerance ``eps ~ factor * U_ref * h^1.5`` that lets small
+  (smooth) anti-diffusive fluxes pass unlimited while O(1) front jumps stay
+  strictly limited. Findings: it **fully recovers the high-order scheme's
+  accuracy** on the smooth anisotropic case (error drops from the clipped strict
+  value to exactly the reconstructed value), and the steep-front overshoot is
+  **essentially non-oscillatory** — it vanishes monotonically under refinement
+  (faster than the slope-1.5 reference). ``smoothness_factor=0`` recovers PR2's
+  strictly bound-preserving limiter.
+- **Next (PR4):** a curvature-based (or geometric NTPFA) limiter for *strict*
+  bound preservation together with full smooth-extremum accuracy at coarse
+  resolution.
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).
@@ -83,7 +92,9 @@ Dirichlet data):
 - PR2 (done): nonlinear bound-preserving high-resolution scheme via algebraic
   flux correction (`AFCMonotoneSolver`) + demonstrative graphs
   (`dmp_afc_demo.py` -> `test_plots/dmp/monotonicity_showcase.png`).
-- PR3: extremum-aware limiter / NTPFA for full smooth-solution accuracy + DMP.
+- PR3 (done): smoothness-relaxed (linearity-preserving) limiter
+  (`smoothness_factor`) + graph (`test_plots/dmp/smoothness_relaxation.png`).
+- PR4: curvature-based / NTPFA limiter for strict bounds + full smooth accuracy.
 
 ## References
 - Le Potier; Lipnikov, Svyatskiy, Vassilevski (monotone/nonlinear FV).

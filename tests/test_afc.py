@@ -98,3 +98,56 @@ def test_afc_recovers_high_order_when_no_limiting_needed():
     assert _rel_l2(u_afc, ue, areas) < 1.5e-3
     # Both should be close on this benign case.
     assert _rel_l2(u_afc, u_recon, areas) < 5e-2
+
+
+def test_smoothness_relaxation_recovers_highorder_accuracy():
+    # The strict Zalesak limiter clips the smooth peak; the smoothness relaxation
+    # (smoothness_factor > 0) recovers the high-order scheme's accuracy.
+    pytest.importorskip("sympy")
+    from heat_solver.mms import manufactured_case
+
+    alpha = anisotropic_tensor(ratio=5.0, angle=np.pi / 6)
+    case = manufactured_case("exp(-t)*sin(pi*x)*sin(pi*y)", alpha=alpha.tolist(), model="diffusion")
+    v, p, c = generate_nonorthogonal_polygonal_mesh(nx=24, ny=24, bbox=(-1, 1, -1, 1), skew=0.3)
+    areas = np.array([polygon_area_and_centroid(v[poly])[0] for poly in p])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    ue = case["solution"](c[:, 0], c[:, 1], 0.004)
+
+    def afc_err(sf):
+        s = AFCMonotoneSolver(v, p, alpha, 2e-5, bc_func=case["boundary"],
+                              source_func=case["source"], flux_discretization="reconstructed",
+                              smoothness_factor=sf)
+        _, u = s.solve(u0, 0.0, 0.004)
+        return _rel_l2(u, ue, areas)
+
+    err_strict = afc_err(0.0)
+    err_relaxed = afc_err(1.0)
+    s_recon = PolygonalHeatSolver(v, p, alpha, 2e-5, bc_type="dirichlet", bc_func=case["boundary"],
+                                  source_func=case["source"], flux_discretization="reconstructed",
+                                  nonorthogonal_correction=True)
+    _, u_recon = s_recon.solve(u0, 0.0, 0.004)
+    err_recon = _rel_l2(u_recon, ue, areas)
+
+    assert err_relaxed < 0.6 * err_strict          # clipping penalty removed
+    assert err_relaxed < 1.5 * err_recon           # matches the high-order scheme
+
+
+def test_smoothness_relaxation_overshoot_is_mesh_vanishing():
+    # With smoothness_factor > 0 the steep-front overshoot is essentially
+    # non-oscillatory: it shrinks under refinement and is small on a fine mesh.
+    alpha = anisotropic_tensor(ratio=20.0, angle=np.pi / 6)
+
+    def front_overshoot(tiles):
+        v, p, c = generate_nonorthogonal_tiled_polygonal_mesh(
+            nx_tiles=tiles, ny_tiles=tiles, bbox=(-1, 1, -1, 1), skew=0.4)
+        s = AFCMonotoneSolver(v, p, alpha, 1.5e-3, bc_func=lambda x, y, t: np.zeros_like(x),
+                              source_func=lambda x, y, t: np.zeros_like(x),
+                              flux_discretization="reconstructed", smoothness_factor=1.0)
+        _, u = s.solve(_block_ic(c), 0.0, 9e-3)
+        be = bound_excursion(u, 0.0, 1.0)
+        return max(be["overshoot"], be["undershoot"])
+
+    coarse = front_overshoot(10)
+    fine = front_overshoot(24)
+    assert fine < coarse          # overshoot shrinks under refinement
+    assert fine < 5e-3            # and is small on the fine mesh
