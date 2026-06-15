@@ -1,6 +1,6 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** idea
+- **Status:** PR1/PR2 initial implementation
 - **Owner:** —
 - **Last updated:** 2026-06-14
 
@@ -19,11 +19,11 @@ traveling-interface solutions for non-Fourier / fractional phase change, and wha
 is its observed order?*
 
 ## Scope
-- **In scope (candidate first increment):** a composed solver coupling apparent
-  heat capacity with the Cattaneo three-level scheme (hyperbolic Stefan), plus a
-  manufactured traveling-interface solution (extend `stefan_apparent_capacity`).
-- **Out of scope (later):** fractional Stefan (Caputo + latent heat); sharp-
-  interface tracking; alloy/multi-component solidification.
+- **Implemented first increment:** composed solvers coupling apparent heat
+  capacity with the Cattaneo three-level scheme and the Caputo L1 scheme, plus
+  manufactured moving-interface verification cases.
+- **Out of scope (later):** sharp-interface tracking; alloy/multi-component
+  solidification; application studies.
 
 ## Design sketch
 - New: extend `heat_solver/transport.py` (`_TransportBase` already reuses the
@@ -47,7 +47,12 @@ is its observed order?*
 
 ## PR breakdown
 - PR1: hyperbolic Stefan solver + manufactured case + convergence test.
-- PR2+: fractional Stefan; application studies.
+  Implemented as `HyperbolicStefanSolver` and
+  `hyperbolic_stefan_apparent_capacity`.
+- PR2: fractional Stefan solver + manufactured case + convergence test.
+  Implemented as `FractionalStefanSolver` and
+  `fractional_stefan_apparent_capacity`.
+- PR2+: application studies.
 
 ## References
 - Non-Fourier Stefan problem (1D) literature; DPL bioheat phase-change

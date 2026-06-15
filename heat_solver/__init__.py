@@ -41,7 +41,9 @@ from .polygonal import PolygonalHeatSolver
 from .transport import (
     AdvectionDiffusionHeatSolver,
     FractionalHeatSolver,
+    FractionalStefanSolver,
     HyperbolicHeatSolver,
+    HyperbolicStefanSolver,
     ReactionDiffusionHeatSolver,
 )
 from .triangular import NonUniformHeatSolver
@@ -50,7 +52,9 @@ __all__ = [
     "AFCMonotoneSolver",
     "AdvectionDiffusionHeatSolver",
     "FractionalHeatSolver",
+    "FractionalStefanSolver",
     "HyperbolicHeatSolver",
+    "HyperbolicStefanSolver",
     "ReactionDiffusionHeatSolver",
     "NonUniformHeatSolver",
     "PolygonalHeatSolver",

@@ -173,6 +173,113 @@ def stefan_apparent_capacity_source(alpha, phase_change_model, amplitude=0.8, in
     return source
 
 
+def hyperbolic_stefan_apparent_capacity_case(alpha=0.08, tau=0.05):
+    """Manufactured Cattaneo-Stefan traveling ``tanh`` front.
+
+    The exact field is the apparent-capacity Stefan profile
+    ``T = A tanh((x - x0 - s t) / w)``.  The source closes
+    ``tau T_tt + c(T) T_t - alpha T_xx = Q`` with
+    ``c(T)`` supplied by :class:`ApparentHeatCapacityModel`.
+    """
+    alpha = float(alpha)
+    tau = float(tau)
+    amplitude = 0.8
+    interface_width = 0.18
+    speed = 0.45
+    x0 = -0.35
+    phase_change_model = ApparentHeatCapacityModel(
+        solidus_temperature=-0.25,
+        liquidus_temperature=0.25,
+        latent_heat=6.0,
+        specific_heat=1.0,
+    )
+
+    def solution(x, y, t):
+        return stefan_apparent_capacity_solution(
+            x, y, t, amplitude=amplitude, interface_width=interface_width, speed=speed, x0=x0
+        )
+
+    def source(x, y, t):
+        del y
+        z = (x - x0 - speed * t) / interface_width
+        tanh_z = np.tanh(z)
+        sech2_z = 1.0 - tanh_z**2
+        temperature = amplitude * tanh_z
+        dT_dt = -(amplitude * speed / interface_width) * sech2_z
+        dT_tt = -(2.0 * amplitude * speed**2 / (interface_width**2)) * tanh_z * sech2_z
+        dT_xx = -(2.0 * amplitude / (interface_width**2)) * tanh_z * sech2_z
+        capacity = phase_change_model.effective_heat_capacity(temperature)
+        return tau * dT_tt + capacity * dT_dt - alpha * dT_xx
+
+    def initial_rate(x, y):
+        del y
+        z = (x - x0) / interface_width
+        return -(amplitude * speed / interface_width) * (1.0 - np.tanh(z) ** 2)
+
+    return {
+        "name": "Hyperbolic Stefan Apparent Capacity",
+        "bbox": (-1.0, 1.0, -1.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "phase_change_model": phase_change_model,
+        "phase_change_options": {"max_iters": 80, "tol": 1e-10, "relaxation": 0.85, "anderson_depth": 4},
+        "relaxation_time": tau,
+        "initial_rate": initial_rate,
+        "alpha": alpha,
+    }
+
+
+def fractional_stefan_apparent_capacity_case(alpha=0.08, beta=0.6):
+    """Manufactured fractional Stefan case with a smooth moving phase front.
+
+    ``T = A tanh((x - x0) / w) - s t^2`` moves the zero-temperature interface
+    while retaining a closed-form Caputo derivative:
+    ``D_t^beta T = -2 s t^(2-beta) / Gamma(3-beta)``.
+    """
+    from scipy.special import gamma as _gamma
+
+    alpha = float(alpha)
+    beta = float(beta)
+    amplitude = 0.8
+    interface_width = 0.18
+    speed = 0.45
+    x0 = 0.45
+    phase_change_model = ApparentHeatCapacityModel(
+        solidus_temperature=-0.25,
+        liquidus_temperature=0.25,
+        latent_heat=5.0,
+        specific_heat=1.0,
+    )
+
+    def solution(x, y, t):
+        del y
+        z = (x - x0) / interface_width
+        return amplitude * np.tanh(z) - speed * t**2
+
+    def source(x, y, t):
+        del y
+        z = (x - x0) / interface_width
+        tanh_z = np.tanh(z)
+        sech2_z = 1.0 - tanh_z**2
+        temperature = solution(x, 0.0, t)
+        caputo = -(2.0 * speed / _gamma(3.0 - beta)) * (t ** (2.0 - beta))
+        dT_xx = -(2.0 * amplitude / (interface_width**2)) * tanh_z * sech2_z
+        return phase_change_model.effective_heat_capacity(temperature) * caputo - alpha * dT_xx
+
+    return {
+        "name": "Fractional Stefan Apparent Capacity",
+        "bbox": (0.0, 1.0, 0.0, 1.0),
+        "solution": solution,
+        "source": source,
+        "boundary": solution,
+        "phase_change_model": phase_change_model,
+        "phase_change_options": {"max_iters": 120, "tol": 1e-10, "relaxation": 0.55},
+        "beta": beta,
+        "alpha": alpha,
+    }
+
+
 def temp_dependent_diffusivity_solution(x, y, t):
     del y
     return np.exp(-t) * (1.0 + 0.25 * x)
@@ -619,6 +726,10 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
             "phase_change_model": phase_change_model,
             "phase_change_options": {"max_iters": 100, "tol": 1e-9, "relaxation": 0.95, "anderson_depth": 5, "linearize_cp": True},
         }
+    elif case == "hyperbolic_stefan_apparent_capacity":
+        return hyperbolic_stefan_apparent_capacity_case(alpha=alpha)
+    elif case == "fractional_stefan_apparent_capacity":
+        return fractional_stefan_apparent_capacity_case(alpha=alpha)
     elif case == "temperature_dependent_diffusivity":
         return {
             "name": "Temperature-Dependent Diffusivity",
@@ -659,6 +770,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
         "source_driven_sine, steady_linear_neumann, steady_linear_robin, "
         "linear_patch, hot_block, off_axis_wave, nyquist_oscillations, point_source, "
         "green_function_source, laplace_equation, anisotropic_heat_kernel, stefan_apparent_capacity, "
+        "hyperbolic_stefan_apparent_capacity, fractional_stefan_apparent_capacity, "
         "temperature_dependent_diffusivity, radiative_manufactured, functionally_graded"
     )
 

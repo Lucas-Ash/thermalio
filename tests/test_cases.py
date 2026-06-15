@@ -52,6 +52,34 @@ def test_get_analytical_case_stefan_apparent_capacity():
     assert q.shape == x.shape
 
 
+@pytest.mark.parametrize(
+    "case_name, extra_keys",
+    [
+        ("hyperbolic_stefan_apparent_capacity", ("relaxation_time", "initial_rate")),
+        ("fractional_stefan_apparent_capacity", ("beta",)),
+    ],
+)
+def test_get_analytical_case_nonfourier_stefan(case_name, extra_keys):
+    case = get_analytical_case(case_name, alpha=0.08, t_end=0.05)
+    assert "Stefan Apparent Capacity" in case["name"]
+    assert "phase_change_model" in case
+    assert "phase_change_options" in case
+    assert case["phase_change_model"] is not None
+    for key in extra_keys:
+        assert key in case
+
+    if case_name.startswith("hyperbolic"):
+        x = np.array([-0.42, -0.35, -0.28])
+    else:
+        x = np.array([0.40, 0.45, 0.50])
+    y = np.zeros_like(x)
+    u = case["solution"](x, y, 0.02)
+    q = case["source"](x, y, 0.02)
+    assert u.shape == x.shape
+    assert q.shape == x.shape
+    assert np.any(case["phase_change_model"].effective_heat_capacity(u) > 1.0)
+
+
 def test_get_analytical_case_temperature_dependent_diffusivity():
     case = get_analytical_case("temperature_dependent_diffusivity", alpha=0.12, t_end=0.05)
     assert case["name"] == "Temperature-Dependent Diffusivity"
