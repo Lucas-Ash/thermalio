@@ -1,0 +1,298 @@
+{
+  "sweep": [
+    {
+      "mesh": "square",
+      "anisotropy": "isotropic",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.999960601200195
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "isotropic",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 25,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.999960601200195
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "isotropic",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2099,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9988434895622874
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "isotropic",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9988434895622867
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x5",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999907850417294
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x5",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2086,
+      "overshoot": 0.0,
+      "undershoot": 0.014072026046081813,
+      "min": -0.014072026046081813,
+      "max": 0.9999908402079286
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x5",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2059,
+      "overshoot": 0.0,
+      "undershoot": 0.01993314859994876,
+      "min": -0.01993314859994876,
+      "max": 0.9995428274131483
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x5",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9995163274708381
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x20",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999926446184447
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x20",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2085,
+      "overshoot": 0.0,
+      "undershoot": 0.019362440064235483,
+      "min": -0.019362440064235483,
+      "max": 0.9999927252684698
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x20",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2077,
+      "overshoot": 0.0,
+      "undershoot": 0.02406226078847692,
+      "min": -0.02406226078847692,
+      "max": 0.9996222028016054
+    },
+    {
+      "mesh": "square",
+      "anisotropy": "aniso_x20",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9995926845921792
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "isotropic",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9998496907290905
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "isotropic",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2275,
+      "overshoot": 0.03598956804595055,
+      "undershoot": 0.04989552604270658,
+      "min": -0.04989552604270658,
+      "max": 1.0359895680459505
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "isotropic",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 1964,
+      "overshoot": 0.11447185474390964,
+      "undershoot": 0.11231462901458905,
+      "min": -0.11231462901458905,
+      "max": 1.1144718547439096
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "isotropic",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9989627746188849
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x5",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999977088304026
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x5",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2298,
+      "overshoot": 0.046102993581135454,
+      "undershoot": 0.036672633724324714,
+      "min": -0.036672633724324714,
+      "max": 1.0461029935811355
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x5",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2017,
+      "overshoot": 0.0702901089245469,
+      "undershoot": 0.04507185439776553,
+      "min": -0.04507185439776553,
+      "max": 1.070290108924547
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x5",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999306444683955
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x20",
+      "scheme": "tpfa_base",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999996081830417
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x20",
+      "scheme": "tpfa_corrected",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2263,
+      "overshoot": 0.04224942542164434,
+      "undershoot": 0.026488484266871202,
+      "min": -0.026488484266871202,
+      "max": 1.0422494254216443
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x20",
+      "scheme": "reconstructed",
+      "is_m_matrix": false,
+      "num_positive_offdiag": 2237,
+      "overshoot": 0.05716650874787854,
+      "undershoot": 0.03066061080066911,
+      "min": -0.03066061080066911,
+      "max": 1.0571665087478785
+    },
+    {
+      "mesh": "skewed_tiled",
+      "anisotropy": "aniso_x20",
+      "scheme": "reconstructed_monotone",
+      "is_m_matrix": true,
+      "num_positive_offdiag": 0,
+      "overshoot": 0.0,
+      "undershoot": 0.0,
+      "min": 0.0,
+      "max": 0.9999520905141986
+    }
+  ],
+  "tradeoff": [
+    {
+      "scheme": "tpfa_base",
+      "err_coarse": 0.02194909875179521,
+      "err_fine": 0.024741715803402117,
+      "order": -0.17278384994629303,
+      "overshoot": 0.0
+    },
+    {
+      "scheme": "tpfa_corrected",
+      "err_coarse": 0.0030544123737092,
+      "err_fine": 0.0015928690760680124,
+      "order": 0.9392671611823793,
+      "overshoot": 0.019031634806842
+    },
+    {
+      "scheme": "reconstructed",
+      "err_coarse": 0.004504743174771843,
+      "err_fine": 0.0035549209504880893,
+      "order": 0.34162737768898527,
+      "overshoot": 0.08562274791780228
+    },
+    {
+      "scheme": "reconstructed_monotone",
+      "err_coarse": 0.015349440363210435,
+      "err_fine": 0.020052141440657884,
+      "order": -0.3855702592744652,
+      "overshoot": 0.0
+    }
+  ]
+}
