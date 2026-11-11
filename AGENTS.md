@@ -55,18 +55,70 @@ with support for:
   Plot generation helpers used by the verification script.
 
 - `tests.py`
-  Current expensive verification sweep.
-  As of now, this runs only the `nonorthogonal_tiled_polygonal` mesh across all configured cases and refinement levels.
+  Expensive manufactured-solution verification sweep (not the unit tests).
+  Runs every case in `CASE_SETTINGS` across all refinement levels, on the mesh
+  types each case supports (`_mesh_jobs(...)`): curvilinear and square polygonal
+  for most cases, the tiled non-orthogonal mesh for several, and the full
+  seven-mesh set (`MESH_ORDER`) for `anisotropic_heat_kernel`.
 
 - `qa_regression.py`
   Regression harness for numerical datasets.
   First run seeds baselines.
   Later runs compare fresh outputs to stored baselines.
 
-- `test_polygonal_boundary_conditions.py`
-  Small direct regression script for polygonal Neumann / Robin checks.
+- `tests/`
+  Pytest unit-test suite (fast, ~2 min). This is what CI runs.
+  `tests/test_polygonal_boundary_conditions.py` holds the polygonal Neumann / Robin checks.
+
+- `heat_solver/transport.py`, `heat_solver/interface_diagnostics.py`
+  Extended transport models (Cattaneo, advection-diffusion, fractional, Pennes)
+  and the Direction C hyperbolic / fractional Stefan solvers plus phase-change
+  diagnostics and enthalpy audits.
+
+- `heat_solver/verification.py`, `mms.py`, `nversion.py`, `reference_fd.py`
+  Direction A V&V tooling (observed order / GCI, SymPy MMS, cross-scheme checks,
+  independent FD reference). `benchmark_suite.py` ties them together.
+
+- `heat_solver/dmp.py`, `heat_solver/afc.py`
+  Direction B discrete-maximum-principle diagnostics and bound-preserving AFC schemes.
+
+- `heat_solver/inverse.py`, `heat_solver/pinn_jax.py`
+  Direction D inverse problems (least squares, Pennes adjoint, UQ, field inversion,
+  ML/PINN baselines). `pinn_jax.py` needs optional JAX and its tests skip without it.
+
+- `docs/research/`
+  One design / status note per research direction (A-D). Update the matching note
+  when you land work on a direction.
+
+- `requirements.txt`, `requirements-dev.txt`
+  Exact-pinned runtime and test dependencies.
+
+- `.github/workflows/ci.yml`
+  CI: installs the pinned deps on Python 3.13, byte-compiles, runs `pytest tests`.
+
+## Environment Setup
+
+```bash
+cd /home/user/thermalio
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+The commands below assume this `.venv`. Dependencies are pinned exactly; if you
+bump a pin, rerun the unit tests and `qa_regression.py` and commit the new pins
+with any fixes they require.
 
 ## Current Verification Workflow
+
+### Unit tests (run these first; CI runs the same command)
+
+```bash
+cd /home/user/thermalio
+MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tests -q
+```
+
+Use `python -m pytest` (not bare `pytest`) so the repo root is on `sys.path`.
+Expect 2 skips in `tests/test_pinn_jax.py` when JAX is not installed.
 
 ### Main verification sweep
 
@@ -101,7 +153,7 @@ Run:
 
 ```bash
 cd /home/user/thermalio
-MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python test_polygonal_boundary_conditions.py
+MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tests/test_polygonal_boundary_conditions.py -q
 ```
 
 ## Boundary and Source Conventions
@@ -173,14 +225,18 @@ with
 - For simple syntax validation, use:
 
 ```bash
-python -m py_compile /home/user/thermalio/heat_solver/*.py /home/user/thermalio/tests.py /home/user/thermalio/qa_regression.py
+python -m compileall -q heat_solver tests tests.py qa_regression.py benchmark_suite.py
 ```
+- `np.cross` on 2-vectors raises under the pinned NumPy 2.x. Use
+  `heat_solver.geometry.cross2d` for 2D cross products.
 
 ## Notes For Future Agents
 
-- The repo is not a git repository in the current environment.
-- `pytest` is not installed in the available Python environments here.
-- Use the provided scripts instead of assuming a `pytest` workflow.
+- The repo is a git repository; GitHub Actions CI runs on every push and pull request.
+- `pytest` is part of `requirements-dev.txt`. The `tests/` suite is the fast gate;
+  `tests.py` and `qa_regression.py` are the slower numerical sweeps.
+- `qa_regression/` is gitignored, so baselines are local to each checkout and are
+  not run in CI.
 - `MPLCONFIGDIR=/tmp/matplotlib` is useful in this environment to avoid matplotlib cache permission warnings.
 
 ## Common Tasks

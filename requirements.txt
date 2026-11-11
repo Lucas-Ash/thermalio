@@ -1,0 +1,7 @@
+# Runtime dependencies for Thermalio's solvers, drivers, and plotting.
+# Pinned to the exact versions the full test suite was last verified against
+# (Python 3.13). Bump deliberately: update a pin, rerun `python -m pytest tests`
+# and the QA regression, then commit the new pins together with any fixes.
+numpy==2.5.3
+scipy==1.18.1
+matplotlib==3.11.2

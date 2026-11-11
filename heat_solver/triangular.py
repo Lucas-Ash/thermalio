@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, diags
 from scipy.sparse.linalg import factorized, spsolve
 
-from .geometry import polygon_area_and_centroid
+from .geometry import cross2d, polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
 
 
@@ -76,7 +76,7 @@ class NonUniformHeatSolver:
         a = tri_points[:, 0, :]
         b = tri_points[:, 1, :]
         c = tri_points[:, 2, :]
-        return 0.5 * np.abs(np.cross(b - a, c - a))
+        return 0.5 * np.abs(cross2d(b - a, c - a))
 
     @staticmethod
     def _triangle_circumcenter(a, b, c):
@@ -135,11 +135,11 @@ class NonUniformHeatSolver:
                     mbc = 0.5 * (B + C)
                     mca = 0.5 * (C + A)
                     if i == a:
-                        cv_area[i] += 0.5 * abs(np.cross(mab - A, centroid - A)) + 0.5 * abs(np.cross(centroid - A, mca - A))
+                        cv_area[i] += 0.5 * abs(cross2d(mab - A, centroid - A)) + 0.5 * abs(cross2d(centroid - A, mca - A))
                     elif i == b:
-                        cv_area[i] += 0.5 * abs(np.cross(mbc - B, centroid - B)) + 0.5 * abs(np.cross(centroid - B, mab - B))
+                        cv_area[i] += 0.5 * abs(cross2d(mbc - B, centroid - B)) + 0.5 * abs(cross2d(centroid - B, mab - B))
                     else:
-                        cv_area[i] += 0.5 * abs(np.cross(mca - C, centroid - C)) + 0.5 * abs(np.cross(centroid - C, mbc - C))
+                        cv_area[i] += 0.5 * abs(cross2d(mca - C, centroid - C)) + 0.5 * abs(cross2d(centroid - C, mbc - C))
                 continue
             pts = np.array(points, dtype=float)
             angles = np.arctan2(pts[:, 1] - self.points[i, 1], pts[:, 0] - self.points[i, 0])

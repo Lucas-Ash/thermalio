@@ -83,9 +83,12 @@ Dirichlet data):
 ## Design sketch
 - Landed: `heat_solver/dmp.py`; `monotone` flag in `heat_solver/polygonal.py`
   (`_apply_monotone` applied to each assembled diffusion matrix).
-- PR2 (planned): `heat_solver/ntpfa.py` — nonlinear two-point flux with auxiliary
-  harmonic/vertex values, conormal decomposition, nonnegative nonlinear weights,
-  and a Picard iteration; reuse `_TransportBase`/solver assembly hooks.
+- Landed (PR2–PR4): `heat_solver/afc.py` — `AFCMonotoneSolver`, algebraic flux
+  correction between the high-order operator and `make_monotone(A_H)`, with local
+  (Zalesak), smoothness-relaxed, and global maximum-principle limiters.
+- Not built: the originally planned `heat_solver/ntpfa.py` (nonlinear two-point
+  flux). AFC was chosen instead because it reuses the verified M-matrix
+  projection and is purely algebraic; NTPFA remains an open future option.
 
 ## Reuse map
 - `heat_solver/meshes.py` skewed/tiled generators; `process_alpha` tensor support;
@@ -96,8 +99,9 @@ Dirichlet data):
   properties (M-matrix, zero row sums, symmetry, no-op on M-matrices), base TPFA
   monotone under anisotropy, reconstructed violates DMP, monotone restores it,
   monotone is a no-op on orthogonal isotropic meshes.
-- PR2: NTPFA should drive excursions to ~0 **and** retain ~2nd-order accuracy on
-  skewed anisotropic meshes (tie to direction A's order-of-accuracy reporting).
+- PR2–PR4 (done): `tests/test_afc.py` — AFC drives excursions to zero on the
+  steep anisotropic front and, with the global limiter, matches the high-order
+  scheme's accuracy on smooth solutions.
 
 ## PR breakdown
 - PR1 (done): DMP/overshoot diagnostic + linear monotone projection + sweep.

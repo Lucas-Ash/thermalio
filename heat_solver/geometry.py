@@ -1,6 +1,18 @@
 import numpy as np
 
 
+def cross2d(a, b):
+    """
+    z-component of the cross product of 2D vectors (broadcasts over leading axes).
+
+    Replaces ``np.cross`` on 2-vectors, which NumPy 2.0 deprecated and NumPy 2.5
+    rejects with a ValueError.
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+
 def polygon_area_and_centroid(points):
     """
     Compute polygon area and centroid from an ordered vertex list.

@@ -1,6 +1,6 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** PR1-PR7 initial implementation
+- **Status:** landed (PR1–PR7 + technical report `direction_D_inverse_report.tex`)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -43,8 +43,9 @@ reference?*
   scalar perfusion, PDE/data/initial/boundary losses, and JSON/CSV/PNG report
   output.
 - **Out of scope (later):** adjoints for nonlinear/transport/fractional solvers;
-  full Bayesian inversion; PINN implementation and head-to-head benchmark;
-  high-dimensional cellwise field recovery.
+  full Bayesian inversion; calibrated large-scale PINN head-to-head benchmark
+  (the JAX adapter exists, but CI does not install JAX); high-dimensional
+  cellwise field recovery.
 
 ## Design sketch
 - New: `heat_solver/inverse.py` — objective `J(theta) = ||u(theta) - u_obs||`,

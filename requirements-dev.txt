@@ -1,11 +1,10 @@
-# Optional / test-time dependencies for Thermalio's V&V tooling.
-# The core solvers (heat_solver, excluding heat_solver.mms) need only
-# numpy / scipy / matplotlib. SymPy powers the manufactured-solution
-# auto-derivation in heat_solver/mms.py and is imported lazily, so it is
-# required only to build/verify MMS sources, not to run the solvers.
-pytest
-sympy
-# Optional PINN backend; install manually when running tests/test_pinn_jax.py
-# against the real backend:
+# Test-time and V&V-tooling dependencies (pinned; see requirements.txt).
+# SymPy powers the manufactured-solution auto-derivation in heat_solver/mms.py
+# and is imported lazily, so it is needed only to build/verify MMS sources.
+-r requirements.txt
+pytest==9.2.0
+sympy==1.14.0
+# Optional PINN backend (not pinned, not installed in CI). Install manually to
+# run tests/test_pinn_jax.py against the real backend; otherwise those tests skip:
 # jax
 # jaxlib

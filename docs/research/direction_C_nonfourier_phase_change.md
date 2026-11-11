@@ -1,6 +1,6 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** PR1/PR2 solvers + expansion diagnostics + expansion steps 1-3 study runners + computing-capability steps 4-8
+- **Status:** landed (PR1/PR2 solvers, expansion steps 1-3, computing-capability steps 4-8, technical report `direction_C_nonfourier_report.tex`)
 - **Owner:** —
 - **Last updated:** 2026-06-15
 
@@ -27,8 +27,9 @@ is its observed order?*
   `test_plots/direction_C_nonfourier_phase_change/expansion_studies/`:
   relaxation-aware hyperbolic Stefan physics, fractional-memory effects, and
   latent-heat/mushy-zone stiffness.
-- **Out of scope (later):** sharp-interface tracking; alloy/multi-component
-  solidification; application studies.
+- **Out of scope (later):** sharp-interface tracking (post-processed interface
+  diagnostics exist, see step 4); alloy/multi-component solidification.
+  Application studies have since landed (step 5).
 
 ## Design sketch
 - New: extend `heat_solver/transport.py` (`_TransportBase` already reuses the
@@ -187,11 +188,11 @@ manufactured exactness, runner smoke test).
    Direction C runners less hand-tuned and more suitable for broad parameter
    sweeps.
 
-2. **Memory compression for fractional Stefan.**  The Caputo L1 scheme stores
-   and sums the full time history, so long simulations become increasingly
-   expensive.  Sum-of-exponentials, short-memory windowing, or adaptive history
-   compression would make fractional phase-change studies practical at larger
-   final times and finer spatial resolutions.
+2. **Accurate memory compression for fractional Stefan.**  The Caputo L1
+   scheme sums the full time history.  Short-memory windowing (`memory_window`)
+   is available but trades accuracy for cost; sum-of-exponentials or adaptive
+   history compression would keep accuracy at larger final times and finer
+   resolutions.
 
 3. **Enthalpy-primary nonlinear formulation.**  The current apparent-capacity
    approach solves in temperature and inserts the latent-heat spike through
@@ -199,11 +200,11 @@ manufactured exactness, runner smoke test).
    accounting for narrow mushy zones, because latent heat is naturally linear in
    enthalpy even when temperature changes slowly through the phase interval.
 
-4. **Sharp-interface diagnostics on top of apparent capacity.**  Even without
-   explicit front tracking, post-processing should extract interface position,
-   front speed, curvature, mushy-zone thickness, and phase-fraction contours.
-   These diagnostics would make comparisons against Stefan theory and
-   experimental front-position data much clearer.
+4. **Interface curvature and phase-fraction contours.**  Step 4 now extracts
+   interface position, front speed, and mushy-zone thickness along a
+   centerline.  Still missing are interface curvature and full 2D
+   phase-fraction contours, which would sharpen comparisons against Stefan
+   theory and experimental front-position data.
 
 5. **Application-study runners.**  Direction C now has six reproducible 2D
    scenarios beyond manufactured solutions: pulsed-laser melting, cryosurgery

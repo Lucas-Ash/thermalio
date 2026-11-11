@@ -145,7 +145,23 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/dmp.py` | Discrete-maximum-principle diagnostics + a conservative monotone (M-matrix projection) diffusion scheme. |
 | `heat_solver/afc.py` | Nonlinear high-resolution diffusion via algebraic flux correction (FCT), with strict bound-preservation or a smoothness-relaxed (linearity-preserving) limiter. |
 | `benchmark_suite.py` | Consolidated V&V benchmark runner (observed order + N-version + cross-code) → `test_plots/benchmark/`. |
-| `docs/research/` | Research backlog: planned directions (A–D) for novel work. |
+| `heat_solver/transport.py` (Stefan), `heat_solver/interface_diagnostics.py` | Direction C hyperbolic / fractional Stefan solvers, interface diagnostics, enthalpy audits; study runners `direction_c_studies.py`, `direction_c_applications.py`. |
+| `heat_solver/inverse.py`, `heat_solver/pinn_jax.py` | Direction D inverse problems: least squares, Pennes adjoint, UQ, field inversion, ML/PINN baselines (JAX optional). |
+| `tests/` | Pytest unit suite run by CI (`.github/workflows/ci.yml`). |
+| `docs/research/` | Research notes for directions A–D (all landed): design decisions, findings, open follow-ups. |
+
+**Install** (dependencies are pinned exactly in `requirements.txt` / `requirements-dev.txt`; verified on Python 3.13):
+
+```bash
+python3.13 -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+```
+
+**Run the unit tests** (what CI runs on every push / pull request; ~2 min):
+
+```bash
+MPLCONFIGDIR=/tmp/matplotlib python -m pytest tests -q
+```
 
 **Run the main verification sweep** (writes figures and CSV/TXT summaries under `test_plots/`):
 
@@ -154,7 +170,7 @@ cd /path/to/thermalio
 MPLCONFIGDIR=/tmp/matplotlib python tests.py
 ```
 
-**Boundary-condition spot checks** (polygonal Neumann / Robin): `test_polygonal_boundary_conditions.py`.
+**Boundary-condition spot checks** (polygonal Neumann / Robin): `tests/test_polygonal_boundary_conditions.py`.
 
 **Verification & Validation tooling** — the convergence summaries report the **observed order of accuracy**, **Richardson-extrapolated error**, and an **asymptotic-range flag** (via `heat_solver/verification.py`). Manufactured-solution sources can be **auto-derived symbolically** with `heat_solver/mms.py` (reproducing the hand-coded cases to machine precision, including sums of real powers of `t` for fractional cases; needs the optional `sympy` dependency, `pip install -r requirements-dev.txt`). Cross-scheme and cross-mesh agreement (TPFA vs reconstructed-gradient vs MPFA) is checked by `python -m heat_solver.nversion --case source_driven_sine`, and the FV solvers are validated against an **independent finite-difference reference** (`heat_solver/reference_fd.py`). The consolidated **benchmark runner** ties these together:
 
@@ -168,9 +184,9 @@ MPLCONFIGDIR=/tmp/matplotlib python benchmark_suite.py   # writes test_plots/ben
   <img src="test_plots/dmp/monotonicity_showcase.png" alt="Monotonicity / AFC showcase" width="90%" />
 </p>
 
-Planned research directions are tracked in `docs/research/`.
+Research directions A–D and their open follow-ups are tracked in `docs/research/`.
 
-Dependencies are the usual scientific Python stack (**NumPy**, **SciPy**, **Matplotlib**). Use a virtual environment and install those packages if they are not already present.
+Runtime dependencies are **NumPy**, **SciPy**, and **Matplotlib**; **pytest** and **SymPy** are needed for the tests and MMS tooling, and **JAX** is optional (PINN backend only).
 
 ---
 
