@@ -27,6 +27,12 @@ directions above each exploit that breadth + rigor against a gap confirmed in th
 current literature. Direction A came first because it was the highest-leverage,
 lowest-risk starting point and strengthens the foundation the others build on.
 
+## Gap analysis
+
+[gap_analysis_vs_established_codes.md](gap_analysis_vs_established_codes.md):
+measured gaps vs FiPy / scikit-fem (and FEniCS / deal.II by capability) with a
+prioritized roadmap.
+
 ## Open follow-ups across directions
 
 - **A:** transcendental (Mittag-Leffler) Caputo cases; registering MMS cases in

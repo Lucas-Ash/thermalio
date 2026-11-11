@@ -146,13 +146,14 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/afc.py` | Nonlinear high-resolution diffusion via algebraic flux correction (FCT): strict local, smoothness-relaxed, global maximum-principle, and source-aware (`source_envelope`, `source_local`) limiters for sign-changing sources (`dmp_source_study.py`). |
 | `benchmark_suite.py` | Consolidated V&V benchmark runner (observed order + N-version + cross-code) → `test_plots/benchmark/`. |
 | `heat_solver/transport.py` (Stefan), `heat_solver/interface_diagnostics.py` | Direction C hyperbolic / fractional Stefan solvers, interface diagnostics, enthalpy audits; study runners `direction_c_studies.py`, `direction_c_applications.py`. |
-| `heat_solver/quadratic_flux.py` | `flux_discretization="quadratic"`: 2-exact reconstruction + consistent compact penalty; exact for quadratics and second order on skewed, hexagonal, perturbed and mixed polygonal meshes with anisotropic conductivity (`quadratic_flux_study.py`). Recommended over `reconstructed` on non-orthogonal meshes. |
+| `heat_solver/quadratic_flux.py` | `flux_discretization="quadratic"`: 2-exact reconstruction + consistent compact penalty; exact for quadratics and second order on skewed, hexagonal, perturbed and mixed polygonal meshes with anisotropic conductivity (`quadratic_flux_study.py`). Recommended over `reconstructed` on non-orthogonal meshes; supports temperature-dependent tensor conductivity. |
 | `heat_solver/boundary_flux.py` | Consistent (reaction) Dirichlet boundary-flux reconstruction and flux-based energy audits; study `direction_c_flux_audit_study.py`. |
 | `heat_solver/external_codes.py` | Cross-code validation adapters for FiPy and scikit-fem (optional, `requirements-external.txt`); study `external_code_comparison.py`; CI job `external-validation`. |
 | `heat_solver/enthalpy.py` | Enthalpy-primary (Cattaneo-)Stefan solver: Newton in the enthalpy, exact discrete energy conservation, adaptive time stepping (`AdaptiveStepOptions`); study script `direction_c_enthalpy_studies.py`. |
 | `heat_solver/adjoint.py` | Exact discrete adjoints: conductivity/perfusion/source fields and Robin coefficient, Caputo L1 (`beta`), nonlinear enthalpy Stefan (`L`, `alpha`, `tau`); Taylor tests; study script `direction_d_adjoint_studies.py`. Write-up: `direction_CD_enthalpy_adjoint_report.tex`. |
 | `heat_solver/inverse.py`, `heat_solver/pinn_jax.py` | Direction D inverse problems: least squares, Pennes adjoint, UQ, field inversion, ML/PINN baselines (JAX optional). |
 | `tests/` | Pytest unit suite run by CI (`.github/workflows/ci.yml`). |
+| `docs/research/gap_analysis_vs_established_codes.md` | Measured gaps vs FiPy / scikit-fem / FEniCS / deal.II and a prioritized roadmap. |
 | `docs/research/` | Research notes for directions A–D (all landed): design decisions, findings, open follow-ups. |
 
 **Install** (dependencies are pinned exactly in `requirements.txt` / `requirements-dev.txt`; verified on Python 3.13):

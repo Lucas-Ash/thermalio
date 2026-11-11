@@ -85,9 +85,20 @@ without destroying accuracy?*
   inconsistencies otherwise.  Study: `quadratic_flux_study.py` ->
   `test_plots/flux_reconstruction/quadratic_flux.png`; tests:
   `tests/test_quadratic_flux.py`.
+- **PR6 follow-up (2026-11):** temperature-dependent (tensor) conductivity is
+  supported by the quadratic flux; geometry is precomputed once
+  (`QuadraticDiffusionOperator`) so re-assembly is vectorized (0.12 s at 16k
+  cells); face temperatures come from the quadratic reconstruction
+  (O(h^3)).  Measured: order ~1.9 on skewed/hex meshes for a curved nonlinear
+  anisotropic case; 5-7x faster than the TPFA tensor path.  Fixed a pre-existing
+  bug: nonlinear Crank--Nicolson used A(u^{n+1}) on the explicit half (first
+  order in time); now second order.  Limitations are pinned by
+  `tests/test_quadratic_flux_limitations.py` (numerical coercivity and
+  stability up to anisotropy 1e4 on four mesh families, energy decay, documented
+  non-monotonicity, stencil-width bound, geometry reuse).
 - **Open (future):** coercivity proof / discrete energy estimate for the
-  quadratic flux; vectorized assembly; temperature-dependent conductivity with
-  the quadratic flux; sharper local source envelopes; geometric NTPFA.
+  quadratic flux; vectorized geometry precompute; sharper local source
+  envelopes; geometric NTPFA.  See `gap_analysis_vs_established_codes.md`.
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).

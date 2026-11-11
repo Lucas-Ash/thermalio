@@ -142,73 +142,121 @@ class QuadraticReconstruction:
         return np.append(self.stencils[i], i)
 
 
+class QuadraticDiffusionOperator:
+    """Precomputed quadratic-flux operator: ``A(K) = sum_f sum_{ab} K_f[a, b] G_{f,ab}``.
+
+    Every entry of the quadratic flux (consistent part and penalty) is linear
+    in the four components of the face conductivity tensor, so the geometric
+    coefficients are computed once and re-assembly for new conductivities --
+    e.g. temperature-dependent ``K(x, u)`` inside a nonlinear iteration -- is a
+    vectorized product plus one sparse conversion.
+
+    ``face_values(u)`` evaluates the average of the two one-sided quadratic
+    reconstructions at each face midpoint (``O(h^3)`` accurate), which is used
+    for the face temperature of nonlinear conductivities; the plain two-cell
+    average would only be ``O(h)`` accurate on irregular meshes.
+    """
+
+    def __init__(self, vertices, polygons, edge_to_cells, reconstruction=None, penalty=1.0):
+        rec = reconstruction or QuadraticReconstruction(vertices, polygons)
+        self.reconstruction = rec
+        self.n = len(rec.polygons)
+        verts = np.asarray(vertices, dtype=float)
+        rows, cols, geom, face_id = [], [], [], []
+        fv_rows, fv_cols, fv_vals = [], [], []
+        mids, lengths, normals = [], [], []
+        f = 0
+        for edge, cells in edge_to_cells.items():
+            if len(cells) != 2:
+                continue
+            i, j = sorted(cells)
+            v0, v1 = verts[edge[0]], verts[edge[1]]
+            ev = v1 - v0
+            length = float(np.hypot(*ev))
+            if length == 0.0:
+                continue
+            normal = np.array([ev[1], -ev[0]]) / length
+            d = rec.centers[j] - rec.centers[i]
+            if normal @ d < 0:
+                normal = -normal
+            xf = 0.5 * (v0 + v1)
+            idx_i, Ci = rec.indices(i), rec.coeffs[i]
+            idx_j, Cj = rec.indices(j), rec.coeffs[j]
+            ri, rj = xf - rec.centers[i], xf - rec.centers[j]
+            # one-sided gradients at x_f, as coefficient vectors (2 x n_stencil)
+            Gi = np.vstack([Ci[0] + Ci[2] * ri[0] + Ci[3] * ri[1], Ci[1] + Ci[3] * ri[0] + Ci[4] * ri[1]])
+            Gj = np.vstack([Cj[0] + Cj[2] * rj[0] + Cj[3] * rj[1], Cj[1] + Cj[3] * rj[0] + Cj[4] * rj[1]])
+            idx = np.concatenate([idx_i, idx_j, [i, j], idx_i, idx_j])
+            row_ij = _fit_row(d, rec.moments[j] - rec.moments[i])
+            row_ji = _fit_row(-d, rec.moments[i] - rec.moments[j])
+            pen = np.concatenate([np.zeros(len(idx_i) + len(idx_j)), [1.0, -1.0],
+                                  0.5 * (row_ij @ Ci), -0.5 * (row_ji @ Cj)])
+            nd = float(normal @ d)
+            g4 = np.zeros((len(idx), 4))  # components (0,0), (0,1), (1,0), (1,1) of K
+            for c, (a, b) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1))):
+                # n.K.grad u = sum_ab n_a K_ab (grad u)_b ; penalty T = n.K.n / n.d
+                cons = np.concatenate([Gi[b], Gj[b], [0.0, 0.0], np.zeros(len(idx_i) + len(idx_j))])
+                g4[:, c] = -0.5 * length * normal[a] * cons + length * normal[a] * normal[b] / nd * pen
+            for sign, row in ((1.0, i), (-1.0, j)):
+                rows.append(np.full(len(idx), row))
+                cols.append(idx)
+                geom.append(sign * g4)
+                face_id.append(np.full(len(idx), f))
+            # face value: 1/2 [p_i(x_f) + p_j(x_f)], p(x) = ubar - 1/2 H:M + g.r + 1/2 r^T H r
+            for C, r, ii, M, idxc in ((Ci, ri, i, rec.moments[i], idx_i), (Cj, rj, j, rec.moments[j], idx_j)):
+                vals = (C[0] * r[0] + C[1] * r[1]
+                        + 0.5 * (C[2] * (r[0] ** 2 - M[0, 0]) + 2 * C[3] * (r[0] * r[1] - M[0, 1])
+                                 + C[4] * (r[1] ** 2 - M[1, 1])))
+                fv_rows.append(np.full(len(idxc) + 1, f))
+                fv_cols.append(np.append(idxc, ii))
+                fv_vals.append(0.5 * np.append(vals, 1.0))
+            mids.append(xf)
+            lengths.append(length)
+            normals.append(normal)
+            f += 1
+        self.n_faces = f
+        self.face_midpoints = np.asarray(mids)
+        self.face_lengths = np.asarray(lengths)
+        self.face_normals = np.asarray(normals)
+        self._rows = np.concatenate(rows)
+        self._cols = np.concatenate(cols)
+        self._geom = np.concatenate(geom)
+        self._face = np.concatenate(face_id)
+        if penalty != 1.0:
+            raise NotImplementedError("penalty != 1 is not supported by the precomputed operator.")
+        self._face_value = coo_matrix((np.concatenate(fv_vals), (np.concatenate(fv_rows), np.concatenate(fv_cols))),
+                                      shape=(f, self.n)).tocsr()
+
+    def face_values(self, u):
+        return self._face_value @ np.asarray(u, dtype=float)
+
+    def assemble(self, K_faces):
+        """``K_faces``: scalar, (2, 2), (n_faces,) or (n_faces, 2, 2) conductivities at face midpoints."""
+        K = np.asarray(K_faces, dtype=float)
+        if K.ndim == 0:
+            K = np.broadcast_to(np.eye(2) * float(K), (self.n_faces, 2, 2))
+        elif K.shape == (2, 2):
+            K = np.broadcast_to(K, (self.n_faces, 2, 2))
+        elif K.shape == (self.n_faces,):
+            K = K[:, None, None] * np.eye(2)
+        comps = K.reshape(self.n_faces, 4)[self._face]
+        data = np.einsum("ec,ec->e", self._geom, comps)
+        return coo_matrix((data, (self._rows, self._cols)), shape=(self.n, self.n)).tocsr()
+
+
 def assemble_quadratic_diffusion(vertices, polygons, edge_to_cells, kappa_at, reconstruction=None,
-                                 penalty=1.0):
+                                 penalty=1.0, operator=None):
     """Assemble ``A`` with ``(A u)_i = sum_faces outward flux of -K grad u``.
 
-    ``kappa_at(x, y) -> 2x2`` gives the (possibly variable) conductivity at a
-    face midpoint.  Faces on the domain boundary are skipped (boundary closures
-    are added by the solver).  Returns ``(A, reconstruction)``.
+    ``kappa_at(x, y) -> (..., 2, 2)`` gives the conductivity at face midpoints
+    (vectorized).  Boundary faces are skipped (closures are added by the
+    solver).  Returns ``(A, operator)``; pass ``operator`` back to reuse the
+    precomputed geometry.
     """
-    rec = reconstruction or QuadraticReconstruction(vertices, polygons)
-    verts = np.asarray(vertices, dtype=float)
-    rows, cols, vals = [], [], []
-    for edge, cells in edge_to_cells.items():
-        if len(cells) != 2:
-            continue
-        i, j = sorted(cells)
-        v0, v1 = verts[edge[0]], verts[edge[1]]
-        ev = v1 - v0
-        length = float(np.hypot(*ev))
-        if length == 0.0:
-            continue
-        normal = np.array([ev[1], -ev[0]]) / length
-        d = rec.centers[j] - rec.centers[i]
-        if normal @ d < 0:
-            normal = -normal
-        xf = 0.5 * (v0 + v1)
-        K = np.asarray(kappa_at(xf[0], xf[1]), dtype=float)
-        if K.ndim == 0:
-            K = np.eye(2) * float(K)
-        Kn = K.T @ normal  # n.K grad u = (K^T n).grad u
-        idx_i, Ci = rec.indices(i), rec.coeffs[i]
-        idx_j, Cj = rec.indices(j), rec.coeffs[j]
-
-        def grad_at(C, xc, x):
-            r = x - xc
-            # grad p(x) = g + H r ; rows of C: gx, gy, Hxx, Hxy, Hyy
-            gx = C[0] + C[2] * r[0] + C[3] * r[1]
-            gy = C[1] + C[3] * r[0] + C[4] * r[1]
-            return gx, gy
-
-        gix, giy = grad_at(Ci, rec.centers[i], xf)
-        gjx, gjy = grad_at(Cj, rec.centers[j], xf)
-        # Consistent part: -|e| n.K * average face gradient.
-        flux_i = -0.5 * length * (Kn[0] * gix + Kn[1] * giy)
-        flux_j = -0.5 * length * (Kn[0] * gjx + Kn[1] * gjy)
-        entries = {}
-        for idx, coef in ((idx_i, flux_i), (idx_j, flux_j)):
-            for k, c in zip(idx, coef):
-                entries[k] = entries.get(k, 0.0) + c
-        # Compact penalty T [ (u_j - u_i) - J ], J = predicted jump, exact for quadratics.
-        T = penalty * float(normal @ K @ normal) / float(normal @ d)
-        row_ij = _fit_row(d, rec.moments[j] - rec.moments[i])
-        row_ji = _fit_row(-d, rec.moments[i] - rec.moments[j])
-        pred_i = row_ij @ Ci  # p_i predicts ubar_j - ubar_i
-        pred_j = -(row_ji @ Cj)  # p_j predicts ubar_j - ubar_i
-        entries[j] = entries.get(j, 0.0) - T * length
-        entries[i] = entries.get(i, 0.0) + T * length
-        for idx, coef in ((idx_i, pred_i), (idx_j, pred_j)):
-            for k, c in zip(idx, coef):
-                entries[k] = entries.get(k, 0.0) + 0.5 * T * length * c
-        for k, c in entries.items():
-            if c != 0.0:
-                rows.extend((i, j))
-                cols.extend((k, k))
-                vals.extend((c, -c))
-    n = len(rec.polygons)
-    A = coo_matrix((vals, (rows, cols)), shape=(n, n)).tocsr()
-    return A, rec
+    op = operator or QuadraticDiffusionOperator(vertices, polygons, edge_to_cells, reconstruction, penalty)
+    xf = op.face_midpoints
+    K = np.asarray(kappa_at(xf[:, 0], xf[:, 1]), dtype=float)
+    return op.assemble(K), op
 
 
 # ---------------------------------------------------------------------------

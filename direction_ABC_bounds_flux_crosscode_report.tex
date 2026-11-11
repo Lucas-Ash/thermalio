@@ -576,12 +576,22 @@ test).
   Dirichlet-band latent jump is a modelling artefact of initial data that are
   inconsistent with the boundary data; consistent initial data or face-based
   Dirichlet conditions would remove it.
-\item The quadratic flux is not provably coercive: the penalty with $T_f>0$
-  stabilizes it in every test, but no discrete energy estimate is given.  It is
-  not monotone (use it as the high-order target of the AFC limiters for bounds);
-  it has $\approx21$ non-zeros per row (vs.\ 5 for TPFA); its assembly is a Python
-  loop ($\approx10$\,s for $16\,384$ cells); and it does not yet support
-  temperature-dependent conductivity.
+\item The quadratic flux is not provably coercive.  Numerically, the symmetric
+  part of the operator is positive definite and the time-stepping spectrum lies
+  in the right half plane on all four mesh families for anisotropy up to
+  $10^4$ (unit tests).  It is not monotone (use it as the high-order target of
+  the AFC limiters for bounds) and has $\approx21$ non-zeros per row (vs.\ 5 for
+  TPFA).  Its geometry is precomputed once ($6$\,s for $16\,384$ cells) and
+  re-assembly is vectorized ($0.12$\,s), which makes temperature-dependent
+  (tensor) conductivity practical.  This is supported, with face temperatures
+  from the quadratic reconstruction, and converges at order $\approx1.9$ on skewed
+  and hexagonal meshes.  The same work found and fixed a first-order defect in
+  the solver's nonlinear Crank--Nicolson step (the explicit half used
+  $\mathsf A(u^{n+1})$).
+\item A measured gap analysis against FiPy, scikit-fem, FEniCS and deal.II
+  (2D only, Python-loop setup cost, no preconditioned or parallel solvers,
+  band Dirichlet, solver-specific APIs) is in
+  \path{docs/research/gap_analysis_vs_established_codes.md}.
 \item The external comparison is for linear problems.  A nonlinear (Stefan)
   cross-code comparison would require writing an enthalpy model in the
   external code, which would no longer be independent.  The Neumann solution

@@ -663,17 +663,19 @@ class PolygonalHeatSolver:
             return
 
         if self.flux_discretization == "quadratic":
-            if temperature is not None:
-                raise NotImplementedError("flux_discretization='quadratic' does not support temperature-dependent diffusivity.")
-            from .quadratic_flux import assemble_quadratic_diffusion
+            from .quadratic_flux import QuadraticDiffusionOperator
 
             self.M_diag = mass
-            A, self._quadratic_reconstruction = assemble_quadratic_diffusion(
-                self.vertices, self.polygons, self.edge_to_cells,
-                lambda x, y: self._process_alpha(x, y),
-                reconstruction=getattr(self, "_quadratic_reconstruction", None),
-            )
-            self.A = self._apply_monotone(A)
+            op = getattr(self, "_quadratic_operator", None)
+            if op is None:
+                op = QuadraticDiffusionOperator(self.vertices, self.polygons, self.edge_to_cells)
+                self._quadratic_operator = op
+            xf = op.face_midpoints
+            # Face temperature from the quadratic reconstruction (O(h^3)), not the
+            # two-cell average (O(h) on irregular meshes).
+            face_t = None if temperature is None else op.face_values(temperature)
+            K = self._process_alpha(xf[:, 0], xf[:, 1], temperature=face_t)
+            self.A = self._apply_monotone(op.assemble(K))
             return
 
         diffusion = lil_matrix((self.M, self.M))
@@ -1189,6 +1191,14 @@ class PolygonalHeatSolver:
                 )
                 src_avg = self.cell_areas * (source_next + source_prev)
 
+            # Crank--Nicolson needs the *old-level* operator A(u^n) on the explicit
+            # half; using the new-level iterate for both halves (as before) makes the
+            # scheme first order in time for temperature-dependent conductivity.
+            A_old = None
+            if self.time_scheme == "crank_nicolson" and has_temp_dependent_diffusion:
+                self._assemble_system(temperature=u)
+                A_old = self.A.copy()
+
             for _ in range(max_iters):
                 if has_temp_dependent_diffusion:
                     self._assemble_system(temperature=u_iter)
@@ -1210,7 +1220,8 @@ class PolygonalHeatSolver:
                         lhs = mass_matrix + dt_eff * (self.A + boundary_matrix)
                         rhs = rhs + dt_eff * boundary_rhs
                 elif self.bc_type == "dirichlet":
-                    rhs = (mass_matrix - 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * src_avg
+                    A_prev = self.A if A_old is None else A_old
+                    rhs = (mass_matrix - 0.5 * dt_eff * A_prev) @ u + 0.5 * dt_eff * src_avg
                     bc_vals = self.bc_func(cx, cy, t_next)
                     for i in np.where(self.is_boundary)[0]:
                         rhs[i] = bc_vals[i]
@@ -1221,10 +1232,14 @@ class PolygonalHeatSolver:
                     lhs = lhs.tocsr()
                 else:
                     if has_temp_dependent_diffusion or has_nonlinear_radiation:
+                        # Old level evaluated at u^n (operator and nonlinear boundary
+                        # closure), new level at the current iterate.
+                        b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t, temperature=u)
                         b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next, temperature=u_iter)
+                        k_prev = (self.A if A_old is None else A_old) + b_mat_prev
                         k_next = self.A + b_mat_next
-                        rhs = (mass_matrix - 0.5 * dt_eff * k_next) @ u + 0.5 * dt_eff * src_avg
-                        rhs = rhs + dt_eff * b_rhs_next
+                        rhs = (mass_matrix - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
+                        rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
                         lhs = mass_matrix + 0.5 * dt_eff * k_next
                     else:
                         b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t, temperature=u)

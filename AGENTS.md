@@ -96,6 +96,9 @@ with support for:
   (`cell_average_data`), and initial data / error checks should use
   `solver.cell_average(f, t)`. The legacy `reconstructed` flux loses order on
   skewed meshes; prefer `quadratic` (or `tpfa` + `nonorthogonal_correction`).
+  Temperature-dependent (tensor) `alpha(x, y, T)` is supported; the geometry is
+  precomputed once per solver (`QuadraticDiffusionOperator`).
+  `heat_solver/nonlinear_cases.py` has a curved nonlinear manufactured case.
 
 - `heat_solver/boundary_flux.py`, `heat_solver/external_codes.py`
   Dirichlet reaction-flux energy audits (set `solver.record_history = True` on
