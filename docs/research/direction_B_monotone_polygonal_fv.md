@@ -69,10 +69,25 @@ without destroying accuracy?*
   on a steep block with heater/sink the high-order scheme leaves the envelope
   by 0.063, the envelope and strict-local limiters never do, and the sink's
   legitimate minimum is not clipped.  Report: `direction_ABC_bounds_flux_crosscode_report.tex`.
-- **Open (future):** sharper (local-in-space) source envelopes; geometric NTPFA
-  for local-extremum control within the envelope; order loss of the
-  reconstructed flux on skewed anisotropic meshes (found by Direction A's
-  cross-code study).
+- **Delivered (PR6, 2026-11): quadratic flux** (`flux_discretization="quadratic"`,
+  `heat_solver/quadratic_flux.py`).  Diagnosis of the skewed-mesh order loss:
+  the `reconstructed` flux (averaged linearly exact LSQ gradients) has no
+  compact coupling and an O(1) truncation error on distorted meshes; part of
+  the reported loss was also the backward-Euler time floor.  Fix: 2-exact LSQ
+  reconstruction from cell averages (second moments in the fit rows),
+  face-midpoint gradients, and a compact jump penalty measured against the
+  reconstruction-predicted jump (vanishes on quadratics).  Exact for
+  quadratics (truncation ~1e-14 vs 4e-3..3e-2 for TPFA+correction) and second
+  order on skewed (2.00), hexagonal (1.93), randomly perturbed (2.03) and tiled
+  mixed-polygon (1.92) meshes, where the older options stall at 0.2-1.1.
+  Source/Dirichlet data are cell-averaged by quadrature for this flux
+  (`cell_average_data`); the 2-exact fit amplifies centroid-sampling
+  inconsistencies otherwise.  Study: `quadratic_flux_study.py` ->
+  `test_plots/flux_reconstruction/quadratic_flux.png`; tests:
+  `tests/test_quadratic_flux.py`.
+- **Open (future):** coercivity proof / discrete energy estimate for the
+  quadratic flux; vectorized assembly; temperature-dependent conductivity with
+  the quadratic flux; sharper local source envelopes; geometric NTPFA.
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).

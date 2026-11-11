@@ -110,7 +110,7 @@ def _rel_l2_cells(u, ue, areas):
     return float(np.sqrt(np.sum(areas * (u - ue) ** 2) / np.sum(areas * ue**2)))
 
 
-def run_thermalio(case, n, mesh="square"):
+def run_thermalio(case, n, mesh="square", flux="reconstructed"):
     if mesh == "square":
         v, p, c = generate_square_polygonal_mesh(nx=n, ny=n, bbox=case["bbox"])
     else:
@@ -126,12 +126,17 @@ def run_thermalio(case, n, mesh="square"):
     else:
         solver = PolygonalHeatSolver(
             v, p, case["kappa"], case["dt"], bc_type="dirichlet", bc_func=case["dirichlet"],
-            source_func=case["source"], flux_discretization="reconstructed", nonorthogonal_correction=True,
+            source_func=case["source"], flux_discretization=flux, nonorthogonal_correction=True,
         )
     x, y = solver.cell_centers[:, 0], solver.cell_centers[:, 1]
-    _, u = solver.solve(case["exact"](x, y, 0.0), 0.0, case["t_end"])
-    wall = time.perf_counter() - t0
-    ue = case["exact"](x, y, case["t_end"])
+    if flux == "quadratic":  # unknowns are cell averages: consistent initial data and error metric
+        _, u = solver.solve(solver.cell_average(case["exact"], 0.0), 0.0, case["t_end"])
+        wall = time.perf_counter() - t0
+        ue = solver.cell_average(case["exact"], case["t_end"])
+    else:
+        _, u = solver.solve(case["exact"](x, y, 0.0), 0.0, case["t_end"])
+        wall = time.perf_counter() - t0
+        ue = case["exact"](x, y, case["t_end"])
     return {"centers": solver.cell_centers, "u": u, "err": _rel_l2_cells(u, ue, solver.cell_areas),
             "max_err": float(np.max(np.abs(u - ue))), "time": wall, "dofs": solver.M}
 
@@ -178,6 +183,8 @@ def study_case(case, include_fipy=True, include_skewed=False):
         if include_skewed:
             sk = run_thermalio(case, n, mesh="skewed")
             row.update({"thermalio_skewed": sk["err"], "thermalio_skewed_time": sk["time"]})
+            sq = run_thermalio(case, n, mesh="skewed", flux="quadratic")
+            row.update({"thermalio_skewed_quadratic": sq["err"], "thermalio_skewed_quadratic_time": sq["time"]})
         if include_fipy:
             fp_ = run_fipy(case, n)
             row.update({"fipy": fp_["err"], "fipy_time": fp_["time"],
@@ -265,7 +272,8 @@ def main():
 
     styles = {
         "thermalio": ("Thermalio FV (square)", "o-", "tab:blue"),
-        "thermalio_skewed": ("Thermalio FV (skewed mesh)", "o--", "tab:cyan"),
+        "thermalio_skewed": ("Thermalio FV reconstructed (skewed mesh)", "o--", "tab:cyan"),
+        "thermalio_skewed_quadratic": ("Thermalio FV quadratic (skewed mesh)", "D-", "tab:purple"),
         "fipy": ("FiPy FV", "s-", "tab:orange"),
         "skfem_p1": ("scikit-fem P1", "^-", "tab:green"),
         "skfem_p2": ("scikit-fem P2", "v-", "tab:red"),

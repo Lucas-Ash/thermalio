@@ -131,8 +131,15 @@ class PolygonalHeatSolver:
     ``flux_discretization='tpfa'`` (default) uses the classical two-point transmissibility between
     cell centers, optionally with ``nonorthogonal_correction``. ``flux_discretization='reconstructed'``
     (only with ``flux_scheme='tpfa'``) builds the diffusive flux from a face-average of least-squares
-    cell gradients, giving a wider stencil that often reduces error on skewed meshes for smooth
-    solutions.
+    cell gradients.  It has no compact two-point coupling and only linearly exact gradients, so it
+    loses second order on sheared meshes (order ~0.8 measured); kept for reproducibility.
+
+    ``flux_discretization='quadratic'`` (recommended for non-orthogonal / anisotropic problems) uses a
+    2-exact least-squares reconstruction on a vertex-ring stencil, face-midpoint gradients and a
+    consistent compact jump penalty (``heat_solver.quadratic_flux``).  It is exact for quadratic
+    solutions on arbitrary polygonal meshes and second order on skewed and hexagonal meshes.  Its
+    unknowns are cell averages, so source and Dirichlet data are integrated over cells by default
+    (``cell_average_data``); use :meth:`cell_average` for initial data.
     """
 
     def __init__(
@@ -156,6 +163,7 @@ class PolygonalHeatSolver:
         nonlinear_options=None,
         reuse_linear_lhs=True,
         monotone=False,
+        cell_average_data=None,
     ):
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
@@ -182,10 +190,10 @@ class PolygonalHeatSolver:
         if self.flux_scheme not in {"tpfa", "mpfa"}:
             raise ValueError("flux_scheme must be 'tpfa' or 'mpfa'.")
         self.flux_discretization = str(flux_discretization).lower().strip()
-        if self.flux_discretization not in {"tpfa", "reconstructed"}:
-            raise ValueError("flux_discretization must be 'tpfa' or 'reconstructed'.")
-        if self.flux_scheme == "mpfa" and self.flux_discretization == "reconstructed":
-            raise ValueError("flux_discretization='reconstructed' is only supported with flux_scheme='tpfa'.")
+        if self.flux_discretization not in {"tpfa", "reconstructed", "quadratic"}:
+            raise ValueError("flux_discretization must be 'tpfa', 'reconstructed' or 'quadratic'.")
+        if self.flux_scheme == "mpfa" and self.flux_discretization != "tpfa":
+            raise ValueError(f"flux_discretization={self.flux_discretization!r} is only supported with flux_scheme='tpfa'.")
         if phase_change_model is not None and not isinstance(phase_change_model, ApparentHeatCapacityModel):
             raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
         self.phase_change_model = phase_change_model
@@ -207,6 +215,21 @@ class PolygonalHeatSolver:
         self.boundary_faces = self._build_boundary_faces()
         self.neighbors = self._build_neighbors()
         self.is_boundary = self._detect_boundary_cells()
+        # Cell-average data: integrate the source (and Dirichlet data) over each
+        # cell instead of sampling at the centroid.  Default on for the
+        # quadratic flux (whose 2-exact reconstruction needs consistent
+        # averages), off otherwise so existing schemes are unchanged.
+        if cell_average_data is None:
+            cell_average_data = self.flux_discretization == "quadratic"
+        self.cell_average_data = bool(cell_average_data)
+        self._cell_quadrature = None
+        if self.cell_average_data:
+            from .quadratic_flux import CellAveragedFunction, CellQuadrature
+
+            self._cell_quadrature = CellQuadrature(self.vertices, self.polygons)
+            self.source_func = CellAveragedFunction(self.source_func, self._cell_quadrature, self.cell_centers)
+            if self.bc_type == "dirichlet":
+                self.bc_func = CellAveragedFunction(self.bc_func, self._cell_quadrature, self.cell_centers)
         self._bc_accepts_normals = self._bc_func_accepts_normals()
         self._alpha_accepts_temperature = self._alpha_func_accepts_temperature()
         self.temperature_dependent_diffusivity = (
@@ -591,6 +614,18 @@ class PolygonalHeatSolver:
 
         self.A = diffusion.tocsr()
 
+    def cell_average(self, f, *args):
+        """Cell averages of ``f(x, y, *args)`` (degree-4 triangle-fan quadrature).
+
+        Use for initial data and for error measurement with
+        ``flux_discretization='quadratic'``, whose unknowns are cell averages.
+        """
+        from .quadratic_flux import CellQuadrature
+
+        if self._cell_quadrature is None:
+            self._cell_quadrature = CellQuadrature(self.vertices, self.polygons)
+        return self._cell_quadrature.average(f, *args)
+
     def _apply_monotone(self, A):
         """Optionally project the diffusion matrix onto an M-matrix (DMP-preserving)."""
         if not self.monotone:
@@ -625,6 +660,20 @@ class PolygonalHeatSolver:
             self.M_diag = mass
             self._assemble_diffusion_reconstructed(temperature=temperature)
             self.A = self._apply_monotone(self.A)
+            return
+
+        if self.flux_discretization == "quadratic":
+            if temperature is not None:
+                raise NotImplementedError("flux_discretization='quadratic' does not support temperature-dependent diffusivity.")
+            from .quadratic_flux import assemble_quadratic_diffusion
+
+            self.M_diag = mass
+            A, self._quadratic_reconstruction = assemble_quadratic_diffusion(
+                self.vertices, self.polygons, self.edge_to_cells,
+                lambda x, y: self._process_alpha(x, y),
+                reconstruction=getattr(self, "_quadratic_reconstruction", None),
+            )
+            self.A = self._apply_monotone(A)
             return
 
         diffusion = lil_matrix((self.M, self.M))

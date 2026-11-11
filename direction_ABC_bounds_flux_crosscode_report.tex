@@ -59,9 +59,17 @@ isotropic, anisotropic and Robin/Pennes manufactured problems, and the enthalpy
 solver against Neumann's classical Stefan solution.  All codes agree and
 converge at their nominal rates on isotropic problems.  On the anisotropic
 problem, Thermalio's reconstructed flux stays near second order while FiPy's
-tensor diffusion drops to order $0.6$--$0.9$.  We also report a limitation of
-Thermalio itself: on skewed meshes the anisotropic case falls to about first
-order.
+tensor diffusion drops to order $0.6$--$0.9$.  The study also exposed a
+limitation of Thermalio itself: on skewed meshes the anisotropic case fell to
+about first order.
+\textbf{(B$'$)} We trace that loss to the \texttt{reconstructed} flux (averaged
+linearly exact gradients, no compact coupling).  We replace it with a new
+\emph{quadratic} flux: a 2-exact least-squares reconstruction from cell
+averages, face-midpoint gradients and a consistent compact jump penalty.  The
+new flux reproduces quadratic solutions to $10^{-14}$ on every mesh tested and
+restores second order on skewed ($2.00$), hexagonal ($1.93$), randomly perturbed
+($2.03$) and tiled mixed-polygon ($1.92$) meshes.  On the last three, every
+previous option stalls at order $0.2$--$1.1$.
 \end{abstract}
 
 \tableofcontents
@@ -392,11 +400,15 @@ scikit-fem P2 & $1.53\mathrm{e}{-5}\ (2.89)$ & $1.54\mathrm{e}{-5}\ (2.88)$ & $5
   more accurate than FiPy at $n=64$.  FiPy's rank-2 face coefficient on
   \texttt{Grid2D} converges at order $0.6$--$0.9$ in this test.  We report this as
   observed behaviour of the documented API, not as a general statement about FiPy.
-\item \textbf{Limitation of Thermalio.}  On the skewed mesh the same anisotropic
-  problem converges at orders $1.34\to1.07\to0.88$.  The error is still smaller
-  than FiPy's on its orthogonal grid, but the asymptotic order is lost.  This
-  points at the gradient reconstruction on distorted cells and is a concrete
-  target for future work (Direction B's NTPFA/MPFA line).
+\item \textbf{Limitation of Thermalio (now fixed).}  On the skewed mesh the same
+  anisotropic problem converged at orders $1.34\to1.07\to0.88$ with the
+  \texttt{reconstructed} flux.  \Cref{sec:quadratic} diagnoses the cause and
+  introduces the quadratic flux.  In this cross-code protocol it reaches
+  $1.45\times10^{-5}$ at $n=64$ (``Thermalio FV quadratic (skewed mesh)'' in
+  \cref{fig:A}), $10\times$ below the \texttt{reconstructed} flux
+  ($1.41\times10^{-4}$).  Its finest-pair order here ($1.51$) is capped by the
+  shared backward-Euler time floor; with Crank--Nicolson it is $2.00$
+  (\cref{tab:Q}).
 \item \textbf{Time-error floor.}  P2 reaches the common backward-Euler floor of
   $\approx5\times10^{-6}$ on the Robin problem, which is why its last observed order is
   $0.23$.
@@ -418,6 +430,141 @@ of width $10^{-3}$) tracks the front with a maximum error of
 $8.2\times10^{-4}=0.13\,\Delta x$ over $t\in[0.02,0.5]$ (\cref{fig:A}f).
 
 %=============================================================================
+\section[Restoring second order: the quadratic flux]{Restoring second order on non-orthogonal meshes:\\ the quadratic flux}
+\label{sec:quadratic}
+%=============================================================================
+
+\subsection{Diagnosis}
+
+Three findings, each separated by its own experiment:
+\begin{enumerate}[leftmargin=*]
+\item \emph{Part of the reported loss was the time step.}  With backward Euler
+  ($\Delta t=2.5\times10^{-4}$) the finest anisotropic errors ($\sim10^{-5}$) reach the
+  temporal floor ($\approx6\times10^{-6}$).  All results below use Crank--Nicolson with
+  $\Delta t=10^{-4}$ and $t_f=0.02$, which removes it.
+\item \emph{The \texttt{reconstructed} flux is genuinely defective.}  Its face
+  gradient is the plain average $\frac12(\nabla_hu_i+\nabla_hu_j)$ of
+  least-squares (LSQ) cell gradients.  It has no compact two-point term, so the
+  stencil is wide and weakly coupled, and its deep-interior error stops
+  converging on the sheared mesh.  The TPFA flux with non-orthogonal correction
+  (a two-point term along $\bm d$ plus a gradient correction) is second order
+  on the sheared mesh.
+\item \emph{All linearly exact gradient schemes are inconsistent on rough
+  meshes.}  An LSQ gradient that is exact only for linear fields has an
+  $O(h)$ error on non-symmetric stencils.  The face flux is then only $O(h)$
+  accurate, and the discrete operator has an $O(1)$ truncation error: applied
+  to the cell averages of a quadratic it misses the source by $10^{-3}$ to
+  $10^{-1}$ (\cref{fig:Q}, top right).
+\end{enumerate}
+
+\subsection{Formulation}
+
+\paragraph{2-exact reconstruction.}  On each cell we seek a quadratic
+\begin{equation}
+  p_i(\bm x)=c_i+\bm g_i\cdot(\bm x-\bm x_i)+\tfrac12(\bm x-\bm x_i)^{\!\top}\mathsf H_i(\bm x-\bm x_i)
+\end{equation}
+whose cell average over $\Omega_i$ equals $\bar u_i$.  With centroid $\bm x_i$
+and central second moments
+$\mathsf M_i=|\Omega_i|^{-1}\int_{\Omega_i}(\bm x-\bm x_i)(\bm x-\bm x_i)^{\!\top}$
+(closed-form polygon formulas), the average of $p_i$ over a neighbour cell $j$ gives
+the fitting equations
+\begin{equation}
+  \bar u_j-\bar u_i = \bm g_i\cdot\bm\Delta_{ij}+\tfrac12\bm\Delta_{ij}^{\!\top}\mathsf H_i\bm\Delta_{ij}
+  +\tfrac12\,\mathsf H_i:(\mathsf M_j-\mathsf M_i),\qquad \bm\Delta_{ij}=\bm x_j-\bm x_i,
+  \label{eq:fit}
+\end{equation}
+for all $j$ in the vertex-ring stencil (extended by a second ring for
+boundary cells with fewer than 7 neighbours).  They are solved by weighted
+least squares (weights $|\bm\Delta_{ij}|^{-2}$, columns scaled by $h$ and $h^2$) for
+$(\bm g_i,\mathsf H_i)$, which are linear in $\bar u$.  The moment term is what
+makes the fit exact for quadratics given \emph{cell averages}; omitting it
+leaves an $O(h)$ gradient error.
+
+\paragraph{Face flux.}  At the midpoint $\bm x_f$ of face $f=(i,j)$ with unit
+normal $\bm n$ (from $i$ to $j$) and $\bm d=\bm x_j-\bm x_i$,
+\begin{align}
+  \bm G_f &= \tfrac12\big[\bm g_i+\mathsf H_i(\bm x_f-\bm x_i)+\bm g_j+\mathsf H_j(\bm x_f-\bm x_j)\big],\\
+  J_f &= \tfrac12\big[(p_i\text{-predicted }\bar u_j-\bar u_i)+(p_j\text{-predicted }\bar u_j-\bar u_i)\big],\\
+  F_f &= -|f|\,\bm n^{\!\top}\mathsf K\bm G_f-|f|\,T_f\big[(\bar u_j-\bar u_i)-J_f\big],
+  \qquad T_f=\frac{\bm n^{\!\top}\mathsf K\bm n}{\bm n\cdot\bm d}>0 .
+  \label{eq:qflux}
+\end{align}
+$F_f$ is the outward flux of $-\mathsf K\nabla u$ from $i$; it is added to
+row $i$ and subtracted from row $j$, so the scheme is conservative.  The
+penalty restores compact two-point coupling (it is the TPFA term) but is
+measured against the jump the reconstruction \emph{predicts}, so it vanishes
+whenever the data are reconstructed exactly.
+
+\begin{proposition}[Quadratic exactness]
+Let $\mathsf K$ be constant, faces straight and $u$ a quadratic polynomial with
+exact cell averages $\bar u$.  If every stencil has full rank for
+\eqref{eq:fit}, then $F_f=-\int_f\bm n^{\!\top}\mathsf K\nabla u$ exactly for every
+interior face.  Hence $\sum_{f\subset\partial\Omega_i}F_f=-\int_{\Omega_i}\nabla\cdot(\mathsf K\nabla u)$,
+i.e.\ the discrete operator has zero truncation error on quadratics.
+\end{proposition}
+\begin{proof}
+For quadratic $u$, \eqref{eq:fit} holds exactly with $(\bm g_i,\mathsf H_i)=(\nabla u(\bm x_i),\nabla^2u)$,
+so the least-squares solution is exact.  Then $\bm G_f=\nabla u(\bm x_f)$,
+$J_f=\bar u_j-\bar u_i$, and the penalty vanishes.  Since $\nabla u$ is linear
+along the straight face, the midpoint rule gives
+$|f|\,\bm n^{\!\top}\mathsf K\nabla u(\bm x_f)=\int_f\bm n^{\!\top}\mathsf K\nabla u$.
+\end{proof}
+Exactness for quadratics makes the flux $O(h^2)$ consistent for smooth $u$.  For a
+stable conservative scheme this gives second-order convergence of the cell
+averages.
+
+\paragraph{Consistent data.}  Because \eqref{eq:fit} effectively
+differentiates the data twice, an $O(h^2)$ inconsistency $\delta$ in the cell
+values (e.g.\ Dirichlet band values sampled at centroids instead of averaged)
+produces Hessian errors $O(\delta/h^2)=O(1)$ near the boundary.  Measured on
+perturbed quadrilaterals, this reduces the observed order from $\approx2$ to
+$0.38$.  The solver therefore integrates the source and Dirichlet data over
+each cell with a degree-4 triangle-fan quadrature when the quadratic flux is
+selected (\texttt{cell\_average\_data}, default on for this flux only).  It
+also provides \texttt{cell\_average()} for initial data and error measurement.
+The two-point schemes are insensitive to this and keep their previous
+behaviour, so no regression baseline changes.
+
+\subsection{Results}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{test_plots/flux_reconstruction/quadratic_flux.png}
+\caption{Anisotropic diffusion (ratio 5, $30^\circ$), consistent cell-average
+data, Crank--Nicolson.  Four mesh families; top right: maximum interior
+truncation error of the steady operator on $x^2+3xy-2y^2$; bottom right:
+finest-mesh error.}
+\label{fig:Q}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Relative $L^2$ error on the finest mesh (finest-pair observed order).
+Quadratic truncation error in the last column block.}
+\small
+\begin{tabular}{@{}lccc|c@{}}
+\toprule
+mesh & reconstructed & TPFA + corr. & \textbf{quadratic} & truncation (quad.\ / TPFA) \\
+\midrule
+skewed ($n=128$) & $3.39\mathrm{e}{-5}\ (0.85)$ & $1.03\mathrm{e}{-6}\ (1.98)$ & $1.00\mathrm{e}{-6}\ (2.00)$ & $2\mathrm{e}{-14}$ / $1\mathrm{e}{-13}$ \\
+hexagonal ($n=128$) & $2.60\mathrm{e}{-5}\ (1.14)$ & $1.63\mathrm{e}{-5}\ (1.01)$ & $4.17\mathrm{e}{-6}\ (1.93)$ & $5\mathrm{e}{-15}$ / $4\mathrm{e}{-3}$ \\
+perturbed ($n=128$) & $2.63\mathrm{e}{-4}\ (0.24)$ & $1.43\mathrm{e}{-4}\ (0.94)$ & $3.29\mathrm{e}{-6}\ (2.03)$ & $1\mathrm{e}{-14}$ / $2\mathrm{e}{-2}$ \\
+tiled ($n=96$) & $6.40\mathrm{e}{-4}\ (0.22)$ & $3.57\mathrm{e}{-4}\ (0.75)$ & $2.77\mathrm{e}{-5}\ (1.92)$ & $7\mathrm{e}{-15}$ / $3\mathrm{e}{-2}$ \\
+\bottomrule
+\end{tabular}
+\label{tab:Q}
+\end{table}
+
+On the sheared mesh the corrected TPFA is already second order, because a
+uniform shear keeps the face midpoint at the midpoint of the centroids and
+makes its gradient correction exact for quadratics.  The quadratic flux matches
+it there and is the only option that stays second order on hexagonal, randomly
+perturbed and mixed polygonal meshes, with finest-mesh errors $4$--$80\times$
+smaller.  The AFC limiters accept it as their high-order target
+(\texttt{flux\_discretization="quadratic"}) and remain strictly bounded (unit
+test).
+
+%=============================================================================
 \section{Limitations and next steps}
 %=============================================================================
 \begin{itemize}[leftmargin=*]
@@ -429,9 +576,12 @@ $8.2\times10^{-4}=0.13\,\Delta x$ over $t\in[0.02,0.5]$ (\cref{fig:A}f).
   Dirichlet-band latent jump is a modelling artefact of initial data that are
   inconsistent with the boundary data; consistent initial data or face-based
   Dirichlet conditions would remove it.
-\item The second-order loss of Thermalio on skewed anisotropic meshes, revealed by
-  the cross-code study, should be addressed (e.g.\ NTPFA, or a least-squares
-  gradient with boundary-face constraints).
+\item The quadratic flux is not provably coercive: the penalty with $T_f>0$
+  stabilizes it in every test, but no discrete energy estimate is given.  It is
+  not monotone (use it as the high-order target of the AFC limiters for bounds);
+  it has $\approx21$ non-zeros per row (vs.\ 5 for TPFA); its assembly is a Python
+  loop ($\approx10$\,s for $16\,384$ cells); and it does not yet support
+  temperature-dependent conductivity.
 \item The external comparison is for linear problems.  A nonlinear (Stefan)
   cross-code comparison would require writing an enthalpy model in the
   external code, which would no longer be independent.  The Neumann solution
@@ -443,7 +593,8 @@ $8.2\times10^{-4}=0.13\,\Delta x$ over $t\in[0.02,0.5]$ (\cref{fig:A}f).
 python -m pip install -r requirements-external.txt
 export MPLCONFIGDIR=/tmp/matplotlib
 python -m pytest tests/test_afc.py tests/test_boundary_flux.py \
-       tests/test_external_codes.py -q
+       tests/test_external_codes.py tests/test_quadratic_flux.py -q
+python quadratic_flux_study.py           # ~4 min
 python dmp_source_study.py               # ~1 min
 python direction_c_flux_audit_study.py   # ~1 min
 python external_code_comparison.py       # ~3 min

@@ -41,8 +41,9 @@ accuracy, is it in the asymptotic range, and do independent schemes agree?*
   at nominal order on isotropic/Robin problems (Thermalio-FiPy difference
   2.5e-4, Thermalio-P2 2.5e-5..3.2e-4 at n=64); with a rotated tensor Thermalio
   (reconstructed flux) is ~2nd order and 17x more accurate than FiPy's rank-2
-  coefficient (order 0.6-0.9); **Thermalio loses order on skewed meshes for
-  the anisotropic case (0.88)** -- an open item; enthalpy solver tracks the
+  coefficient (order 0.6-0.9); Thermalio's `reconstructed` flux lost order on skewed meshes for
+  the anisotropic case (0.88) -- fixed by the quadratic flux (Direction B PR6;
+  10x lower error in this protocol, order 2.00 with Crank--Nicolson); enthalpy solver tracks the
   Neumann front to 0.13 dx.  `tests/test_external_codes.py` runs in a
   separate CI job.
 - **Parked (deliberately not done):** genuinely transcendental-in-time Caputo (needs Mittag-Leffler /

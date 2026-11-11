@@ -32,9 +32,9 @@ lowest-risk starting point and strengthens the foundation the others build on.
 - **A:** transcendental (Mittag-Leffler) Caputo cases; registering MMS cases in
   the regression sweep; nonlinear cross-code comparison.  (External-code
   validation vs FiPy and scikit-fem landed 2026-11.)
-- **B:** order loss of the reconstructed flux on skewed anisotropic meshes;
+- **B:** coercivity analysis and vectorized assembly of the quadratic flux;
   geometric NTPFA; sharper local source envelopes.  (Sign-changing-source
-  limiters landed 2026-11.)
+  limiters and the second-order quadratic flux landed 2026-11.)
 - **C:** second-order (Newmark-averaged) Cattaneo time stepping, adaptivity for
   the apparent-capacity and fractional solvers, consistent Dirichlet initial
   data (removes the band latent-heat jump), sharp-interface tracking.

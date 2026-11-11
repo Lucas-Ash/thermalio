@@ -89,6 +89,14 @@ with support for:
   `direction_c_enthalpy_studies.py`, `direction_d_adjoint_studies.py`; report:
   `direction_CD_enthalpy_adjoint_report.tex` (`pdflatex`, run twice).
 
+- `heat_solver/quadratic_flux.py`
+  `flux_discretization="quadratic"` for `PolygonalHeatSolver`: second order on
+  non-orthogonal / anisotropic problems. Its unknowns are cell averages:
+  source and Dirichlet data are cell-integrated automatically
+  (`cell_average_data`), and initial data / error checks should use
+  `solver.cell_average(f, t)`. The legacy `reconstructed` flux loses order on
+  skewed meshes; prefer `quadratic` (or `tpfa` + `nonorthogonal_correction`).
+
 - `heat_solver/boundary_flux.py`, `heat_solver/external_codes.py`
   Dirichlet reaction-flux energy audits (set `solver.record_history = True` on
   `HyperbolicStefanSolver`), and FiPy / scikit-fem adapters for cross-code
