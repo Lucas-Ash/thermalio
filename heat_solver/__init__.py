@@ -26,6 +26,8 @@ from .dmp import (
     run_dmp_study,
 )
 from .afc import AFCMonotoneSolver
+from .mesh_io import Mesh2D, export_vtu, import_gmsh, import_vtu, load_mesh
+from .mesh_library import get_mesh, load_named, save_named
 from .adjoint import (
     AdjointGradient,
     LinearHeatAdjoint,
@@ -100,6 +102,14 @@ from .transport import (
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
+    "Mesh2D",
+    "export_vtu",
+    "get_mesh",
+    "import_gmsh",
+    "import_vtu",
+    "load_mesh",
+    "load_named",
+    "save_named",
     "AdaptiveStepOptions",
     "AdjointGradient",
     "ApparentCapacityPicardSolver",

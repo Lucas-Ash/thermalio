@@ -22,7 +22,7 @@
 
 | # | Gap | Evidence | Established codes |
 |---|-----|----------|-------------------|
-| 1 | **2D only, built-in meshes only** | `meshes.py` has six parametric generators; no mesh import or export; curved boundaries only through the separate curvilinear solver | FiPy reads Gmsh; scikit-fem reads meshio formats; FEniCS/deal.II do 1-3D with general meshes |
+| 1 | **Mesh import/export (2D by design)** — *addressed 2026-11* | `mesh_io` + `mesh_library`: Gmsh/VTU/npz import and export, saved generator configurations with stored geometry, all solvers and drivers accept imported meshes; set-up of 65k cells 18 s -> <1 s. Remaining: no Gmsh 4 import without meshio, no curved (high-order) boundary geometry | FiPy reads Gmsh; scikit-fem reads meshio formats |
 | 2 | **Setup cost dominated by Python loops** | 65,536 cells: mesh 2.8 s + solver init 8.3 s + assembly 3.9 s (≈15 s before the first solve) vs FiPy 4.2 s and scikit-fem P1 6.3 s *for the entire run*; quadratic-flux geometry precompute 6.3 s at 16k cells | Vectorized or compiled assembly |
 | 3 | **No scalable linear solvers or parallelism** | `_solve_sparse_linear_system`: SciPy LU, or *unpreconditioned* CG/BiCGSTAB; no AMG/ILU, no PETSc, no MPI | FEniCS/deal.II: PETSc/Trilinos, AMG, MPI to 10^9 DoF; FiPy: optional PETSc/Trilinos |
 | 4 | **Dirichlet imposed on a band of boundary cells** | One layer of unknowns is fixed at centroid values: an h/2 boundary shift, a 4x larger error constant than FiPy's face-based Dirichlet on the same grid (isotropic case), and the latent-heat "band jump" artefact in the energy audits | Face/nodal Dirichlet |

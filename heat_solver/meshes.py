@@ -210,3 +210,43 @@ def generate_nonuniform_delaunay(nx=30, ny=30, jitter=0.15, bbox=(-1.5, 1.5, -1.
     jitter_xy[~is_boundary, 1] = rng.uniform(-jitter * hy, jitter * hy, size=(~is_boundary).sum())
     tri = Delaunay(pts + jitter_xy)
     return tri.points, tri.simplices.copy()
+
+
+def generate_curvilinear_grid(nx=40, ny=40, bbox=(-1.0, 1.0, -1.0, 1.0), warp=0.1, twist=0.0):
+    """Smoothly warped structured grid ``(X, Y)`` of shape ``(ny, nx)``.
+
+    This is the mapping previously built inline by ``run_curvilinear_test``:
+    a sine-bump warp (``warp``) plus an optional cross-mode twist (``twist``),
+    both vanishing on the boundary so the domain stays the box ``bbox``.
+    """
+    x_min, x_max, y_min, y_max = bbox
+    xi = np.linspace(x_min, x_max, nx)
+    eta = np.linspace(y_min, y_max, ny)
+    XI, ETA = np.meshgrid(xi, eta)
+    L_x = x_max - x_min
+    L_y = y_max - y_min
+    sx = (XI - x_min) / L_x
+    sy = (ETA - y_min) / L_y
+    interior_mode = np.sin(np.pi * sx) * np.sin(np.pi * sy)
+    cross_x = np.sin(2.0 * np.pi * sx) * np.sin(np.pi * sy)
+    cross_y = np.sin(np.pi * sx) * np.sin(2.0 * np.pi * sy)
+    X = XI + L_x * (warp * interior_mode + twist * cross_x)
+    Y = ETA + L_y * (0.9 * warp * interior_mode - twist * cross_y)
+    return X, Y
+
+
+def generate_perturbed_quad_mesh(nx=20, ny=20, bbox=(-1.0, 1.0, -1.0, 1.0), amplitude=0.2, seed=0):
+    """Square grid with interior vertices randomly displaced by ``amplitude * h``.
+
+    A rough (non-smooth) mesh family used in the flux-accuracy studies.
+    """
+    vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
+    vertices = vertices.copy()
+    xmin, xmax, ymin, ymax = bbox
+    tol = 1e-9 * max(xmax - xmin, ymax - ymin)
+    inner = ((vertices[:, 0] > xmin + tol) & (vertices[:, 0] < xmax - tol)
+             & (vertices[:, 1] > ymin + tol) & (vertices[:, 1] < ymax - tol))
+    h = np.array([(xmax - xmin) / nx, (ymax - ymin) / ny])
+    vertices[inner] += amplitude * h * np.random.default_rng(seed).uniform(-1, 1, (inner.sum(), 2))
+    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    return vertices, polygons, centers

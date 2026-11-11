@@ -38,3 +38,6 @@ Thumbs.db
 *.toc
 *.synctex.gz
 direction_*_report.log
+
+# mesh library temp files
+mesh_library/*.tmp

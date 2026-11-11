@@ -136,6 +136,7 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/cases.py` | Manufactured solutions, sources, BC callbacks, case metadata. |
 | `heat_solver/drivers.py` | High-level runners wiring meshes, solvers, and error metrics. |
 | `heat_solver/meshes.py` | Mesh generators (hex, square, mixed, skewed, tiled, Delaunay). |
+| `heat_solver/mesh_io.py`, `heat_solver/mesh_library.py`, `mesh_library/` | 2D mesh import/export (native `.npz` with stored geometry, VTU for ParaView, Gmsh `.msh`) and a library of saved generator configurations: meshes are generated once and imported by every problem (`PolygonalHeatSolver(*mesh, ...)`, `mesh=` on all drivers). See `docs/mesh_io.md`; rebuild with `build_mesh_library.py`; example `mesh_io_demo.py`. |
 | `tests.py` | Full verification sweep: plots and `convergence_summary` under `test_plots/`. |
 | `qa_regression.py` | Compare fresh numerical outputs to stored baselines. |
 | `heat_solver/verification.py` | Observed order of accuracy, Richardson extrapolation, and GCI (feeds the convergence summaries). |

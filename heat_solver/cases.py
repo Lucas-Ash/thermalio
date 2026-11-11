@@ -716,7 +716,7 @@ def get_analytical_case(case="heat_kernel", alpha=0.1, t_end=0.15):
         if np.isscalar(alpha) or np.asarray(alpha).ndim == 0:
             max_alpha = float(alpha)
         else:
-            max_alpha = np.max(np.linalg.eigvals(alpha))
+            max_alpha = float(np.max(np.linalg.eigvals(alpha).real))
         L = 4.0 * np.sqrt(4.0 * max_alpha * t_end)
         return {
             "name": "Anisotropic Heat Kernel",

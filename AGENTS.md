@@ -51,6 +51,19 @@ with support for:
   - skewed non-orthogonal tiled polygonal mesh
   - nonuniform Delaunay mesh
 
+- `heat_solver/mesh_io.py`, `heat_solver/mesh_library.py`, `mesh_library/`
+  Meshes are generated once and imported (see `docs/mesh_io.md`). `Mesh2D`
+  unpacks into every cell-centred solver (`PolygonalHeatSolver(*mesh, ...)`);
+  use `mesh.triangulation()` / `mesh.structured()` for the triangular /
+  curvilinear solvers. Drivers take `mesh=` (Mesh2D, file, or library name)
+  and otherwise load their configuration from the library (generating and
+  saving on first use). After adding a generator, register it in
+  `mesh_library.GENERATORS`; after changing sweep/QA mesh configurations, run
+  `python build_mesh_library.py` and commit `mesh_library/`. Derived geometry
+  is cached by mesh content hash and is read-only; it is bit-identical to the
+  legacy per-cell builders (keep it that way, QA baselines depend on it).
+  The unit tests point `THERMALIO_MESH_LIBRARY` at a temp dir (`tests/conftest.py`).
+
 - `heat_solver/plotting.py`
   Plot generation helpers used by the verification script.
 

@@ -17,6 +17,22 @@ from .triangular import NonUniformHeatSolver
 from .curvilinear import CurvilinearHeatSolver
 
 
+def _driver_mesh(mesh, use_library, generator, **params):
+    """Mesh for a driver: an explicit mesh (Mesh2D / file / library name) or a library configuration.
+
+    With ``use_library=True`` (default) the generator configuration is loaded
+    from the mesh library (generated and saved once on first use) instead of
+    being rebuilt on every run.
+    """
+    from .mesh_library import generate, get_mesh, resolve_mesh
+
+    if mesh is not None:
+        return resolve_mesh(mesh)
+    if use_library:
+        return get_mesh(generator, **params)
+    return generate(generator, **params)
+
+
 def run_curvilinear_test(
     alpha=0.1,
     dt=5e-3,
@@ -34,6 +50,8 @@ def run_curvilinear_test(
     phase_change_model=None,
     phase_change_options=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bc_type is None:
@@ -50,20 +68,14 @@ def run_curvilinear_test(
         nonlinear_options = case_info.get("nonlinear_options")
     alpha = case_info.get("alpha", alpha)
 
+    grid = _driver_mesh(mesh, use_library, "curvilinear", nx=nx, ny=ny, bbox=bbox, warp=warp, twist=twist)
+    X, Y = grid.structured()
+    ny, nx = X.shape
+    if mesh is not None:
+        bbox = grid.bbox
     x_min, x_max, y_min, y_max = bbox
-    xi = np.linspace(x_min, x_max, nx)
-    eta = np.linspace(y_min, y_max, ny)
-    XI, ETA = np.meshgrid(xi, eta)
-
     L_x = x_max - x_min
     L_y = y_max - y_min
-    sx = (XI - x_min) / L_x
-    sy = (ETA - y_min) / L_y
-    interior_mode = np.sin(np.pi * sx) * np.sin(np.pi * sy)
-    cross_x = np.sin(2.0 * np.pi * sx) * np.sin(np.pi * sy)
-    cross_y = np.sin(np.pi * sx) * np.sin(2.0 * np.pi * sy)
-    X = XI + L_x * (warp * interior_mode + twist * cross_x)
-    Y = ETA + L_y * (0.9 * warp * interior_mode - twist * cross_y)
 
     source_func = case_info.get("source", lambda x, y, t: 0.0)
 
@@ -212,11 +224,14 @@ def run_polygonal_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     if bbox is None:
         bbox = case_info["bbox"]
-    vertices, polygons, _ = generate_hexagonal_polygonal_mesh(nx=nx, ny=ny, spacing=spacing, jitter=jitter, bbox=bbox, seed=seed)
+    vertices, polygons = _driver_mesh(mesh, use_library, "hexagonal", nx=nx, ny=ny, spacing=spacing,
+                                      jitter=jitter, bbox=bbox, seed=seed).polygonal()
     return run_polygonal_mesh_test(
         vertices,
         polygons,
@@ -262,8 +277,11 @@ def run_mixed_polygonal_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
-    vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=bbox)
+    vertices, polygons = _driver_mesh(mesh, use_library, "mixed", nx_tiles=nx_tiles, ny_tiles=ny_tiles,
+                                      bbox=bbox).polygonal()
     return run_polygonal_mesh_test(
         vertices,
         polygons,
@@ -309,8 +327,10 @@ def run_square_polygonal_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
-    vertices, polygons, _ = generate_square_polygonal_mesh(nx=nx, ny=ny, bbox=bbox)
+    vertices, polygons = _driver_mesh(mesh, use_library, "square", nx=nx, ny=ny, bbox=bbox).polygonal()
     return run_polygonal_mesh_test(
         vertices,
         polygons,
@@ -357,8 +377,11 @@ def run_nonorthogonal_polygonal_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
-    vertices, polygons, _ = generate_nonorthogonal_polygonal_mesh(nx=nx, ny=ny, bbox=bbox, skew=skew)
+    vertices, polygons = _driver_mesh(mesh, use_library, "nonorthogonal", nx=nx, ny=ny, bbox=bbox,
+                                      skew=skew).polygonal()
     return run_polygonal_mesh_test(
         vertices,
         polygons,
@@ -405,13 +428,11 @@ def run_nonorthogonal_tiled_polygonal_test(
     phase_change_options=None,
     temperature_dependent_diffusivity=None,
     nonlinear_options=None,
+    mesh=None,
+    use_library=True,
 ):
-    vertices, polygons, _ = generate_nonorthogonal_tiled_polygonal_mesh(
-        nx_tiles=nx_tiles,
-        ny_tiles=ny_tiles,
-        bbox=bbox,
-        skew=skew,
-    )
+    vertices, polygons = _driver_mesh(mesh, use_library, "nonorthogonal_tiled", nx_tiles=nx_tiles,
+                                      ny_tiles=ny_tiles, bbox=bbox, skew=skew).polygonal()
     return run_polygonal_mesh_test(
         vertices,
         polygons,
@@ -451,6 +472,8 @@ def run_test(
     bbox=None,
     phase_change_model=None,
     phase_change_options=None,
+    mesh=None,
+    use_library=True,
 ):
     if mesh_type != "delaunay":
         raise ValueError("run_test supports only 'delaunay'. Use polygonal test drivers for polygonal meshes.")
@@ -462,7 +485,8 @@ def run_test(
         )
     if bbox is None:
         bbox = case_info["bbox"]
-    points, tris = generate_nonuniform_delaunay(nx=nx, ny=ny, jitter=jitter, bbox=bbox, seed=seed)
+    points, tris = _driver_mesh(mesh, use_library, "delaunay", nx=nx, ny=ny, jitter=jitter, bbox=bbox,
+                                seed=seed).triangulation()
     exact_solution = case_info["solution"]
     source_func = case_info.get("source", lambda x, y, t: 0.0)
     if phase_change_model is None:

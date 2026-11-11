@@ -1,0 +1,1293 @@
+{
+ "curvilinear-00c69f234c2d": {
+  "file": "curvilinear-00c69f234c2d.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "5be197952e77de2b892f979e1347a5287f0267b80ee81990bc3e65ca820e12bf"
+ },
+ "curvilinear-00fc736f9c6c": {
+  "file": "curvilinear-00fc736f9c6c.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "1e4192d4d1219108083033d9cd0c42839119f9b190fcd1d2d4dc8ae7794981ee"
+ },
+ "curvilinear-04e339c7c061": {
+  "file": "curvilinear-04e339c7c061.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "100b189cb5ccce4f1a130b3084615b462ebe24fea3f21deb92bddf4c0b5be606"
+ },
+ "curvilinear-05b1043b5eff": {
+  "file": "curvilinear-05b1043b5eff.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "76ba13a1cb6ef4884fd21395ac4c0e4adcd931385c2871a63acffba9225e426f"
+ },
+ "curvilinear-1c26591ad376": {
+  "file": "curvilinear-1c26591ad376.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "ff87ada3cbc5989f4fe222612cbb0383a08005abed72a6998b2d14b1af6d84cf"
+ },
+ "curvilinear-1f239d38b60e": {
+  "file": "curvilinear-1f239d38b60e.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    -0.8404011958461834,
+    0.8404011958461834,
+    -0.8404011958461834,
+    0.8404011958461834
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "38dd2dbec66a478780d7163fee1d1da491266852b4192a10dabc9bef853b41a5"
+ },
+ "curvilinear-2e23c057f6ab": {
+  "file": "curvilinear-2e23c057f6ab.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "3e2b528519c05015bc530889320400bc9982a16090dc62b552772063ca165f4e"
+ },
+ "curvilinear-39e3c912a433": {
+  "file": "curvilinear-39e3c912a433.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "904617ed6bc86a82c48f30d91da832da49ffe280cf4f91bf60b91551319f6faf"
+ },
+ "curvilinear-46b828f5113c": {
+  "file": "curvilinear-46b828f5113c.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    -0.9797958971132712,
+    0.9797958971132712,
+    -0.9797958971132712,
+    0.9797958971132712
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "907822c4a1e4ec6bf777f2ce7603813030d4e0bd824683c4d4fe2f5a3fa4976b"
+ },
+ "curvilinear-4d136eab7cda": {
+  "file": "curvilinear-4d136eab7cda.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "46a3e84d15e64ab97de9d1c93d0dad23a590385f38699f9affe5090a758d255f"
+ },
+ "curvilinear-4ee92ef68e81": {
+  "file": "curvilinear-4ee92ef68e81.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    -0.9797958971132712,
+    0.9797958971132712,
+    -0.9797958971132712,
+    0.9797958971132712
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "6e2c1efb3a122865a4c32b63980b7e02039d912c1b03f1dbf14edfc88a6b285a"
+ },
+ "curvilinear-5d9d07bc69b0": {
+  "file": "curvilinear-5d9d07bc69b0.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "38f7a067d9ed481bfb6d1855dc55660d462f960e117a41a76a8896955f62fea3"
+ },
+ "curvilinear-60517a751839": {
+  "file": "curvilinear-60517a751839.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    -0.9797958971132712,
+    0.9797958971132712,
+    -0.9797958971132712,
+    0.9797958971132712
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "228eee419b549eeec2bca00fb6ae73a2cdae66113b3e4fd0577abebf4b6d99e9"
+ },
+ "curvilinear-6a7fde564a62": {
+  "file": "curvilinear-6a7fde564a62.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "af06fbfef8551e65340472f92feca39d2fc24be13099848467808872ea08d667"
+ },
+ "curvilinear-83cb6a0bcfff": {
+  "file": "curvilinear-83cb6a0bcfff.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    -0.8404011958461834,
+    0.8404011958461834,
+    -0.8404011958461834,
+    0.8404011958461834
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "7270c6261d3cdb1212a21aa19224c5b490c784c192922fa5b9b9eb24d281b0d6"
+ },
+ "curvilinear-8e61eb1658da": {
+  "file": "curvilinear-8e61eb1658da.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    -0.8404011958461834,
+    0.8404011958461834,
+    -0.8404011958461834,
+    0.8404011958461834
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "8fb03bc8b1c66a106020f50b91b1f31a4692a8fa53e92a90505ec245240e28d9"
+ },
+ "curvilinear-90b5f0213072": {
+  "file": "curvilinear-90b5f0213072.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "341d4450ada629b62c6216c389cabce2df561f624fb6615d08cdf8ba3e9e8cfe"
+ },
+ "curvilinear-9105821dded2": {
+  "file": "curvilinear-9105821dded2.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "78beb58df71fe8d2971f89841306cb74592490c6744c48fd8945aab2b7dc37e1"
+ },
+ "curvilinear-915030d93d23": {
+  "file": "curvilinear-915030d93d23.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    -0.9797958971132712,
+    0.9797958971132712,
+    -0.9797958971132712,
+    0.9797958971132712
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "011b9de99def969b9abf03f83eff6c215cb949af6692906bfed6160935ddbdd2"
+ },
+ "curvilinear-91cb946ab38a": {
+  "file": "curvilinear-91cb946ab38a.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "68a0dae3aad46365fe9165e2eec8f80b6407cd6efdaa0620d3d3895229351dc0"
+ },
+ "curvilinear-961e1c13449c": {
+  "file": "curvilinear-961e1c13449c.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "be3c0404431d1504a823f5d7dac258c87b42e65883afc72dd86574872f05d075"
+ },
+ "curvilinear-9ace1d6d8ec3": {
+  "file": "curvilinear-9ace1d6d8ec3.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 1444,
+  "n_vertices": 1521,
+  "hash": "075397424c188e3c6d2384ca09f9d1a58ca8df0c465b37abe7314ddcb7426078"
+ },
+ "curvilinear-a3ef824c1e44": {
+  "file": "curvilinear-a3ef824c1e44.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 11881,
+  "n_vertices": 12100,
+  "hash": "1047de5cf1096041408deafbb65338dc5cb15c95617a01d2d909d6ad6d4a2e33"
+ },
+ "curvilinear-b61d694375ec": {
+  "file": "curvilinear-b61d694375ec.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "169bbf3fdb951d42a8053a0d7d950b92ee62d212f195608e456a56b472138a12"
+ },
+ "curvilinear-bbf2589547c5": {
+  "file": "curvilinear-bbf2589547c5.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "7696b317ed1b2d67e64a4b625f3c005b644e1fa183a3841ddae1cbeed9bbdb52"
+ },
+ "curvilinear-c2df8a8ea9ca": {
+  "file": "curvilinear-c2df8a8ea9ca.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.18,
+   "twist": 0.07
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "b7f79ca0afda7933ca6c5623ec95781ff5ce8b7a8320cf3ea1c6025dc07d6886"
+ },
+ "curvilinear-cb21b6ee7ac0": {
+  "file": "curvilinear-cb21b6ee7ac0.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "b9b1675d91be84a46722609e7eb715ac504bfd76baed2e20dbf2d82bf46cae33"
+ },
+ "curvilinear-cb7b383239ad": {
+  "file": "curvilinear-cb7b383239ad.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    -0.8404011958461834,
+    0.8404011958461834,
+    -0.8404011958461834,
+    0.8404011958461834
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 196,
+  "n_vertices": 225,
+  "hash": "72238866304377ceaecf5a7a5bcb91818159a65195dacee9f3e56e5ce4844952"
+ },
+ "curvilinear-d7f40df15b9a": {
+  "file": "curvilinear-d7f40df15b9a.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    -0.8404011958461834,
+    0.8404011958461834,
+    -0.8404011958461834,
+    0.8404011958461834
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 7225,
+  "n_vertices": 7396,
+  "hash": "5235469f3084319d5ce02b7beab3b8396c77dfd35d1ba269e806fd4c85d1b24d"
+ },
+ "curvilinear-e83951dd6cef": {
+  "file": "curvilinear-e83951dd6cef.npz",
+  "generator": "curvilinear",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    -0.9797958971132712,
+    0.9797958971132712,
+    -0.9797958971132712,
+    0.9797958971132712
+   ],
+   "warp": 0.1,
+   "twist": 0
+  },
+  "kind": "structured",
+  "n_cells": 3721,
+  "n_vertices": 3844,
+  "hash": "5ca1d43124082bab7ad38305e8bb59e474d88ad0221a2d138396e4abe5cadefa"
+ },
+ "hexagonal-239c51ec2112": {
+  "file": "hexagonal-239c51ec2112.npz",
+  "generator": "hexagonal",
+  "parameters": {
+   "nx": 128,
+   "ny": 128,
+   "spacing": 0.015625,
+   "jitter": 0,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "seed": 1
+  },
+  "kind": "polygonal",
+  "n_cells": 6364,
+  "n_vertices": 13048,
+  "hash": "ac8d27e9d8f44ccfd15f219a94b7a1c117fd31a8c51fab432372426a9a3009bd"
+ },
+ "hexagonal-af5e03649aa2": {
+  "file": "hexagonal-af5e03649aa2.npz",
+  "generator": "hexagonal",
+  "parameters": {
+   "nx": 16,
+   "ny": 16,
+   "spacing": 0.125,
+   "jitter": 0,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "seed": 1
+  },
+  "kind": "polygonal",
+  "n_cells": 105,
+  "n_vertices": 252,
+  "hash": "a8553b55757f055d9e73f5a4a5ff4cbf5dffd29373a9de3e27e4f77d8283769d"
+ },
+ "hexagonal-edb8e7d25e8c": {
+  "file": "hexagonal-edb8e7d25e8c.npz",
+  "generator": "hexagonal",
+  "parameters": {
+   "nx": 64,
+   "ny": 64,
+   "spacing": 0.03125,
+   "jitter": 0,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "seed": 1
+  },
+  "kind": "polygonal",
+  "n_cells": 1591,
+  "n_vertices": 3342,
+  "hash": "0f82822d82b867c3d94c68d72a6bb5233bf25a2c768a9a0171a6f7bd447c8ec2"
+ },
+ "hexagonal-ffed4d720e32": {
+  "file": "hexagonal-ffed4d720e32.npz",
+  "generator": "hexagonal",
+  "parameters": {
+   "nx": 32,
+   "ny": 32,
+   "spacing": 0.0625,
+   "jitter": 0,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "seed": 1
+  },
+  "kind": "polygonal",
+  "n_cells": 407,
+  "n_vertices": 895,
+  "hash": "cacc8828ef03bc8b6dbc32473fb1573a75cb97526ba47b586dc9e716613f4bef"
+ },
+ "l_shape": {
+  "file": "l_shape.npz",
+  "generator": null,
+  "parameters": null,
+  "kind": "polygonal",
+  "n_cells": 432,
+  "n_vertices": 481,
+  "hash": "cc7fb46614acc34844ba6f3d021b1701c480c9ee578681579b32cca2250aa4f3"
+ },
+ "nonorthogonal-0988bd34a350": {
+  "file": "nonorthogonal-0988bd34a350.npz",
+  "generator": "nonorthogonal",
+  "parameters": {
+   "nx": 128,
+   "ny": 128,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 16384,
+  "n_vertices": 16641,
+  "hash": "2f7111b81ee5f579b4aa27294194822bb28af6be18ae7cce2afe47a6bca58076"
+ },
+ "nonorthogonal-3d17d11f1aea": {
+  "file": "nonorthogonal-3d17d11f1aea.npz",
+  "generator": "nonorthogonal",
+  "parameters": {
+   "nx": 8,
+   "ny": 8,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 64,
+  "n_vertices": 81,
+  "hash": "1e3d5331e9663256b27658552860492e4eeda78a49657e065c7e28699b187858"
+ },
+ "nonorthogonal-8c77efab26f4": {
+  "file": "nonorthogonal-8c77efab26f4.npz",
+  "generator": "nonorthogonal",
+  "parameters": {
+   "nx": 16,
+   "ny": 16,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 256,
+  "n_vertices": 289,
+  "hash": "005a4aee0a4b360368594caf81a63bd299f76ef5f7163e696bc19ee92fbf2172"
+ },
+ "nonorthogonal-ea877798d0da": {
+  "file": "nonorthogonal-ea877798d0da.npz",
+  "generator": "nonorthogonal",
+  "parameters": {
+   "nx": 32,
+   "ny": 32,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 1024,
+  "n_vertices": 1089,
+  "hash": "a8ea58283235d15335f7bc8526264402d2be57b455239ce96b00d879ae3c8a3d"
+ },
+ "nonorthogonal-f8cf20f44605": {
+  "file": "nonorthogonal-f8cf20f44605.npz",
+  "generator": "nonorthogonal",
+  "parameters": {
+   "nx": 64,
+   "ny": 64,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 4096,
+  "n_vertices": 4225,
+  "hash": "d98d14f11f7f90667089f6315ec296cea5beb4fb67a21c7fb07f891708a5830d"
+ },
+ "nonorthogonal_tiled-170b1d42c1b5": {
+  "file": "nonorthogonal_tiled-170b1d42c1b5.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 31,
+   "ny_tiles": 31,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "skew": 0.35
+  },
+  "kind": "polygonal",
+  "n_cells": 7688,
+  "n_vertices": 8836,
+  "hash": "c6acaf4302e1eed927b00edcb20c3c27a8c86b4eb364a987f024e26a40a33823"
+ },
+ "nonorthogonal_tiled-173ff67dbadb": {
+  "file": "nonorthogonal_tiled-173ff67dbadb.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 20,
+   "ny_tiles": 20,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "skew": 0.35
+  },
+  "kind": "polygonal",
+  "n_cells": 3200,
+  "n_vertices": 3721,
+  "hash": "9400c8a5d5c1ce8db1fef95e4c5cae3d9735426df6857852f3500fb9af19ac1a"
+ },
+ "nonorthogonal_tiled-54333713c53d": {
+  "file": "nonorthogonal_tiled-54333713c53d.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 55,
+   "ny_tiles": 55,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "skew": 0.35
+  },
+  "kind": "polygonal",
+  "n_cells": 24200,
+  "n_vertices": 27556,
+  "hash": "2daf99331d37cf79b47d17916a66cb6fc70e4fae146c4395eb01eb238799fee7"
+ },
+ "nonorthogonal_tiled-8962b24301b6": {
+  "file": "nonorthogonal_tiled-8962b24301b6.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 4,
+   "ny_tiles": 4,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 128,
+  "n_vertices": 169,
+  "hash": "9d85278e8c20543f9990693d1df05e9f17042fcf065d49a483c8d14d17952a00"
+ },
+ "nonorthogonal_tiled-8b0519f8abcb": {
+  "file": "nonorthogonal_tiled-8b0519f8abcb.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 8,
+   "ny_tiles": 8,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 512,
+  "n_vertices": 625,
+  "hash": "18c23fd34fa722beee10e5c4cacc7ed836182af0ab6531ffef8716ca412955b9"
+ },
+ "nonorthogonal_tiled-91ce5b896ecf": {
+  "file": "nonorthogonal_tiled-91ce5b896ecf.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 8,
+   "ny_tiles": 8,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "skew": 0.35
+  },
+  "kind": "polygonal",
+  "n_cells": 512,
+  "n_vertices": 625,
+  "hash": "f288ff0bc293cb54aba4f28c5149daa5422feb80270510d9d15c2463d01716d4"
+ },
+ "nonorthogonal_tiled-c79f473650bb": {
+  "file": "nonorthogonal_tiled-c79f473650bb.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 32,
+   "ny_tiles": 32,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 8192,
+  "n_vertices": 9409,
+  "hash": "12982015ac4cd92093f4c877ff0dbaadc1911d2b9b023fcf03d3af0e1cc55788"
+ },
+ "nonorthogonal_tiled-d12010657f43": {
+  "file": "nonorthogonal_tiled-d12010657f43.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 43,
+   "ny_tiles": 43,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "skew": 0.35
+  },
+  "kind": "polygonal",
+  "n_cells": 14792,
+  "n_vertices": 16900,
+  "hash": "77b3d19464ea2f4bb787c3550b9169c6ca7d15316a424ce86e6688db6173393c"
+ },
+ "nonorthogonal_tiled-e7674293a7ab": {
+  "file": "nonorthogonal_tiled-e7674293a7ab.npz",
+  "generator": "nonorthogonal_tiled",
+  "parameters": {
+   "nx_tiles": 16,
+   "ny_tiles": 16,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "skew": 0.3
+  },
+  "kind": "polygonal",
+  "n_cells": 2048,
+  "n_vertices": 2401,
+  "hash": "3e2c296fda6666f516ef4a6a5d4e095b62846376f9d9cf2097e01dfbda005c7c"
+ },
+ "perturbed-10095fa9b6d2": {
+  "file": "perturbed-10095fa9b6d2.npz",
+  "generator": "perturbed",
+  "parameters": {
+   "nx": 128,
+   "ny": 128,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "amplitude": 0.2,
+   "seed": 0
+  },
+  "kind": "polygonal",
+  "n_cells": 16384,
+  "n_vertices": 16641,
+  "hash": "e730d4c332e86179fca8f5cbd9b42652eda9211b6236beb8955ec724931c53ba"
+ },
+ "perturbed-36ffe46b0e5e": {
+  "file": "perturbed-36ffe46b0e5e.npz",
+  "generator": "perturbed",
+  "parameters": {
+   "nx": 16,
+   "ny": 16,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "amplitude": 0.2,
+   "seed": 0
+  },
+  "kind": "polygonal",
+  "n_cells": 256,
+  "n_vertices": 289,
+  "hash": "b07fdb1db4f9ee0bd53b08ba05053dccbcdce9500d41534d2199e6b868643ca7"
+ },
+ "perturbed-a419012a46ec": {
+  "file": "perturbed-a419012a46ec.npz",
+  "generator": "perturbed",
+  "parameters": {
+   "nx": 64,
+   "ny": 64,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "amplitude": 0.2,
+   "seed": 0
+  },
+  "kind": "polygonal",
+  "n_cells": 4096,
+  "n_vertices": 4225,
+  "hash": "0d84218a8d92fe04732569d7fff6fa08218d0544bf1fd2723110ed0082086cb4"
+ },
+ "perturbed-ef134f138844": {
+  "file": "perturbed-ef134f138844.npz",
+  "generator": "perturbed",
+  "parameters": {
+   "nx": 32,
+   "ny": 32,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ],
+   "amplitude": 0.2,
+   "seed": 0
+  },
+  "kind": "polygonal",
+  "n_cells": 1024,
+  "n_vertices": 1089,
+  "hash": "32065d389ed25dbdbf03400c02529dac4da858b47f95a6e1ea4079c192375879"
+ },
+ "square-013acc4a8b8a": {
+  "file": "square-013acc4a8b8a.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 32,
+   "ny": 32,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 1024,
+  "n_vertices": 1089,
+  "hash": "c63a1736d3ddac498e03b34d9ac27f3bcc7f21767e934267e94ed93fc85b53a3"
+ },
+ "square-0bd72c28a67d": {
+  "file": "square-0bd72c28a67d.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 8,
+   "ny": 8,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 64,
+  "n_vertices": 81,
+  "hash": "f021930692e6df2f1c888d6feb389099c0573a1d958ef1faa963174c967e9dd6"
+ },
+ "square-17d46502a102": {
+  "file": "square-17d46502a102.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 12100,
+  "n_vertices": 12321,
+  "hash": "247b3d2b019252c0ae5adabd330f9f178479898802fc79fcfce9115bc1fba363"
+ },
+ "square-20a85f0cd9fc": {
+  "file": "square-20a85f0cd9fc.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 16,
+   "ny": 16,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 256,
+  "n_vertices": 289,
+  "hash": "8be57edcf8469cd7eaddf08dc08939faf4ab08bd80a0fec9364ee1fb6432d139"
+ },
+ "square-522c2ec331f6": {
+  "file": "square-522c2ec331f6.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 1521,
+  "n_vertices": 1600,
+  "hash": "d0f3a19b939856c1801e48840d4bd506524d58f0e5c656bc192e33c423c42ece"
+ },
+ "square-77483486cdfa": {
+  "file": "square-77483486cdfa.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 3844,
+  "n_vertices": 3969,
+  "hash": "252fcbf1b113d25c4cd25eba615bf636a8b74d1a303e2c338ef5a8a917db24ee"
+ },
+ "square-7875ac56726a": {
+  "file": "square-7875ac56726a.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 110,
+   "ny": 110,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 12100,
+  "n_vertices": 12321,
+  "hash": "a1ed59b8b26719a78ec54610f0813b1281a1a4344c860bc8e6d5faa54d206e17"
+ },
+ "square-8588d29f24c4": {
+  "file": "square-8588d29f24c4.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 39,
+   "ny": 39,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 1521,
+  "n_vertices": 1600,
+  "hash": "b39ffb6eb95475a6497a2c094bdaa5a483c6374c07842908068924940aba62d3"
+ },
+ "square-8e53264a0bfb": {
+  "file": "square-8e53264a0bfb.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 64,
+   "ny": 64,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 4096,
+  "n_vertices": 4225,
+  "hash": "844f21109b69353cfb88cad8be83de207181c568880f14cff16dcec6c24e1e59"
+ },
+ "square-ab75de4c8981": {
+  "file": "square-ab75de4c8981.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 7396,
+  "n_vertices": 7569,
+  "hash": "5177ece087089c97bd5f103653004740dd868b4e136161873b6b0f556f35f670"
+ },
+ "square-b4407ec912a9": {
+  "file": "square-b4407ec912a9.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 62,
+   "ny": 62,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 3844,
+  "n_vertices": 3969,
+  "hash": "662093c9dfe8f3aede55dd356b5417ae5f52ea052bca8e3ed6f3564a5344b477"
+ },
+ "square-d183c73ba6d7": {
+  "file": "square-d183c73ba6d7.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 225,
+  "n_vertices": 256,
+  "hash": "03ec9611868bc765300f3a285d586d02870bd10c9656b4a932096dbeb3bc1556"
+ },
+ "square-d9550fe4c89f": {
+  "file": "square-d9550fe4c89f.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 86,
+   "ny": 86,
+   "bbox": [
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 7396,
+  "n_vertices": 7569,
+  "hash": "6c01ca9be7d0005171fb86bf280404b85deb7f82f0eadf81a93ce850bb2fa4c0"
+ },
+ "square-f94adce47149": {
+  "file": "square-f94adce47149.npz",
+  "generator": "square",
+  "parameters": {
+   "nx": 15,
+   "ny": 15,
+   "bbox": [
+    -1,
+    1,
+    -1,
+    1
+   ]
+  },
+  "kind": "polygonal",
+  "n_cells": 225,
+  "n_vertices": 256,
+  "hash": "bcc98132f7bc7d14f1e3e582feee17122294432b036ba9938232b77295470555"
+ }
+}

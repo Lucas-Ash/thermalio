@@ -165,6 +165,10 @@ class PolygonalHeatSolver:
         monotone=False,
         cell_average_data=None,
     ):
+        from .mesh_io import Mesh2D
+
+        if isinstance(vertices, Mesh2D):
+            raise TypeError("pass a Mesh2D unpacked: PolygonalHeatSolver(*mesh, alpha, dt, ...).")
         self.vertices = np.asarray(vertices, dtype=float)
         self.polygons = [list(poly) for poly in polygons]
         self.alpha = alpha
@@ -209,12 +213,19 @@ class PolygonalHeatSolver:
         # Backward-compatible alias retained for existing callers/tests.
         self.phase_change_options = self.nonlinear_options
         self.M = len(self.polygons)
-        self.cell_centers = self._compute_cell_centers()
-        self.cell_areas = self._compute_cell_areas()
-        self.edge_to_cells = self._build_edge_to_cells()
-        self.boundary_faces = self._build_boundary_faces()
-        self.neighbors = self._build_neighbors()
-        self.is_boundary = self._detect_boundary_cells()
+        # Derived geometry comes from the mesh-content cache (populated by
+        # heat_solver.mesh_io when a mesh is loaded from file, or computed once,
+        # vectorized, on first use) so repeated problems on one mesh skip it.
+        from .mesh_io import geometry_for
+
+        self._mesh_key, self._geometry = geometry_for(self.vertices, self.polygons)
+        geo = self._geometry
+        self.cell_centers = geo.cell_centers
+        self.cell_areas = geo.cell_areas
+        self.edge_to_cells = geo.edge_to_cells
+        self.boundary_faces = dict(geo.boundary_faces)
+        self.neighbors = geo.neighbors
+        self.is_boundary = geo.is_boundary
         # Cell-average data: integrate the source (and Dirichlet data) over each
         # cell instead of sampling at the centroid.  Default on for the
         # quadratic flux (whose 2-exact reconstruction needs consistent
@@ -248,7 +259,12 @@ class PolygonalHeatSolver:
             )
             or (self.flux_scheme == "mpfa" and self.bc_type != "dirichlet")
         )
-        self.gradient_coeffs = self._build_gradient_reconstruction() if need_tpfa_gradients else None
+        self.gradient_coeffs = None
+        if need_tpfa_gradients:
+            self.gradient_coeffs = geo.extras.get("gradient_coeffs")
+            if self.gradient_coeffs is None:
+                self.gradient_coeffs = self._build_gradient_reconstruction()
+                geo.extras["gradient_coeffs"] = self.gradient_coeffs
         self.M_diag = None
         self.A = None
         self.u = np.zeros(self.M)
@@ -666,10 +682,11 @@ class PolygonalHeatSolver:
             from .quadratic_flux import QuadraticDiffusionOperator
 
             self.M_diag = mass
-            op = getattr(self, "_quadratic_operator", None)
+            op = getattr(self, "_quadratic_operator", None) or self._geometry.extras.get("quadratic_operator")
             if op is None:
                 op = QuadraticDiffusionOperator(self.vertices, self.polygons, self.edge_to_cells)
-                self._quadratic_operator = op
+                self._geometry.extras["quadratic_operator"] = op  # shared by all solvers on this mesh
+            self._quadratic_operator = op
             xf = op.face_midpoints
             # Face temperature from the quadratic reconstruction (O(h^3)), not the
             # two-cell average (O(h) on irregular meshes).

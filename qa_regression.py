@@ -87,6 +87,11 @@ def _to_builtin(value):
         return int(value)
     if isinstance(value, np.bool_):
         return bool(value)
+    if isinstance(value, (complex, np.complexfloating)):
+        # e.g. bounding boxes derived from np.linalg.eigvals (zero imaginary part)
+        if complex(value).imag != 0.0:
+            raise ValueError(f"cannot store complex value {value!r} in QA metadata")
+        return float(complex(value).real)
     return value
 
 
@@ -122,7 +127,7 @@ def _write_dataset(root, job, data):
         "mesh_name": job["mesh_name"],
         "config": _to_builtin(job["config"]),
         "polygons": data["polygons"],
-        "results": data["results"],
+        "results": _to_builtin(data["results"]),
     }
     with (target_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, sort_keys=True)

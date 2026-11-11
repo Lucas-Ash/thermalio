@@ -127,6 +127,9 @@ def test_operator_is_linear_in_conductivity():
 
 
 def test_nonlinear_solve_reuses_precomputed_geometry(monkeypatch):
+    from heat_solver.mesh_io import GEOMETRY_CACHE
+
+    GEOMETRY_CACHE.clear()  # the operator is shared per mesh; start from a cold cache
     case = anisotropic_nonlinear_case()
     v, p = MESHES["skewed"](10)
     built = {"n": 0}
@@ -146,6 +149,10 @@ def test_nonlinear_solve_reuses_precomputed_geometry(monkeypatch):
     s = PolygonalHeatSolver(v, p, case["alpha"], 1e-3, bc_type="dirichlet", bc_func=case["exact"],
                             source_func=case["source"], flux_discretization="quadratic")
     s.solve(s.cell_average(case["exact"], 0.0), 0.0, 5e-3)
+    assert built["n"] == 1
+    # A second solver on the same mesh reuses the cached operator.
+    PolygonalHeatSolver(v, p, case["alpha"], 1e-3, flux_discretization="quadratic")._assemble_system(
+        temperature=np.ones(len(p)))
     assert built["n"] == 1
     assert calls["n"] > 5  # re-assembled in every Picard iteration
 
