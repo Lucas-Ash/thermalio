@@ -1,8 +1,8 @@
 # Direction C: 2D non-Fourier / fractional phase change (hyperbolic & fractional Stefan)
 
-- **Status:** landed (PR1/PR2 solvers, expansion steps 1-3, computing-capability steps 4-8, technical report `direction_C_nonfourier_report.tex`)
+- **Status:** landed (PR1/PR2 solvers, expansion steps 1-3, computing-capability steps 4-8, technical report `direction_C_nonfourier_report.tex`; enthalpy-primary formulation + adaptive stepping follow-up, report `direction_CD_enthalpy_adjoint_report.tex`)
 - **Owner:** —
-- **Last updated:** 2026-06-15
+- **Last updated:** 2026-11-11
 
 ## Motivation & V&V question
 Phase change and the extended transport models are currently **not composable** in
@@ -180,13 +180,13 @@ manufactured exactness, runner smoke test).
 
 ## Additional computing capabilities that would help
 
-1. **Adaptive time stepping for stiff phase change.**  Hyperbolic and
-   fractional Stefan solves become difficult when the mushy-zone width is
-   narrow, latent heat is large, or `tau` is small.  The solvers would benefit
-   from automatic `dt` reduction on Picard/Anderson failure and conservative
-   step growth after successful nonlinear convergence.  This would make the
-   Direction C runners less hand-tuned and more suitable for broad parameter
-   sweeps.
+1. **Adaptive time stepping for stiff phase change.** *Landed* for the
+   enthalpy solver (`AdaptiveStepOptions`): extrapolation-based local error
+   estimate, elementary controller, Newton-failure step halving, exact output
+   times and sliver avoidance.  On a laser-pulse + cooling problem it is
+   10-120x more accurate than uniform steps at comparable Newton work.  Still
+   open: adaptivity for the apparent-capacity and fractional solvers, a PI
+   controller, and a true error estimator for `tau > 0`.
 
 2. **Accurate memory compression for fractional Stefan.**  The Caputo L1
    scheme sums the full time history.  Short-memory windowing (`memory_window`)
@@ -194,11 +194,14 @@ manufactured exactness, runner smoke test).
    history compression would keep accuracy at larger final times and finer
    resolutions.
 
-3. **Enthalpy-primary nonlinear formulation.**  The current apparent-capacity
-   approach solves in temperature and inserts the latent-heat spike through
-   `c(T)`.  An enthalpy-primary formulation could improve robustness and energy
-   accounting for narrow mushy zones, because latent heat is naturally linear in
-   enthalpy even when temperature changes slowly through the phase interval.
+3. **Enthalpy-primary nonlinear formulation.** *Landed* as
+   `heat_solver/enthalpy.py::EnthalpyStefanSolver` (Fourier and Cattaneo,
+   `tau H_tt + H_t - div(alpha grad T(H)) = Q`, Newton in `H` with line
+   search).  Energy conservative to <=1.5e-10; never failed in a 35-case
+   stiffness sweep where apparent-capacity Picard failed in 20.  Also found:
+   the three-level Cattaneo scheme (shared with `HyperbolicHeatSolver`) is
+   first order in time, not second; a Newmark-averaged variant is the next
+   step.  Still open: fractional enthalpy formulation.
 
 4. **Interface curvature and phase-fraction contours.**  Step 4 now extracts
    interface position, front speed, and mushy-zone thickness along a
@@ -231,6 +234,18 @@ manufactured exactness, runner smoke test).
    useful next increment would add Latin-hypercube or factorial designs with
    parallel execution, resumable jobs, and aggregate sensitivity plots so broad
    parameter studies can scale beyond the current lightweight matrix.
+
+## Enthalpy + adaptive follow-up (2026-11)
+
+- Code: `heat_solver/enthalpy.py` (`EnthalpyStefanSolver`, `SmoothPhaseChangeModel`,
+  `AdaptiveStepOptions`, `ApparentCapacityPicardSolver` baseline).
+- Studies: `direction_c_enthalpy_studies.py` ->
+  `test_plots/direction_C_nonfourier_phase_change/enthalpy_adaptive/`
+  (`enthalpy_mms_convergence.png`, `stiffness_robustness.png`,
+  `adaptive_pulse_cooling.png`, `summary.json`).
+- Tests: `tests/test_enthalpy.py`.
+- Write-up: `direction_CD_enthalpy_adjoint_report.tex` (formulation, proofs,
+  results).
 
 ## Expansion plots
 

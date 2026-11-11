@@ -1,0 +1,867 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{cleveref}
+
+\graphicspath{{./}}
+\numberwithin{equation}{section}
+
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{lemma}[proposition]{Lemma}
+\theoremstyle{remark}
+\newtheorem{remark}[proposition]{Remark}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\Dm}{\mathsf{D}}           % lumped mass matrix diag(|Omega_i|)
+\newcommand{\K}{\mathsf{K}}
+\newcommand{\Pobs}{\mathsf{P}}
+\newcommand{\capp}{c_{\mathrm{app}}}
+\newcommand{\figdirC}{test_plots/direction_C_nonfourier_phase_change/enthalpy_adaptive}
+\newcommand{\figdirD}{test_plots/direction_D_inverse_problems/adjoints}
+
+\title{Enthalpy-Primary Stiff Phase Change, Adaptive Time Stepping,\\
+and Discrete Adjoints Beyond Pennes Perfusion in Thermalio}
+\author{Thermalio research notes --- follow-up to Directions C and D}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents three capabilities added to Thermalio's polygonal
+finite-volume (FV) heat-transfer framework and the evidence that they are
+correct.  (i) An \emph{enthalpy-primary} formulation of the (optionally
+non-Fourier, Cattaneo) Stefan problem, solved by a globalized Newton method in
+the enthalpy variable; it is discretely energy conservative to round-off and
+its Jacobian is uniformly bounded in the latent heat and mushy-zone width.
+(ii) \emph{Adaptive time stepping} with an extrapolation-based local-error
+estimator, an elementary step-size controller, failure-driven step reduction
+and exact output-time landing.  (iii) \emph{Exact discrete adjoints} for
+conductivity, perfusion and source \emph{fields}, Robin heat-transfer
+coefficients, the Caputo L1 scheme (fractional order $\beta$), and the
+nonlinear enthalpy Stefan / Cattaneo--Stefan solver (latent heat, diffusivity,
+relaxation time) on variable time steps.  Manufactured solutions confirm
+first-order temporal and second-order spatial convergence; a 35-case stiffness
+sweep shows that the apparent-heat-capacity Picard scheme fails in 20 cases
+and violates energy conservation by up to $0.67$ energy units, while the
+enthalpy scheme never fails and conserves energy to $1.5\times10^{-10}$; on a
+laser-pulse/cooling problem adaptive stepping is $10$--$120\times$ more accurate
+than uniform stepping at comparable Newton work.  All six adjoints pass Taylor tests
+with second-order remainders; a $50$-parameter conductivity field and a
+latent-heat/diffusivity pair are recovered from sparse noisy sensors.
+\end{abstract}
+
+\tableofcontents
+
+%=============================================================================
+\section{Overview and summary of results}
+%=============================================================================
+
+Direction C of the Thermalio research backlog introduced apparent-heat-capacity
+models of non-Fourier and fractional phase change and identified, among its
+open items, \emph{adaptive time stepping for stiff phase change} and an
+\emph{enthalpy-primary nonlinear formulation}.  Direction D introduced an
+inverse-problem testbed whose only analytic gradient was a discrete adjoint
+for a scalar Pennes perfusion rate; it listed \emph{adjoints for diffusivity,
+source amplitudes, Robin boundary parameters, Cattaneo/fractional transport and
+nonlinear phase change} as the next step.  This report covers both follow-ups.
+
+\begin{table}[h]
+\centering
+\caption{Implemented components.  All live in the \texttt{heat\_solver} package.}
+\label{tab:components}
+\small
+\begin{tabular}{@{}p{0.5\textwidth}p{0.45\textwidth}@{}}
+\toprule
+Component & Location \\
+\midrule
+Smooth enthalpy law $H=cT+L\phi(T)$, safeguarded inverse & \texttt{enthalpy.SmoothPhaseChangeModel} \\
+Enthalpy-primary (Cattaneo--)Stefan solver, Newton & \texttt{enthalpy.EnthalpyStefanSolver} \\
+Adaptive step control & \texttt{enthalpy.AdaptiveStepOptions} \\
+Apparent-capacity Picard reference solver & \texttt{enthalpy.ApparentCapacityPicardSolver} \\
+Field / Robin / source adjoint (backward Euler) & \texttt{adjoint.LinearHeatAdjoint} \\
+Caputo L1 adjoint ($\beta,\alpha$) & \texttt{adjoint.fractional\_heat\_adjoint} \\
+Nonlinear enthalpy adjoint ($L,\alpha,\tau$) & \texttt{adjoint.enthalpy\_stefan\_adjoint} \\
+Taylor-remainder gradient test & \texttt{adjoint.taylor\_test} \\
+Studies / figures & \texttt{direction\_c\_enthalpy\_studies.py}\newline \texttt{direction\_d\_adjoint\_studies.py} \\
+Unit tests & \texttt{tests/test\_enthalpy.py}\newline \texttt{tests/test\_adjoint.py} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=============================================================================
+\section{Spatial discretization (common to all solvers)}
+%=============================================================================
+
+Let $\Omega\subset\R^2$ be partitioned into polygonal cells $\Omega_i$,
+$i=1,\dots,M$, with areas $|\Omega_i|$ and centroids $\bm x_i$.  Write
+$\Dm=\operatorname{diag}(|\Omega_i|)$.  For an isotropic conductivity
+$\kappa(\bm x)$ the two-point flux approximation (with the optional
+non-orthogonal gradient correction used throughout Thermalio) gives a
+diffusion matrix that is \emph{linear in the face conductivities}:
+\begin{equation}
+  \mathsf A(\kappa) = \sum_{e\in\mathcal E_{\mathrm{int}}} \kappa(\bm x_e)\, \mathsf G_e,
+  \qquad
+  (\mathsf G_e)_{ij}\ \text{geometric only},
+  \label{eq:A-decomposition}
+\end{equation}
+where $\bm x_e$ is the midpoint of interior face $e$.  On an orthogonal face
+$\mathsf G_e = \frac{|e|}{d_e}(\bm e_i-\bm e_j)(\bm e_i-\bm e_j)^{\!\top}$, with
+$d_e$ the normal distance between centroids, so $\mathsf A$ is symmetric with
+zero row sums and non-positive off-diagonals (an M-matrix up to its kernel).
+\Cref{eq:A-decomposition} is the key structural fact used by the field
+adjoint (\cref{sec:linear-adjoint}).
+
+Boundary conditions follow Thermalio's conventions.
+\begin{itemize}[leftmargin=*]
+\item \emph{Dirichlet}: the equations of boundary cells $\mathcal B$ (cells
+  touching $\partial\Omega$) are replaced by $u_i=g(\bm x_i,t)$; the
+  interior index set is $\mathcal I=\{1..M\}\setminus\mathcal B$.
+\item \emph{Prescribed inward flux}: $b_i=\sum_{f\subset\partial\Omega_i\cap\partial\Omega}|f|\,q_{\mathrm{in}}(\bm x_f,t)$
+  enters the right-hand side; $\mathcal I=\{1..M\}$.
+\item \emph{Robin} $\kappa\partial_n u + h(u-u_\infty)=0$: eliminating the
+  face value with the one-sided distance $d_f$ gives the face coefficient
+  \begin{equation}
+    \epsilon_f(\kappa_f,h) = \frac{\kappa_f h}{\kappa_f + h d_f},
+    \qquad
+    \mathsf B=\operatorname{diag}\Big(\textstyle\sum_f |f|\,\epsilon_f\Big),\quad
+    b_i = \textstyle\sum_f |f|\,\epsilon_f u_\infty .
+    \label{eq:robin}
+  \end{equation}
+\end{itemize}
+We write $\K=\mathsf A+\mathsf B$ for the full linear operator.
+
+%=============================================================================
+\section{Enthalpy-primary formulation of stiff phase change}
+\label{sec:enthalpy}
+%=============================================================================
+
+\subsection{Continuous model}
+
+The enthalpy method for phase change goes back to fixed-grid formulations such
+as \cite{voller1987,voller1991}, with convergence theory for the classical Stefan
+problem in \cite{elliott1987}; here it is combined with the Cattaneo flux law
+\cite{cattaneo1958,tzou2015} and with Thermalio's polygonal FV operators.
+
+Energy conservation and the Maxwell--Cattaneo--Vernotte flux law read
+\begin{equation}
+  \partial_t H + \nabla\cdot\bm q = Q, \qquad
+  \tau\,\partial_t\bm q + \bm q = -\kappa\nabla T,
+\end{equation}
+with volumetric enthalpy $H$, temperature $T$ and relaxation time $\tau\ge 0$.
+For time-independent $\kappa$ and $\tau$, applying $(1+\tau\partial_t)$ to the
+first equation and eliminating $\bm q$ yields the \emph{hyperbolic enthalpy
+equation}
+\begin{equation}
+  \tau\,\partial_{tt}H + \partial_t H - \nabla\cdot(\kappa\nabla T) = \tilde Q,
+  \qquad \tilde Q = Q + \tau\partial_t Q,
+  \qquad T = \mathcal T(H).
+  \label{eq:hyperbolic-enthalpy}
+\end{equation}
+($\tilde Q$ is what the solver receives as its source; for $\tau=0$ it is just
+$Q$.)  The constitutive enthalpy law is
+\begin{equation}
+  H(T) = cT + L\,\phi(T), \qquad \capp(T) = H'(T) = c + L\phi'(T),
+  \label{eq:enthalpy-law}
+\end{equation}
+with specific heat $c>0$, latent heat $L\ge0$ and liquid fraction
+$\phi:\R\to[0,1]$ nondecreasing.  Two laws are supported:
+\begin{align}
+  \text{ramp:}\quad & \phi(T)=\operatorname{clip}\big((T-T_s)/(T_\ell-T_s),0,1\big),
+  \label{eq:ramp}\\
+  \text{smooth:}\quad & \phi(T)=\tfrac12\big(1+\tanh((T-T_m)/\delta)\big),
+  \qquad \phi'=\tfrac{1}{2\delta}\operatorname{sech}^2\!\big(\tfrac{T-T_m}{\delta}\big).
+  \label{eq:tanh}
+\end{align}
+The capacity spike has height $\capp^{\max}=c+L/(2\delta)$ (smooth) or
+$c+L/(T_\ell-T_s)$ (ramp); the \emph{stiffness} of the problem is governed by
+$L/\delta$.
+
+\begin{remark}[Relation to the apparent-capacity Cattaneo--Stefan model]
+Thermalio's existing \texttt{HyperbolicStefanSolver} discretizes
+$\tau T_{tt}+\capp(T)T_t-\nabla\cdot(\kappa\nabla T)=Q$.  Since
+$H_{tt}=\capp(T)T_{tt}+\capp'(T)T_t^2$, the enthalpy model
+\eqref{eq:hyperbolic-enthalpy} differs by $\tau[(\capp-1)T_{tt}+\capp'T_t^2]$.
+Both coincide for $L=0$, $c=1$ (verified to $10^{-15}$ in the unit tests); the
+enthalpy form is the one that follows from conservation plus the Cattaneo law
+and is therefore the physically consistent extension.
+\end{remark}
+
+\subsection{Inverting the enthalpy law}
+
+Because $H$ is strictly increasing, $\mathcal T=H^{-1}$ exists and is
+Lipschitz:
+\begin{equation}
+  \mathcal T'(H) = \frac{1}{\capp(\mathcal T(H))}\in\Big(0,\frac1c\Big].
+  \label{eq:Tprime}
+\end{equation}
+For the ramp law $\mathcal T$ is piecewise linear and inverted in closed form.
+For the smooth law, $0\le\phi\le1$ gives the bracket
+$\mathcal T(H)\in[(H-L)/c,\;H/c]$; we start from the inverse of the equivalent
+ramp on $[T_m-\delta,T_m+\delta]$ and run a vectorized safeguarded Newton
+iteration that bisects whenever the Newton iterate leaves the current bracket
+or fails to halve $|H(T)-H|$ (``\texttt{rtsafe}'').  Plain Newton is
+\emph{not} sufficient: on the latent plateau it bounces between the two flat
+branches and converges only linearly (we observed $O(1)$ inversion errors
+before adding the halving test).  With the safeguard the inversion error is
+below $3\times10^{-13}$ for $\delta\in[10^{-4},0.5]$, $L\le 50$.
+
+\subsection{Variable-step time discretization}
+
+Let $t_{n+1}=t_n+k_n$.  We use the variable-step three-level operators
+\begin{align}
+  D^2_n H &= \frac{2}{k_n+k_{n-1}}\Big[\frac{H^{n+1}-H^n}{k_n}-\frac{H^n-H^{n-1}}{k_{n-1}}\Big],\\
+  D^1_n H &= \begin{cases}
+    (H^{n+1}-H^n)/k_n, & \tau=0\ \text{(backward Euler)},\\
+    (H^{n+1}-H^{n-1})/(k_n+k_{n-1}), & \tau>0\ \text{(centered)},
+  \end{cases}
+\end{align}
+and seek $H^{n+1}$ such that, on interior rows $i\in\mathcal I$,
+\begin{equation}
+  R^{n+1}(H^{n+1}) := \Dm\big[\tau D^2_nH + D^1_nH - \tilde Q^{n+1}\big]
+  + \K\,\mathcal T(H^{n+1}) - b^{n+1} = 0,
+  \label{eq:residual}
+\end{equation}
+and $R^{n+1}_i = H^{n+1}_i - H(g_i^{n+1})$ on Dirichlet rows.  Collecting
+coefficients,
+\begin{equation}
+  \tau D^2_nH + D^1_nH = \gamma_n H^{n+1} - p_n H^n - s_n H^{n-1},
+  \label{eq:gps}
+\end{equation}
+\begin{equation}
+  \gamma_n = \frac{2\tau}{S_nk_n}+\begin{cases}\frac1{k_n}\\[2pt] \frac1{S_n}\end{cases}\!,\quad
+  p_n = \frac{2\tau}{S_n}\Big(\frac1{k_n}+\frac1{k_{n-1}}\Big)+\begin{cases}\frac1{k_n}\\[2pt]0\end{cases}\!,\quad
+  s_n = -\frac{2\tau}{S_nk_{n-1}}+\begin{cases}0\\[2pt]\frac1{S_n}\end{cases}\!,
+  \label{eq:coefficients}
+\end{equation}
+with $S_n=k_n+k_{n-1}$ and upper/lower cases for $\tau=0$ / $\tau>0$.  For
+$\tau>0$ the first step needs $H^{-1}$; with $v^0=\capp(T^0)\,\partial_tT^0$ and
+$a^0=\big(\tilde Q^0+\Dm^{-1}(b^0-\K T^0)-v^0\big)/\tau$ (the PDE at $t_0$),
+\begin{equation}
+  H^{-1} = H^0 - k_0 v^0 + \tfrac12 k_0^2 a^0,\qquad k_{-1}:=k_0 .
+  \label{eq:startup}
+\end{equation}
+On uniform steps and $L=0$ the scheme is \emph{identical} to the existing
+\texttt{ReactionDiffusionHeatSolver} (backward Euler) and
+\texttt{HyperbolicHeatSolver} (three-level), which we verify to machine
+precision.
+
+\begin{remark}[Temporal order of the three-level Cattaneo scheme]
+\label{rem:order}
+$D^2_n$ and the centered $D^1_n$ are second-order accurate at $t_n$, but
+$\K T$ and $\tilde Q$ are evaluated at $t_{n+1}$, so the truncation error is
+$k(\K\,\partial_tT-\partial_t\tilde Q)+O(k^2)$: the scheme is \emph{first order}
+in time.  We measured order $1.01$--$1.03$ for the pre-existing
+\texttt{HyperbolicHeatSolver} (whose documentation called it second order; its
+regression test refines $h$ and $k$ together and only checks error reduction).
+The documentation has been corrected.  A second-order variant would evaluate
+$\K$ at the weighted average $\frac14(T^{n+1}+2T^n+T^{n-1})$ (Newmark
+$\beta=\frac14$); this is left as future work.
+\end{remark}
+
+\subsection{Newton's method and why the enthalpy variable is robust}
+
+The Jacobian of \eqref{eq:residual} is
+\begin{equation}
+  \mathsf J_n(H) = \gamma_n\Dm + \K\,\mathsf S(H), \qquad
+  \mathsf S(H)=\operatorname{diag}\big(\mathcal T'(H_i)\big)
+  =\operatorname{diag}\big(1/\capp(T_i)\big),
+  \label{eq:jacobian}
+\end{equation}
+with identity rows on $\mathcal B$.  Newton updates
+$\mathsf J_n\delta=-R$ are globalized by backtracking on $\norm{R}_2$
+(Armijo constant $10^{-4}$); iterations stop when
+$\norm{R}_\infty\le 10^{-10}\norm{\gamma_n\Dm H}_\infty$ or
+$\norm{\delta}_\infty\le10^{-10}\max(1,\norm{H}_\infty)$.
+
+\begin{proposition}[Well-posed, $L$-uniformly bounded Newton systems]
+Assume $\K$ is a Z-matrix with non-negative row sums (true for two-point
+fluxes on $\K$-orthogonal meshes with Dirichlet, flux or Robin closures).
+Then for every $H$ the Jacobian \eqref{eq:jacobian} is nonsingular and
+\begin{equation}
+  \norm{\mathsf J_n(H)-\gamma_n\Dm}_\infty \le \frac{\norm{\K}_\infty}{c},
+  \label{eq:bounded}
+\end{equation}
+independently of $L$ and of the mushy-zone width.
+\end{proposition}
+\begin{proof}
+$\mathsf J_n=(\gamma_n\Dm\mathsf S^{-1}+\K)\mathsf S$.  The first factor is a
+Z-matrix whose diagonal dominates its off-diagonal row sums strictly (because
+$\gamma_n|\Omega_i|\capp>0$ is added to a weakly diagonally dominant row), hence a
+nonsingular M-matrix; $\mathsf S$ is a positive diagonal matrix.  The bound
+follows from $0<\mathcal T'\le 1/c$ in \eqref{eq:Tprime}.
+\end{proof}
+
+By contrast, the temperature-primary (apparent-capacity) update
+$\Dm\capp(T^{k})(T^{k+1}-T^n)/k_n+\K T^{k+1}=\dots$ has a matrix diagonal of size
+$|\Omega_i|\capp/k_n=O(L/\delta)$ that \emph{switches on and off} as cells enter
+and leave the mushy interval, and the nonlinearity $\capp(T)$ has Lipschitz
+constant $O(L/\delta^2)$.  In $H$ the nonlinearity $\mathcal T$ has Lipschitz
+constant $1/c$ and becomes \emph{weaker} (flatter) in the mushy zone.
+
+\begin{lemma}[Non-existence of an apparent-capacity fixed point for the ramp law]
+\label{lem:nonexistence}
+Consider one cell, $\tau=0$, ramp law \eqref{eq:ramp} with $w=T_\ell-T_s>0$,
+$L>0$, and the scalar apparent-capacity equation $f(T):=\capp(T)(T-T^n)=r$ with
+$T^n<T_s$.  The equation has no solution for
+\[
+  r\in\Big(c(T_s-T^n),\ \min\big\{(c+L/w)(T_s-T^n),\ c(T_\ell-T^n)\big\}\Big],
+\]
+a non-empty interval.
+\end{lemma}
+\begin{proof}
+On the solid branch $T<T_s$, $f(T)=c(T-T^n)<c(T_s-T^n)$; on the mushy branch
+$T\in[T_s,T_\ell]$, $f(T)=(c+L/w)(T-T^n)\ge(c+L/w)(T_s-T^n)$; on the liquid
+branch $T>T_\ell$, $f(T)=c(T-T^n)>c(T_\ell-T^n)$.  None of these sets meets the
+stated interval.
+\end{proof}
+The enthalpy equation $H(T)-H(T^n)=r$ has a unique solution for every $r$ since
+$H$ is continuous and strictly increasing.  \Cref{lem:nonexistence} is
+consistent with our observation that the apparent-capacity Picard iteration of
+the polygonal solver failed at \emph{every} time step we tried
+($10^{-2}$ down to $5\times10^{-4}$) on a hot-wall melting problem with the
+ramp law; the comparison in \cref{sec:results-stiff} therefore
+uses the smooth law, for which $f$ is continuous and apparent-capacity
+solutions exist.
+
+\subsection{Exact discrete energy conservation}
+
+\begin{proposition}[Discrete energy balance, $\tau=0$]
+Let $E^n=\sum_{i\in\mathcal I}|\Omega_i|H_i^n$.  Every accepted step satisfies
+\begin{equation}
+  E^{n+1}-E^n = k_n\sum_{i\in\mathcal I}\Big(|\Omega_i|Q_i^{n+1}+b_i^{n+1}-(\K T^{n+1})_i\Big)
+  + k_n\sum_{i\in\mathcal I}R_i^{n+1}.
+  \label{eq:energy}
+\end{equation}
+For flux/insulated boundaries $\sum_i(\mathsf A T)_i=0$, so the change of total
+enthalpy equals the injected energy $k_n\sum_i(|\Omega_i|Q_i+b_i)$ up to the
+Newton residual.  For Dirichlet boundaries $-\sum_{\mathcal I}(\mathsf AT)_i$ is
+exactly the conductive flux from the boundary band into the interior.
+\end{proposition}
+\begin{proof}
+Sum \eqref{eq:residual} (with $\tau=0$) over $i\in\mathcal I$ and multiply by $k_n$.
+\end{proof}
+The solver records the per-step balance residual (the last term) and the
+cumulative input; in all experiments the residual is $\le1.5\times10^{-10}$ and
+typically $10^{-17}$.  This holds for \emph{any} step sequence, so adaptivity
+never compromises conservation.  For the apparent-capacity scheme the same
+bookkeeping exposes a defect
+\begin{equation}
+\begin{aligned}
+  \mathcal E^n &= \sum_{i\in\mathcal I}|\Omega_i|\Big[H(T_i^{n+1})-H(T_i^n)-\capp(T_i^{n+1})(T_i^{n+1}-T_i^n)\Big]\\
+  &= \sum_{i\in\mathcal I}|\Omega_i|\int_{T_i^n}^{T_i^{n+1}}\!\!\big(\capp(s)-\capp(T_i^{n+1})\big)\dd s,
+\end{aligned}
+  \label{eq:defect}
+\end{equation}
+which is $O(L|\Omega_i|)$ whenever a cell crosses a substantial part of the mushy
+interval in one step (``latent-heat jumping'').
+
+%=============================================================================
+\section{Adaptive time stepping}
+\label{sec:adaptive}
+%=============================================================================
+
+\subsection{Local error estimator}
+
+For backward Euler on $H'=F(t,H)$ the local error is
+$e_{n+1}=H^{n+1}-H(t_{n+1})=\tfrac12k_n^2H''+O(k^3)$.  The linear extrapolant
+$H^{p}=H^n+\frac{k_n}{k_{n-1}}(H^n-H^{n-1})$ satisfies
+$H(t_{n+1})-H^{p}=\frac12k_n(k_n+k_{n-1})H''+O(k^3)$.  Subtracting,
+$H^{n+1}-H^{p}=\frac12k_n(2k_n+k_{n-1})H''+O(k^3)$, hence
+\begin{equation}
+  \widehat e_{n+1} = \frac{k_n}{2k_n+k_{n-1}}\big(H^{n+1}-H^{p}\big)
+  = e_{n+1}+O(k^3).
+  \label{eq:lte}
+\end{equation}
+The estimator is exact for quadratic-in-time enthalpy histories (unit test).  It
+costs nothing beyond the step itself, and $H^p$ also serves as the Newton
+initial guess.
+
+\subsection{Controller}
+
+With component-wise tolerances, the scaled error is
+\begin{equation}
+  \mathrm{err}_{n+1} = \max_i
+  \frac{|\widehat e_{n+1,i}|}{\mathrm{atol}+\mathrm{rtol}\,\max(|H_i^{n+1}|,|H_i^n|)} .
+\end{equation}
+(The max norm is the default because phase fronts are localized; an RMS norm
+is available.)  The step is accepted iff $\mathrm{err}\le1$, and the next step is
+\begin{equation}
+  k_{\mathrm{new}} = k_n\,\min\!\Big(f_{\max},\ \max\big(f_{\min},\ \rho\,\mathrm{err}^{-1/2}\big)\Big),
+  \qquad \rho=0.9,\ f_{\min}=0.2,\ f_{\max}=2,
+\end{equation}
+the elementary (I-) controller for a method with local error $O(k^2)$
+\cite{hairer1993,soderlind2002}.  Further rules:
+\begin{enumerate}[leftmargin=*]
+\item \emph{Failure-driven reduction}: if Newton fails, the step is retried
+  with $k\leftarrow k/2$ (bounded by $k_{\min}$ and a maximum rejection count).
+\item \emph{Output times / breakpoints} are hit exactly (like
+  \texttt{tstop} in CVODE).  Forcing discontinuities (pulse switch-off) should
+  be listed as output times so that a step never straddles them.
+\item \emph{Sliver avoidance}: if $k<t_{\mathrm{out}}-t<2k$ the remaining
+  interval is split into two equal steps.  Without this rule the controller
+  produced $3\times10^{-6}$ steps just before output times.
+\item The first step has no estimate and is accepted on Newton convergence.
+\item For $\tau>0$, \eqref{eq:lte} is used as a curvature indicator for the
+  three-level scheme (which is first order on variable steps,
+  \cref{rem:order}), not as an asymptotically exact error estimate.
+\end{enumerate}
+
+%=============================================================================
+\section{Discrete adjoints}
+\label{sec:adjoints}
+%=============================================================================
+
+\subsection{General framework}
+
+Let the time-stepping scheme be $R^n(y^n,y^{n-1},y^{n-2};\theta)=0$,
+$n=1..N$, with given $y^0(\theta)$, $y^{-1}(\theta)$, and the misfit
+\begin{equation}
+  \mathcal J(\theta) = \frac12\sum_{m\in\mathcal O}\big(\Pobs\,\eta(y^m)-d^m\big)^{\!\top}
+  \mathsf W^m\big(\Pobs\,\eta(y^m)-d^m\big),
+  \label{eq:misfit}
+\end{equation}
+where $\Pobs$ selects sensor cells, $\mathsf W^m$ are weights and $\eta$ maps
+the state to the observed quantity ($\eta(y)=y$, or $\eta(H)=\mathcal T(H)$ for
+the enthalpy solver).  With the Lagrangian
+$\mathcal L=\mathcal J-\sum_n\lambda_n^{\!\top}R^n$, stationarity with respect to
+$y^m$ gives the backward recurrence ($\lambda_{N+1}=\lambda_{N+2}=0$)
+\begin{equation}
+  \Big(\frac{\partial R^m}{\partial y^m}\Big)^{\!\top}\lambda_m
+  = \frac{\partial\mathcal J}{\partial y^m}
+  - \Big(\frac{\partial R^{m+1}}{\partial y^m}\Big)^{\!\top}\lambda_{m+1}
+  - \Big(\frac{\partial R^{m+2}}{\partial y^m}\Big)^{\!\top}\lambda_{m+2},
+  \label{eq:adjoint-recurrence}
+\end{equation}
+and the total derivative
+\begin{equation}
+  \frac{\dd\mathcal J}{\dd\theta} = \frac{\partial\mathcal J}{\partial\theta}
+  - \sum_{n=1}^N\lambda_n^{\!\top}\frac{\partial R^n}{\partial\theta}
+  - \Big(\lambda_1^{\!\top}\frac{\partial R^1}{\partial y^0}+\lambda_2^{\!\top}\frac{\partial R^2}{\partial y^0}\Big)\frac{\dd y^0}{\dd\theta}
+  - \lambda_1^{\!\top}\frac{\partial R^1}{\partial y^{-1}}\frac{\dd y^{-1}}{\dd\theta}.
+  \label{eq:gradient}
+\end{equation}
+One forward and one backward sweep give all components, so the cost does not
+depend on $\dim\theta$ \cite{giles2000,gunzburger2003}.  Because we
+differentiate the discrete scheme (``discretize-then-optimize''), the gradient
+is the exact derivative of the computed $\mathcal J$, which is what
+gradient-based optimizers need and what a Taylor test can check to round-off
+\cite{farrell2013}.  For Dirichlet rows $\partial R_i^n/\partial y^{n-1}=0$, which
+we implement with the interior mask $\Dm_{\mathcal I}=\Dm\,\mathrm{diag}(\mathbf 1_{\mathcal I})$.
+
+\paragraph{Taylor test.}  For a random direction $d$,
+$r_0(h)=|\mathcal J(\theta+hd)-\mathcal J(\theta)|=O(h)$ while
+$r_1(h)=|\mathcal J(\theta+hd)-\mathcal J(\theta)-h\nabla\mathcal J\cdot d|=O(h^2)$
+\emph{if and only if} the gradient is correct; any error in $\nabla\mathcal J$
+degrades $r_1$ to $O(h)$.
+
+\subsection{Linear parabolic adjoint: conductivity, perfusion and source fields, Robin coefficient}
+\label{sec:linear-adjoint}
+
+The model $u_t-\nabla\cdot(\kappa\nabla u)+ku=Q$ is parameterized by
+\begin{equation}
+  \kappa(\bm x)=\sum_{j}c_j\varphi_j(\bm x),\quad
+  k(\bm x)=\sum_j p_j\psi_j(\bm x),\quad
+  Q(\bm x,t)=Q_0(\bm x,t)+g(t)\sum_j s_j\chi_j(\bm x),\quad h\ (\text{Robin}).
+\end{equation}
+Backward Euler with step $k$ gives
+\begin{equation}
+  R^n = (\Dm+k\K(\theta))u^n-\Dm u^{n-1}-k\big(\Dm Q^n(\theta)+b^n(\theta)\big),
+  \qquad \K = \mathsf A(\kappa)+\Dm\operatorname{diag}(k(\bm x_i))+\mathsf B(\kappa,h),
+\end{equation}
+and \eqref{eq:adjoint-recurrence} becomes a single \emph{linear, constant}
+backward recurrence (one LU factorization of the transpose is reused):
+\begin{equation}
+  (\Dm+k\K)^{\!\top}_{\mathcal B}\lambda_m = \Pobs^{\!\top}\mathsf W^m r^m + \Dm_{\mathcal I}\lambda_{m+1},
+  \qquad r^m=\Pobs u^m-d^m,
+\end{equation}
+where the subscript $\mathcal B$ denotes Dirichlet rows replaced by identity rows.
+With $\hat\lambda_n=\mathbf 1_{\mathcal I}\odot\lambda_n$, the gradient
+components follow from \eqref{eq:A-decomposition}:
+\begin{align}
+  \sigma_e &:= -k\sum_{n}\hat\lambda_n^{\!\top}\mathsf G_e u^n
+  \quad\text{(edge sensitivity)},\qquad
+  \frac{\partial\mathcal J}{\partial c_j} = \sum_{e}\varphi_j(\bm x_e)\,\sigma_e
+  + \sum_{f\subset\partial\Omega}\varphi_j(\bm x_f)\,\omega_f\,\frac{\partial\epsilon_f}{\partial\kappa_f},
+  \label{eq:edge-sensitivity}\\
+  \frac{\partial\mathcal J}{\partial p_j} &= -k\sum_n\sum_i \hat\lambda_{n,i}|\Omega_i|\psi_j(\bm x_i)u_i^n,
+  \qquad
+  \frac{\partial\mathcal J}{\partial s_j} = k\sum_n g(t_n)\sum_i\hat\lambda_{n,i}|\Omega_i|\chi_j(\bm x_i),\\
+  \frac{\partial\mathcal J}{\partial h} &= \sum_f \omega_f\frac{\partial\epsilon_f}{\partial h},
+  \qquad
+  \omega_f := -k\sum_n\hat\lambda_{n,i(f)}|f|\big(u^n_{i(f)}-u_\infty\big),
+\end{align}
+with, from \eqref{eq:robin},
+\begin{equation}
+  \frac{\partial\epsilon_f}{\partial\kappa_f}=\frac{h^2d_f}{(\kappa_f+hd_f)^2},\qquad
+  \frac{\partial\epsilon_f}{\partial h}=\frac{\kappa_f^2}{(\kappa_f+hd_f)^2}.
+\end{equation}
+The edge sensitivities $\sigma_e$ are accumulated once per time step with a
+single scatter over the sparse structure of $\mathsf A$; any conductivity
+basis then costs only one dense product $\Phi^{\!\top}\sigma$.  The gradient
+with respect to \emph{every face conductivity} is therefore available at no
+extra cost.
+
+\subsection{Fractional (Caputo L1) adjoint}
+
+The L1 discretization of the Caputo derivative \cite{lin2007} is the scheme of
+\texttt{FractionalHeatSolver}.
+
+The L1 scheme with $\varsigma=k^{-\beta}/\Gamma(2-\beta)$ and weights
+$b_\ell=(\ell+1)^{1-\beta}-\ell^{1-\beta}$ reads
+\begin{equation}
+  R^m = \varsigma\Dm\sum_{j=0}^m c^{(m)}_ju^j + \K u^m - \Dm Q^m - b^m,
+  \qquad c^{(m)}_j = b_{m-j}\,[j\ge1] - b_{m-1-j}\,[j\le m-1],
+\end{equation}
+so $c^{(m)}_m=1$ and every residual depends on the whole history.  The adjoint
+inherits the memory, now \emph{forward} in index:
+\begin{equation}
+  (\varsigma\Dm+\K)^{\!\top}_{\mathcal B}\lambda_m
+  = \Pobs^{\!\top}\mathsf W^mr^m - \varsigma\Dm_{\mathcal I}\sum_{\ell=m+1}^{N}c^{(\ell)}_m\lambda_\ell .
+\end{equation}
+Using $\partial_\beta\varsigma=\varsigma\,(-\ln k+\psi(2-\beta))$ ($\psi$ the
+digamma function) and
+$\partial_\beta b_\ell=-(\ell+1)^{1-\beta}\ln(\ell+1)+\ell^{1-\beta}\ln\ell$,
+\begin{equation}
+  \frac{\partial\mathcal J}{\partial\beta}=-\sum_{m=1}^N\hat\lambda_m^{\!\top}\Dm\sum_{j=0}^m
+  \big(\partial_\beta\varsigma\,c_j^{(m)}+\varsigma\,\partial_\beta c_j^{(m)}\big)u^j,
+  \qquad
+  \frac{\partial\mathcal J}{\partial\alpha}=-\sum_m\hat\lambda_m^{\!\top}\mathsf A_1u^m,
+\end{equation}
+where $\mathsf A=\alpha\mathsf A_1$.  Forward and adjoint sweeps cost
+$O(N^2M)$, like the forward L1 solver.
+
+\subsection{Nonlinear enthalpy (Stefan / Cattaneo--Stefan) adjoint}
+
+Here $y^n=H^n$, the residual is \eqref{eq:residual}, and the observation is
+$\eta(H)=\mathcal T(H)$.  From \eqref{eq:gps},
+$\partial R^{m+1}/\partial H^m=-p_{m+1}\Dm_{\mathcal I}$ and
+$\partial R^{m+2}/\partial H^m=-s_{m+2}\Dm_{\mathcal I}$, so
+\eqref{eq:adjoint-recurrence} becomes
+\begin{equation}
+  \mathsf J_m(H^m)^{\!\top}\lambda_m
+  = \mathsf S(H^m)\,\Pobs^{\!\top}\mathsf W^mr^m
+  + p_{m+1}\Dm_{\mathcal I}\lambda_{m+1}+s_{m+2}\Dm_{\mathcal I}\lambda_{m+2},
+  \qquad r^m=\Pobs\mathcal T(H^m)-d^m,
+  \label{eq:enthalpy-adjoint}
+\end{equation}
+with the Newton Jacobian \eqref{eq:jacobian} at the converged state.  The
+coefficients $(\gamma_m,p_m,s_m)$ are those of the \emph{accepted} steps, so
+the recurrence is valid on adaptive step sequences (the step-size selection is
+held fixed, the standard convention for adaptive discrete adjoints).
+
+\paragraph{Latent heat.}  At fixed $H$, implicit differentiation of
+$H=cT+L\phi(T)$ gives
+\begin{equation}
+  \frac{\partial\mathcal T}{\partial L}\Big|_H = -\frac{\phi(T)}{\capp(T)} .
+  \label{eq:dTdL}
+\end{equation}
+The contributions to $\dd\mathcal J/\dd L$ are: the explicit observation term
+$\sum_m (\Pobs^{\!\top}\mathsf W^mr^m)^{\!\top}\partial_L\mathcal T(H^m)$; the
+residual term $-\sum_n\lambda_n^{\!\top}\K\,\partial_L\mathcal T(H^n)$ on
+interior rows and $+\sum_n\lambda_{n,\mathcal B}^{\!\top}\phi(g^n_{\mathcal B})$ on
+Dirichlet rows (from $R_i=H_i-H(g_i;L)$); the initial-data term with
+$\dd H^0/\dd L=\phi(T^0)$; and, for $\tau>0$, the start-up term with
+\begin{equation}
+  \frac{\dd H^{-1}}{\dd L} = \phi(T^0) - k_0\,\phi'(T^0)\,\partial_tT^0\Big(1+\frac{k_0}{2\tau}\Big).
+\end{equation}
+
+\paragraph{Diffusivity.}  $\partial R^n/\partial\alpha=\mathsf A_1\mathcal T(H^n)$
+(interior rows) and $\dd H^{-1}/\dd\alpha=-\frac{k_0^2}{2\tau}\Dm^{-1}\mathsf A_1T^0$.
+
+\paragraph{Relaxation time.}  $\partial R^n/\partial\tau=\Dm D^2_{n-1}H$
+(interior rows) and $\dd H^{-1}/\dd\tau=-\frac{k_0^2}{2\tau}a^0$.
+
+With $L=0$ this is the discrete adjoint of the Cattaneo heat equation; with
+$\tau=0$ it is the adjoint of the classical enthalpy method.
+
+%=============================================================================
+\section{Numerical results}
+\label{sec:results}
+%=============================================================================
+
+All figures are produced by the two study scripts; numbers quoted below are
+read from their \texttt{summary.json} files.
+
+\subsection{Manufactured-solution verification of the enthalpy solver}
+
+We take the traveling front $T=A\tanh((x-x_0-st)/w)$ with $A=0.8$, $w=0.18$,
+$s=0.45$, $x_0=-0.35$ on $[-1,1]\times[-0.1,0.1]$, the smooth law
+\eqref{eq:tanh} with $L=2$, $\delta=0.25$, $\kappa=0.08$, and the source
+\[
+  \tilde Q = \tau H_{tt}+H_t-\kappa T_{xx},\qquad
+  H_t=\capp T_t,\quad H_{tt}=\capp T_{tt}+L\phi''(T)T_t^2,
+\]
+with exact Dirichlet data and exact $\partial_tT^0$ for the start-up level.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirC/enthalpy_mms_convergence.png}
+\caption{Manufactured traveling front.  (a) Temporal self-convergence on an
+$80\times8$ mesh: order $1.04$ ($\tau=0$) and $1.06$ ($\tau=0.05$).
+(b) Convergence to the exact solution with $k\propto h^2$: order $1.95$ and
+$2.10$.  (c) Computed and exact fronts with the liquid fraction.}
+\label{fig:mms}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Observed orders (finest pair) for the enthalpy solver.}
+\label{tab:mms}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+& \multicolumn{2}{c}{temporal, $\max|T_k-T_{\mathrm{ref}}|$} & \multicolumn{2}{c}{spatial, $\max|T_h-T|$} \\
+& finest error & order & finest error & order \\
+\midrule
+Fourier ($\tau=0$) & $8.70\times10^{-4}$ & $1.04$ & $5.74\times10^{-5}$ & $1.95$ \\
+Cattaneo ($\tau=0.05$) & $2.34\times10^{-3}$ & $1.06$ & $2.86\times10^{-4}$ & $2.10$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Robustness for stiff mushy zones and energy conservation}
+\label{sec:results-stiff}
+
+A $20\times20$ unit square starts solid ($T=-0.5$) and is melted by a hot
+Dirichlet wall ($T=1$ at $x<0.05$), $\kappa=0.05$, $L=5$, $t_f=0.5$.  We sweep
+the smooth law's half-width $\delta\in\{0.2,\dots,0.002\}$ (capacity spikes
+$13.5$ to $1251$) and $k\in\{0.002,\dots,0.05\}$, and compare the enthalpy
+Newton solver with an apparent-capacity Picard solver given every advantage
+(Anderson depth 5, relaxation 0.7, up to 100 iterations).
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirC/stiffness_robustness.png}
+\caption{(a)--(c) Failed-step fraction and iterations per step over the
+$(\delta,\Delta t)$ grid.  (d) Discrete energy defect \eqref{eq:defect} vs the
+enthalpy balance residual \eqref{eq:energy}.  (e) Melt-front position: the
+apparent-capacity front races ahead because its energy defect creates spurious
+latent heat.  (f) Wall time.}
+\label{fig:stiff}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Stiffness sweep summary (35 runs per method).}
+\label{tab:stiff}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+& apparent capacity (Picard+Anderson) & enthalpy (Newton) \\
+\midrule
+runs with non-converged steps & 20 / 35 (up to 60\% of steps) & 0 / 35 \\
+iterations per step & 4.1 -- 68.7 & 1.2 -- 3.5 \\
+$|\sum_n\text{energy defect}|$ & $3.4\times10^{-4}$ -- $0.67$ & $\le 1.5\times10^{-10}$ \\
+front error, $\delta=0.01$, $\Delta t=0.01$ & $4.9\times10^{-2}$ & $3.3\times10^{-3}$ \\
+total wall time (sum over sweep) & $3.1\times$ & $1\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Adaptive time stepping on a multi-scale pulse problem}
+
+A $40\times8$ strip $[0,1]\times[0,0.2]$ at $T=-0.3$, ramp law with
+$T_s=-0.01$, $T_\ell=0.01$, $L=4$, receives an ultrafast flux pulse
+$q_{\mathrm{in}}=25$ for $t<0.02$ on its left wall and then cools until $t=2$
+(time scales differ by two orders of magnitude).  Errors are measured as the
+maximum over 61 output times of $\norm{T-T_{\mathrm{ref}}}_\infty$ against a
+uniform run with $k=2\times10^{-5}$; work is the total number of Newton
+iterations including rejected steps.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirC/adaptive_pulse_cooling.png}
+\caption{(a) Accepted step sizes ($\mathrm{rtol}=10^{-2}$): small during the
+pulse and at its switch-off, growing by two orders of magnitude during cooling
+(capped at the output spacing).  (b) Wall temperature and melt front vs the
+reference.  (c) Work--precision.  (d) Total enthalpy gain equals the
+cumulative injected energy; per-step balance residuals are $O(10^{-18})$.}
+\label{fig:adaptive}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Work--precision data (\cref{fig:adaptive}c).}
+\label{tab:adaptive}
+\begin{tabular}{@{}rrr@{\qquad}rrrr@{}}
+\toprule
+\multicolumn{3}{c}{uniform} & \multicolumn{4}{c}{adaptive} \\
+steps & Newton its & error & rtol & accepted / rejected & Newton its & error \\
+\midrule
+200 & 243 & 4.58 & $10^{-1}$ & 87 / 6 & 108 & 0.873 \\
+400 & 417 & 4.30 & $10^{-2}$ & 155 / 15 & 177 & 0.262 \\
+800 & 831 & 2.36 & $3\times10^{-3}$ & 227 / 20 & 252 & 0.103 \\
+1600 & 1659 & 1.25 & $10^{-3}$ & 351 / 23 & 379 & 0.0361 \\
+3200 & 3254 & 0.638 & $3\times10^{-4}$ & 611 / 31 & 646 & 0.0254 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At comparable work ($\approx$400 Newton iterations) the adaptive error is
+$120\times$ smaller; the adaptive run at $\mathrm{rtol}=3\times10^{-4}$ is
+$25\times$ more accurate than the finest uniform run with $5\times$ less work.
+We also observed (and the unit tests document) that on a \emph{smooth,
+single-scale} diffusive problem per-step error control gives no advantage at
+equal step count: early errors are damped by diffusion, so spending steps on
+the initial transient does not pay off at the final time.  Adaptivity is
+valuable precisely for the multi-scale forcing of laser processing.
+
+\subsection{Adjoint verification and cost}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirD/adjoint_taylor_tests.png}
+\caption{Taylor tests for all six adjoints.  Dashed: $r_0=O(h)$; solid:
+$r_1=O(h^2)$.  The finest-pair rates of $r_1$ are $2.00$ for all six adjoints.}
+\label{fig:taylor}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{\figdirD/adjoint_cost_scaling.png}
+\caption{(a) Wall time per gradient on a 1024-cell mesh with 50 steps: the
+adjoint costs $\approx0.02$\,s for 1 to 144 conductivity parameters; central
+differences grow linearly.  (b) Relative difference to central differences is
+$10^{-9}$--$10^{-8}$ (finite-difference truncation).}
+\label{fig:cost}
+\end{figure}
+
+The unit tests additionally check (i) the enthalpy adjoint against central
+differences to relative accuracy $10^{-5}$ for $\tau\in\{0,0.03\}$, Dirichlet and
+flux boundaries and a non-zero initial rate $\partial_tT^0$, (ii) that the
+field-adjoint forward solver reproduces \texttt{ReactionDiffusionHeatSolver} and
+the L1 adjoint's forward solver reproduces \texttt{FractionalHeatSolver} to
+$10^{-12}$, and (iii) that the gradient vanishes at the true parameters for
+noise-free data.
+
+\subsection{Conductivity-field inversion}
+
+The truth is $\kappa=0.02+0.03\,G_{(0.32,0.66),0.12}+0.02\,G_{(0.7,0.3),0.1}$
+(Gaussian inclusions).  It is \emph{not} in the span of the inversion basis
+(a constant plus 49 Gaussians of width $0.08$ on a $7\times7$ grid), so this is
+not an ``inverse crime''.  Four heater experiments are observed by 49 sensors
+at 4 times with $1\%$ Gaussian noise.  We minimize the scaled misfit plus a
+smoothness penalty $\frac{\beta}{2}\norm{\mathsf D c}^2/c_{\mathrm{ref}}^2$
+($\mathsf D$ the grid difference operator on the bump coefficients,
+$\beta=2\times10^{-4}$) with L-BFGS-B \cite{byrd1995} (see \cite{vogel2002} for the regularization
+background), starting from a uniform
+$\kappa=0.03$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirD/conductivity_field_inversion.png}
+\caption{(a) True conductivity, sensors and heaters; (b) recovered field;
+(c) error; (d) optimizer convergence.  The relative $L^2$ error falls from
+$34.9\%$ (initial) to $8.2\%$ after 42 L-BFGS-B iterations (48 gradient
+evaluations, a few seconds).}
+\label{fig:field}
+\end{figure}
+
+\subsection{Nonlinear parameter recovery}
+
+Five thermocouples in a $24\times12$ slab record 30 temperature samples while a
+boundary flux pulse melts it (enthalpy Stefan, smooth law, $\delta=0.05$).  From
+$1\%$ noise and the initial guess $(L,\alpha)=(0.8,0.09)$, L-BFGS-B with the
+enthalpy adjoint recovers $(2.0023,\,0.04998)$ against the truth $(2,\,0.05)$
+in 13 iterations.  The objective profiles in $\tau$ (Cattaneo--Stefan) and
+$\beta$ (Caputo L1) show the adjoint derivatives as exact tangents.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\figdirD/nonlinear_parameter_recovery.png}
+\caption{(a) Misfit landscape in $(L,\alpha)$ with accepted L-BFGS-B iterates.
+(b) Thermocouple data, initial prediction and fit.  (c) Adjoint field
+$\lambda$, localized at the sensors and propagated backwards in time.
+(d) Relative parameter error vs noise level (3 noise seeds); noise-free
+recovery is exact to optimizer tolerance and errors grow roughly linearly with
+the noise.  (e), (f) Objective profiles with adjoint tangent lines.}
+\label{fig:nonlinear}
+\end{figure}
+
+%=============================================================================
+\section{Limitations and next steps}
+%=============================================================================
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Temporal order.}  Backward Euler and the three-level Cattaneo
+  scheme are first order in time (\cref{rem:order}).  A Newmark-averaged or
+  BDF2 variant with an embedded error estimate would give second order; the
+  adjoint framework \eqref{eq:adjoint-recurrence} already handles three-level
+  residuals.
+\item \textbf{Controller.}  The elementary controller is adequate here; a PI
+  controller \cite{soderlind2002} would smooth the step sequence after
+  rejections.  For $\tau>0$ the estimator is a heuristic indicator.
+\item \textbf{Adjoint scope.}  The enthalpy adjoint supports scalar $\alpha$
+  and Dirichlet/flux boundaries; extending it to conductivity fields reuses
+  \eqref{eq:edge-sensitivity} with $T$ in place of $u$.  Robin and radiative
+  boundaries in the nonlinear adjoint, and temperature-dependent conductivity,
+  are not yet covered.  The step sequence is not differentiated, so gradients
+  on adaptive grids are exact for the realized grid only (standard practice).
+\item \textbf{Ramp law.}  With the piecewise-linear law, $\mathcal T$ has kinks;
+  Newton is semismooth there and line search keeps it robust, but gradients
+  are only piecewise smooth.  The smooth law is recommended for inversion.
+\item \textbf{Non-orthogonal meshes.}  The M-matrix argument behind the Newton
+  proposition requires a two-point (monotone) flux; with non-orthogonal
+  corrections the Jacobian remains $L$-uniformly bounded but its M-matrix
+  property is not guaranteed (see Direction B for monotone variants).
+\end{itemize}
+
+%=============================================================================
+\section{Reproducibility}
+%=============================================================================
+
+\begin{verbatim}
+python -m pip install -r requirements-dev.txt
+export MPLCONFIGDIR=/tmp/matplotlib
+python -m pytest tests/test_enthalpy.py tests/test_adjoint.py -q
+python direction_c_enthalpy_studies.py   # ~5 min
+python direction_d_adjoint_studies.py    # ~6 min
+pdflatex direction_CD_enthalpy_adjoint_report.tex   # run twice
+\end{verbatim}
+
+\begin{thebibliography}{99}
+\bibitem{voller1987} V.~R. Voller and C.~Prakash, A fixed grid numerical
+  modelling methodology for convection-diffusion mushy region phase-change
+  problems, \emph{Int.\ J.\ Heat Mass Transfer} 30 (1987) 1709--1719.
+\bibitem{voller1991} V.~R. Voller and C.~R. Swaminathan, General source-based
+  method for solidification phase change, \emph{Numer.\ Heat Transfer B} 19
+  (1991) 175--189.
+\bibitem{elliott1987} C.~M. Elliott, Error analysis of the enthalpy method for
+  the Stefan problem, \emph{IMA J.\ Numer.\ Anal.} 7 (1987) 61--71.
+\bibitem{cattaneo1958} C.~Cattaneo, Sur une forme de l'\'equation de la chaleur
+  \'eliminant le paradoxe d'une propagation instantan\'ee, \emph{C.\ R.\ Acad.\
+  Sci.} 247 (1958) 431--433.
+\bibitem{tzou2015} D.~Y. Tzou, \emph{Macro- to Microscale Heat Transfer: The
+  Lagging Behavior}, 2nd ed., Wiley, 2015.
+\bibitem{lin2007} Y.~Lin and C.~Xu, Finite difference/spectral approximations
+  for the time-fractional diffusion equation, \emph{J.\ Comput.\ Phys.} 225
+  (2007) 1533--1552.
+\bibitem{hairer1993} E.~Hairer, S.~P. N{\o}rsett and G.~Wanner, \emph{Solving
+  Ordinary Differential Equations I}, 2nd ed., Springer, 1993.
+\bibitem{soderlind2002} G.~S\"oderlind, Automatic control and adaptive
+  time-stepping, \emph{Numer.\ Algorithms} 31 (2002) 281--310.
+\bibitem{giles2000} M.~B. Giles and N.~A. Pierce, An introduction to the
+  adjoint approach to design, \emph{Flow Turbul.\ Combust.} 65 (2000) 393--415.
+\bibitem{gunzburger2003} M.~D. Gunzburger, \emph{Perspectives in Flow Control
+  and Optimization}, SIAM, 2003.
+\bibitem{farrell2013} P.~E. Farrell, D.~A. Ham, S.~W. Funke and M.~E. Rognes,
+  Automated derivation of the adjoint of high-level transient finite element
+  programs, \emph{SIAM J.\ Sci.\ Comput.} 35 (2013) C369--C393.
+\bibitem{byrd1995} R.~H. Byrd, P.~Lu, J.~Nocedal and C.~Zhu, A limited memory
+  algorithm for bound constrained optimization, \emph{SIAM J.\ Sci.\ Comput.}
+  16 (1995) 1190--1208.
+\bibitem{vogel2002} C.~R. Vogel, \emph{Computational Methods for Inverse
+  Problems}, SIAM, 2002.
+\end{thebibliography}
+
+\end{document}

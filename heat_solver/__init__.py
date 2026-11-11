@@ -26,6 +26,19 @@ from .dmp import (
     run_dmp_study,
 )
 from .afc import AFCMonotoneSolver
+from .adjoint import (
+    AdjointGradient,
+    LinearHeatAdjoint,
+    enthalpy_stefan_adjoint,
+    fractional_heat_adjoint,
+    taylor_test,
+)
+from .enthalpy import (
+    AdaptiveStepOptions,
+    ApparentCapacityPicardSolver,
+    EnthalpyStefanSolver,
+    SmoothPhaseChangeModel,
+)
 from .geometry import polygon_area_and_centroid
 from .inverse import (
     GaussianFieldBasis,
@@ -87,6 +100,15 @@ from .transport import (
 from .triangular import NonUniformHeatSolver
 
 __all__ = [
+    "AdaptiveStepOptions",
+    "AdjointGradient",
+    "ApparentCapacityPicardSolver",
+    "EnthalpyStefanSolver",
+    "LinearHeatAdjoint",
+    "SmoothPhaseChangeModel",
+    "enthalpy_stefan_adjoint",
+    "fractional_heat_adjoint",
+    "taylor_test",
     "AFCMonotoneSolver",
     "AdvectionDiffusionHeatSolver",
     "FractionalHeatSolver",

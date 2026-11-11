@@ -82,6 +82,13 @@ with support for:
 - `heat_solver/dmp.py`, `heat_solver/afc.py`
   Direction B discrete-maximum-principle diagnostics and bound-preserving AFC schemes.
 
+- `heat_solver/enthalpy.py`, `heat_solver/adjoint.py`
+  Enthalpy-primary Stefan solver with adaptive time stepping, and exact discrete
+  adjoints (fields, Robin, fractional, nonlinear Stefan). Verify new adjoints
+  with `adjoint.taylor_test` (second-order remainder rate ~2). Studies:
+  `direction_c_enthalpy_studies.py`, `direction_d_adjoint_studies.py`; report:
+  `direction_CD_enthalpy_adjoint_report.tex` (`pdflatex`, run twice).
+
 - `heat_solver/inverse.py`, `heat_solver/pinn_jax.py`
   Direction D inverse problems (least squares, Pennes adjoint, UQ, field inversion,
   ML/PINN baselines). `pinn_jax.py` needs optional JAX and its tests skip without it.

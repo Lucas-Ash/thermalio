@@ -1,8 +1,8 @@
 # Direction D: Inverse-problem / parameter-identification testbed
 
-- **Status:** landed (PR1–PR7 + technical report `direction_D_inverse_report.tex`)
+- **Status:** landed (PR1–PR7 + technical report `direction_D_inverse_report.tex`; PR8 adjoints beyond Pennes, report `direction_CD_enthalpy_adjoint_report.tex`)
 - **Owner:** —
-- **Last updated:** 2026-06-15
+- **Last updated:** 2026-11-11
 
 ## Motivation & V&V question
 Thermalio has no adjoint/sensitivity machinery, but its *verified, fast* forward
@@ -102,11 +102,26 @@ reference?*
   environment: `pennes_jax_pinn_summary.json`,
   `pennes_jax_pinn_history.csv`, and `pennes_jax_pinn_training.png`.
 
+## PR8: adjoints beyond Pennes (2026-11)
+
+- Code: `heat_solver/adjoint.py`; studies: `direction_d_adjoint_studies.py` ->
+  `test_plots/direction_D_inverse_problems/adjoints/` (`adjoint_taylor_tests.png`,
+  `adjoint_cost_scaling.png`, `conductivity_field_inversion.png`,
+  `nonlinear_parameter_recovery.png`, `summary.json`); tests: `tests/test_adjoint.py`.
+
 ## Further development priorities
-- **Broader PDE adjoint support:** the current discrete adjoint covers scalar
-  reaction/perfusion in the backward-Euler Pennes model. Extend the same pattern
-  to diffusivity, source amplitudes, Robin/radiative boundary parameters,
-  Cattaneo/Fractional transport, and nonlinear phase-change solves.
+- **Broader PDE adjoint support:** *PR8 landed* (`heat_solver/adjoint.py`):
+  exact discrete adjoints for conductivity / perfusion / source *fields* and
+  the Robin coefficient (`LinearHeatAdjoint`), the Caputo L1 scheme w.r.t.
+  `beta` and `alpha` (`fractional_heat_adjoint`), and the nonlinear
+  enthalpy Stefan / Cattaneo-Stefan solver w.r.t. latent heat, `alpha`, `tau`
+  on adaptive steps (`enthalpy_stefan_adjoint`).  All pass Taylor tests (rate
+  2.00).  Gradient cost is flat in the number of parameters (0.02 s for 1-144
+  conductivity coefficients).  Demonstrated: 50-parameter conductivity-field
+  inversion (8% error from 1% noise) and latent-heat/diffusivity recovery from
+  melting thermocouple data.  Still open: field parameters and Robin/radiative
+  boundaries in the nonlinear adjoint, temperature-dependent conductivity,
+  differentiating the step-size controller.
 - **Observation design:** sparse-sensor and multi-time observation operators are
   now available. Next, add sensor-design metrics such as D-optimality, time-window
   comparisons, and automated observability/rank diagnostics.

@@ -4,7 +4,8 @@ Researched directions for adapting Thermalio toward novel, impactful work. Each
 note follows `TEMPLATE.md` and records the scope, design decisions, findings,
 and open follow-ups for its direction. The notes themselves do not affect any
 test, sweep, or regression run. Technical write-ups for C and D live in the repo
-root (`direction_C_nonfourier_report.tex`, `direction_D_inverse_report.tex`).
+root (`direction_C_nonfourier_report.tex`, `direction_D_inverse_report.tex`,
+`direction_CD_enthalpy_adjoint_report.tex` for the enthalpy/adaptive/adjoint follow-up).
 
 | ID | Direction | Status | Note |
 |----|-----------|--------|------|
@@ -30,7 +31,10 @@ lowest-risk starting point and strengthens the foundation the others build on.
   (Mittag-Leffler) Caputo cases; registering MMS cases in the regression sweep.
 - **B:** maximum-principle limiting for sign-changing sources; geometric NTPFA
   for local-extremum control.
-- **C:** adaptive time stepping, enthalpy-primary formulation, boundary-flux
-  reconstruction for Dirichlet energy audits, sharp-interface tracking.
-- **D:** adjoints beyond scalar Pennes perfusion; sensor-design metrics;
-  calibrated PINN studies in a JAX environment.
+- **C:** second-order (Newmark-averaged) Cattaneo time stepping, adaptivity for
+  the apparent-capacity and fractional solvers, boundary-flux reconstruction
+  for Dirichlet energy audits, sharp-interface tracking.  (Enthalpy-primary
+  formulation and adaptive stepping landed 2026-11.)
+- **D:** field parameters and Robin/radiative boundaries in the nonlinear
+  adjoint; sensor-design metrics; calibrated PINN studies in a JAX environment.
+  (Field, Robin, fractional and nonlinear Stefan adjoints landed 2026-11.)

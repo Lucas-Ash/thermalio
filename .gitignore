@@ -31,3 +31,10 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# LaTeX build byproducts
+*.aux
+*.out
+*.toc
+*.synctex.gz
+direction_*_report.log

@@ -15,8 +15,10 @@ mesh geometry, the diffusion stiffness matrix ``A`` and the lumped mass matrix
     The relaxation time gives heat a finite propagation speed
     ``c = sqrt(alpha / tau)`` (thermal waves / "second sound"), which is the
     distinguishing feature of micro/nanoscale and ultrafast-heating transport.
-    Time integration is a second-order implicit (unconditionally stable)
-    three-level scheme.
+    Time integration is an implicit (unconditionally stable) three-level
+    scheme: the time differences are centered at ``t_n`` but diffusion and
+    source are evaluated at ``t_{n+1}``, so it is first-order accurate in time
+    (measured order ~1.0; see direction_CD_enthalpy_adjoint_report.tex).
 
 ``AdvectionDiffusionHeatSolver``
     Convective heat transport with a prescribed (incompressible) velocity
@@ -301,8 +303,9 @@ class _TransportBase:
 class HyperbolicHeatSolver(_TransportBase):
     """Cattaneo--Vernotte (hyperbolic, non-Fourier) heat conduction.
 
-    Solves ``tau u_tt + u_t - div(alpha grad u) = Q`` with a second-order,
-    unconditionally stable three-level implicit scheme on the semi-discrete
+    Solves ``tau u_tt + u_t - div(alpha grad u) = Q`` with an unconditionally
+    stable three-level implicit scheme (first order in time, because ``A u``
+    and ``Q`` are taken at ``t_{n+1}``) on the semi-discrete
     system ``tau M u'' + M u' + A u = M Q``::
 
         u'' ~ (u^{n+1} - 2 u^n + u^{n-1}) / dt^2
