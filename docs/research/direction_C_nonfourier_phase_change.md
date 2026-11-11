@@ -223,11 +223,16 @@ manufactured exactness, runner smoke test).
    whether convergence loss is tied to the moving front, a boundary layer, or a
    volumetric heat-source hot spot.
 
-7. **Explicit boundary-flux reconstruction for Dirichlet audits.**  Step 7 now
-   audits enthalpy changes and known injected/source energies.  Cryosurgery and
-   quench cases still infer boundary extraction from enthalpy loss; a stronger
-   audit would reconstruct conductive boundary fluxes from the finite-volume
-   operator and compare those flux integrals against enthalpy removal directly.
+7. **Explicit boundary-flux reconstruction for Dirichlet audits.** *Landed*
+   (`heat_solver/boundary_flux.py`): consistent reaction flux = residual of the
+   unconstrained Dirichlet-cell equations, exact global balance for
+   conservative operators.  The cryosurgery and quench runners now audit
+   against this flux (previously the closure was zero by construction).
+   Findings (`direction_c_flux_audit_study.py`): apparent-capacity closure
+   errors of 26% / 32% (24-cell mesh), decomposed exactly into a Dirichlet-band
+   latent-heat jump `-L * band area` (dt-independent), an interior capacity
+   defect that shrinks with dt, and unconverged Picard residuals; the enthalpy
+   solver closes to 1e-16.  Report: `direction_ABC_bounds_flux_crosscode_report.tex`.
 
 8. **Higher-dimensional design-of-experiments sweeps.**  Step 8 now provides a
    sparse one-at-a-time benchmark matrix over the main Direction C axes.  A

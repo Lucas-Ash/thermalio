@@ -1,8 +1,8 @@
 # Direction B: Monotone / bound-preserving polygonal & MPFA FV for non-classical models
 
-- **Status:** landed (PR1 diagnostic, PR2 nonlinear AFC, PR3 smoothness-relaxed limiter, PR4 global maximum-principle limiter)
+- **Status:** landed (PR1 diagnostic, PR2 nonlinear AFC, PR3 smoothness-relaxed limiter, PR4 global maximum-principle limiter, PR5 sign-changing sources)
 - **Owner:** —
-- **Last updated:** 2026-06-15
+- **Last updated:** 2026-11-11
 
 ## Motivation & V&V question
 MPFA / polygonal finite volume is mature for *classical* anisotropic diffusion
@@ -58,9 +58,21 @@ without destroying accuracy?*
   continuous problem obeys a maximum principle (source-free or sign-definite
   forcing). PR4 strictly dominates PR2 (bounds, but clips smooth) and PR3
   (accurate, but coarse overshoot).
-- **Open (future):** MPP for problems without an a-priori maximum principle
-  (general sign-changing sources); geometric NTPFA for local-extremum control
-  within ``[m, M]``.
+- **Delivered (PR5, 2026-11):** sign-changing sources.  `limiter="source_envelope"`
+  evolves rigorous bounds `M^{n+1} = max(M^n + dt max q^+, max g)` (and `m`
+  likewise), proved by the discrete comparison principle of the low-order
+  M-matrix step; it reduces to PR4 for `q = 0`.  `limiter="source_local"`
+  takes local bounds from the source-including low-order solution.  Findings
+  (`dmp_source_study.py` -> `test_plots/dmp/sign_changing_sources.png`): on a
+  solution that grows beyond its data range, PR4 stalls at 4.6e-3 while the
+  envelope limiter equals the unlimited high-order scheme (2.38e-4 at n=96);
+  on a steep block with heater/sink the high-order scheme leaves the envelope
+  by 0.063, the envelope and strict-local limiters never do, and the sink's
+  legitimate minimum is not clipped.  Report: `direction_ABC_bounds_flux_crosscode_report.tex`.
+- **Open (future):** sharper (local-in-space) source envelopes; geometric NTPFA
+  for local-extremum control within the envelope; order loss of the
+  reconstructed flux on skewed anisotropic meshes (found by Direction A's
+  cross-code study).
 - **Out of scope (later):** extending MPFA beyond Dirichlet/classical (MPFA is
   Dirichlet-favored and goes singular on the mixed tiled mesh — direction A
   N-version finding).

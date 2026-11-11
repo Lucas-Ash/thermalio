@@ -5,13 +5,13 @@
   "T_far": 0.6,
   "t_end": 0.5,
   "latent_heat": 4.0,
-  "final_freezing_margin": 0.09612374169875146,
+  "final_freezing_margin": 0.09612368537645291,
   "final_frozen_fraction": 0.08500000000000002,
-  "enthalpy_removed": 0.6034246138723134,
-  "nonconverged_steps": 12,
+  "enthalpy_removed": 0.6034197705201594,
+  "nonconverged_steps": 11,
   "final_max_iterations": 200,
-  "final_mean_iterations": 36.45,
-  "final_max_residual": 0.0002537660358838123,
+  "final_mean_iterations": 34.67,
+  "final_max_residual": 0.00025504272921547666,
   "final_max_capacity": 14.333333333333334,
-  "final_relative_energy_closure_residual": 0.0
+  "final_relative_energy_closure_residual": -0.021349185503655603
 }

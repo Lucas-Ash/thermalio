@@ -1,8 +1,8 @@
 # Direction A: Open V&V benchmark suite for non-classical heat transport
 
-- **Status:** landed (first increment + follow-ups; external-code validation parked)
+- **Status:** landed (first increment + follow-ups; external-code validation landed 2026-11, report `direction_ABC_bounds_flux_crosscode_report.tex`)
 - **Owner:** —
-- **Last updated:** 2026-06-15
+- **Last updated:** 2026-11-11
 
 ## Motivation & V&V question
 The emerging-model community (non-Fourier/Cattaneo, fractional subdiffusion,
@@ -32,10 +32,20 @@ accuracy, is it in the asymptotic range, and do independent schemes agree?*
   5. **Consolidated benchmark runner** (`benchmark_suite.py`) tying all of the
      above into one reproducible PASS/FAIL report (JSON + CSV under
      `test_plots/benchmark/`).
-- **Parked (deliberately not done):** validation against an external package
-  (FEniCS/deal.II) — heavy dependency, and the in-repo independent FD reference
-  plus cross-scheme/cross-mesh N-version already provide independent-code
-  verification; genuinely transcendental-in-time Caputo (needs Mittag-Leffler /
+- **External-code validation (landed 2026-11):** `heat_solver/external_codes.py`
+  wraps FiPy 4.0.3 (NIST FV) and scikit-fem 12.0.2 (P1/P2 FEM), pinned in
+  `requirements-external.txt` (FEniCS/deal.II have no pip wheels).
+  `external_code_comparison.py` -> `test_plots/benchmark/external_codes/`
+  solves isotropic, anisotropic and Pennes+Robin manufactured problems with all
+  codes plus Neumann's Stefan similarity solution.  Findings: all codes agree
+  at nominal order on isotropic/Robin problems (Thermalio-FiPy difference
+  2.5e-4, Thermalio-P2 2.5e-5..3.2e-4 at n=64); with a rotated tensor Thermalio
+  (reconstructed flux) is ~2nd order and 17x more accurate than FiPy's rank-2
+  coefficient (order 0.6-0.9); **Thermalio loses order on skewed meshes for
+  the anisotropic case (0.88)** -- an open item; enthalpy solver tracks the
+  Neumann front to 0.13 dx.  `tests/test_external_codes.py` runs in a
+  separate CI job.
+- **Parked (deliberately not done):** genuinely transcendental-in-time Caputo (needs Mittag-Leffler /
   series); auto-registering MMS cases into `CASE_SETTINGS`/`iter_test_jobs`
   (touches the regression-snapshotted job set — needs a baseline reseed, and the
   benchmark runner already exercises MMS cases without that risk).

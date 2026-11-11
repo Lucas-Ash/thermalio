@@ -421,6 +421,12 @@ class HyperbolicHeatSolver(_TransportBase):
         self._init_solve_report()
         t = float(t0)
         bidx = self._boundary_idx
+        # Optional per-step history (set ``solver.record_history = True``) used by
+        # heat_solver.boundary_flux to reconstruct consistent Dirichlet fluxes.
+        record = bool(getattr(self, "record_history", False))
+        if record:
+            self.history = {"t": [float(t0)], "u": [u_n.copy()], "u_start": u_nm1.copy(),
+                            "capacity": [], "dt": dt, "tau": self.tau}
 
         for _ in range(nsteps):
             t_next = t + dt
@@ -470,6 +476,10 @@ class HyperbolicHeatSolver(_TransportBase):
                     "Hyperbolic Stefan solve did not converge. "
                     "Try smaller dt or larger phase_change_options['max_iters']."
                 )
+            if record:
+                self.history["t"].append(float(t_next))
+                self.history["u"].append(u_iter.copy())
+                self.history["capacity"].append(np.asarray(cp_eff, dtype=float).copy())
 
             u_nm1, u_n = u_n, u_iter
             t = t_next

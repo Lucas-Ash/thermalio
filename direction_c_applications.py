@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from heat_solver import boundary_flux
 from heat_solver import interface_diagnostics as idiag
 from heat_solver.geometry import polygon_area_and_centroid
 from heat_solver.meshes import generate_square_polygonal_mesh
@@ -88,6 +89,32 @@ def _fieldnames(names):
         if name not in ordered:
             ordered.append(name)
     return ordered
+
+
+FLUX_AUDIT_FIELDS = ["enthalpy_removed", "flux_extracted_energy", "relaxation_storage",
+                     "capacity_defect", "nonlinear_residual_energy", "flux_identity_residual"]
+
+
+def _flux_audit(solver, pcm, u0, u, areas):
+    """Independent energy audit from the reconstructed Dirichlet boundary flux.
+
+    Previously ``energy_out`` was inferred from the enthalpy loss, which makes
+    the closure residual zero by construction.  Here the extracted energy comes
+    from the consistent (reaction) boundary flux of the discrete operator
+    (:mod:`heat_solver.boundary_flux`), so the closure residual measures the
+    apparent-capacity energy defect plus unconverged-step residuals.
+    """
+    flux = boundary_flux.hyperbolic_stefan_flux_audit(solver, pcm)
+    energy_out = -(flux["boundary_flux_energy"] - flux["relaxation_storage"])
+    audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
+    extra = {
+        "flux_extracted_energy": flux["energy_extracted"],
+        "relaxation_storage": flux["relaxation_storage"],
+        "capacity_defect": flux["capacity_defect"],
+        "nonlinear_residual_energy": flux["nonlinear_residual_energy"],
+        "flux_identity_residual": flux["scheme_identity_residual"],
+    }
+    return audit, extra
 
 
 def _attach_audit_and_report(row, solver, audit):
@@ -303,10 +330,12 @@ def cryosurgery_freezing(nx=40, ny=40, bbox=(0.0, 1.0, 0.0, 1.0), alpha=0.08, ta
             vertices, polygons, alpha, t_k / steps, tau, pcm,
             bc_type="dirichlet", bc_func=probe_dirichlet, phase_change_options=opts,
         )
+        solver.record_history = True
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
         energy_out = max(H0 - budget["total"], 0.0)
-        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
+        audit, flux_fields = _flux_audit(solver, pcm, u0, u, areas)
+        audit.update(flux_fields)
         # Freezing front = solidus isotherm distance from the cold probe.
         front = idiag.interface_position(centers, u, pcm, axis="x", coord=y_mid,
                                          level=pcm.solidus_temperature, pick="first")
@@ -331,7 +360,7 @@ def cryosurgery_freezing(nx=40, ny=40, bbox=(0.0, 1.0, 0.0, 1.0), alpha=0.08, ta
     summary.update(_final_diagnostics(rows))
     _write("cryosurgery_freezing", summary, rows,
            _fieldnames(["time", "freezing_margin", "min_temperature", "frozen_fraction",
-                        "solid_liquid_fraction", "enthalpy_removed"]))
+                        "solid_liquid_fraction", *FLUX_AUDIT_FIELDS]))
     _plot_freezing(rows, final_field, summary, pcm)
     _plot_diagnostics_dashboard("cryosurgery_freezing", rows, "Cryosurgery freezing")
     return summary, rows
@@ -551,10 +580,12 @@ def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0
             vertices, polygons, alpha, t_k / steps, tau, pcm,
             bc_type="dirichlet", bc_func=cold_wall, phase_change_options=opts,
         )
+        solver.record_history = True
         _, u = solver.solve(u0, 0.0, float(t_k), du0=np.zeros_like(u0))
         budget = idiag.enthalpy_budget(pcm, u, areas)
         energy_out = max(H0 - budget["total"], 0.0)
-        audit = idiag.enthalpy_audit(pcm, u0, u, areas, energy_out=energy_out)
+        audit, flux_fields = _flux_audit(solver, pcm, u0, u, areas)
+        audit.update(flux_fields)
         phases = idiag.phase_fractions(pcm, u, areas)
         rows.append(_attach_audit_and_report({
             "time": float(t_k),
@@ -577,7 +608,7 @@ def rapid_solidification_quench(nx=36, ny=18, bbox=(0.0, 1.2, 0.0, 0.6), alpha=0
     summary.update(_final_diagnostics(rows))
     _write("rapid_solidification_quench", summary, rows,
            _fieldnames(["time", "peak_temperature", "min_temperature", "liquid_fraction",
-                        "solid_fraction", "mushy_fraction", "enthalpy_removed"]))
+                        "solid_fraction", "mushy_fraction", *FLUX_AUDIT_FIELDS]))
     _plot_generic_application(
         "rapid_solidification_quench", rows, final_field,
         "Direction C application: rapid solidification quench",

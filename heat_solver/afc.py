@@ -37,6 +37,7 @@ from .polygonal import PolygonalHeatSolver, _apply_dirichlet_rows_csr
 
 
 class AFCMonotoneSolver:
+    _LIMITERS = ("local", "global", "source_envelope", "source_local")
     """Bound-preserving high-resolution diffusion via algebraic flux correction.
 
     Parameters mirror the diffusion subset of :class:`PolygonalHeatSolver`
@@ -56,7 +57,26 @@ class AFCMonotoneSolver:
       bounds are ``bounds=(m, M)`` if given, else auto-detected from the initial
       data and the Dirichlet boundary samples.  This is rigorous when the
       continuous solution obeys a maximum principle (e.g. source-free or
-      sign-definite forcing).
+      sign-definite forcing).  With a sign-changing source the true solution
+      can leave the auto-detected ``[m, M]`` (a heat sink drives it below the
+      initial/boundary minimum), and this limiter would clip physics.
+    - ``"source_envelope"``: rigorous *time-dependent* global bounds for
+      problems with sign-changing sources (Direction B, PR5).  Starting from
+      ``[m^0, M^0]`` (initial + boundary data, or ``bounds``) they evolve as::
+
+          M^{n+1} = max(M^n + dt * max_i q_i^+, max g^{n+1})
+          m^{n+1} = min(m^n - dt * max_i q_i^-, min g^{n+1})
+
+      which is the discrete comparison principle of the low-order M-matrix
+      scheme (spatially constant super/sub-solutions).  The continuous
+      solution obeys the analogous bound, so the limiter never clips the
+      physical solution; with ``q = 0`` it reduces to ``"global"``.
+    - ``"source_local"``: local bounds taken from the *source-including*
+      low-order solution ``u^L`` at the new time level, ``[min, max]`` of
+      ``u^L`` over each node's stencil.  Source-driven extrema appear in
+      ``u^L`` and are therefore admissible, while the high-order correction
+      cannot create extrema beyond what the monotone scheme produces.  Combine
+      with ``smoothness_factor > 0`` to avoid clipping smooth extrema.
     """
 
     def __init__(
@@ -101,8 +121,8 @@ class AFCMonotoneSolver:
         # the physical maximum-principle bounds [m, M] for every node, which is
         # strictly bound-preserving AND does not clip smooth interior extrema.
         self.limiter = str(limiter).lower().strip()
-        if self.limiter not in {"local", "global"}:
-            raise ValueError("limiter must be 'local' or 'global'.")
+        if self.limiter not in self._LIMITERS:
+            raise ValueError(f"limiter must be one of {self._LIMITERS}.")
         self._user_bounds = None if bounds is None else (float(bounds[0]), float(bounds[1]))
 
         self._base._assemble_system()
@@ -222,6 +242,18 @@ class AFCMonotoneSolver:
 
         cx, cy = self.cell_centers[:, 0], self.cell_centers[:, 1]
         global_m, global_M = self._global_bounds(u, t0, t_end) if self.limiter == "global" else (None, None)
+        if self.limiter == "source_envelope":
+            if self._user_bounds is not None:
+                env_lo, env_hi = self._user_bounds
+            else:
+                bc0 = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t0), dtype=float), (self.M,))
+                vals = np.concatenate([u, bc0[self._boundary_idx]])
+                env_lo, env_hi = float(vals.min()), float(vals.max())
+        interior = np.ones(self.M, dtype=bool)
+        interior[self._boundary_idx] = False
+        self.bound_history = []
+        self.limiter_activity = []
+        self.extrema_history = []
 
         t = float(t0)
         for _ in range(nsteps):
@@ -231,17 +263,30 @@ class AFCMonotoneSolver:
             rhs_base = self.cell_areas * u + dt * (self.cell_areas * src)
             rhs_base[self._boundary_idx] = bc[self._boundary_idx]
 
+            u_low = factor(rhs_base)  # low-order (M-matrix) solution, source included
             if self.limiter == "global":
                 # Physical maximum-principle bounds for every node.
                 umin = np.full(self.M, global_m)
                 umax = np.full(self.M, global_M)
+            elif self.limiter == "source_envelope":
+                q_int = src[interior] if np.any(interior) else src
+                g_b = bc[self._boundary_idx]
+                env_hi = max(env_hi + dt * max(float(np.max(q_int)), 0.0),
+                             float(g_b.max()) if g_b.size else -np.inf)
+                env_lo = min(env_lo - dt * max(float(np.max(-q_int)), 0.0),
+                             float(g_b.min()) if g_b.size else np.inf)
+                umin = np.full(self.M, env_lo)
+                umax = np.full(self.M, env_hi)
+            elif self.limiter == "source_local":
+                umin, umax = self._local_bounds(u_low)
             else:
                 # Bounds from the previous time level's local neighbourhood.
                 umin, umax = self._local_bounds(u)
                 umin[self._boundary_idx] = np.minimum(umin[self._boundary_idx], bc[self._boundary_idx])
                 umax[self._boundary_idx] = np.maximum(umax[self._boundary_idx], bc[self._boundary_idx])
 
-            u_iter = factor(rhs_base)  # low-order predictor
+            self.bound_history.append((t_next, float(np.min(umin)), float(np.max(umax))))
+            u_iter = u_low  # low-order predictor
             for _ in range(self.max_iters):
                 limited = self._zalesak_alpha(u_iter, umin, umax)
                 rhs = rhs_base + dt * self._scatter_edges(limited)
@@ -251,6 +296,11 @@ class AFCMonotoneSolver:
                 u_iter = u_new
                 if err <= self.tol * max(1.0, np.max(np.abs(u_new))):
                     break
+            full = dt * self._scatter_edges(self._edge_d * (u_iter[self._edge_i] - u_iter[self._edge_j]))
+            used = dt * self._scatter_edges(limited)
+            denom = float(np.sum(np.abs(full)))
+            self.limiter_activity.append(0.0 if denom == 0.0 else 1.0 - float(np.sum(np.abs(used))) / denom)
             u = u_iter
             t = t_next
+            self.extrema_history.append((t, float(u.min()), float(u.max())))
         return t, u

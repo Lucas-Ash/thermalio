@@ -42,3 +42,31 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest tests -q -ra
+
+  external-validation:
+    name: Cross-code validation (FiPy, scikit-fem)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: /tmp/matplotlib
+      FIPY_SOLVERS: scipy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            requirements-external.txt
+
+      - name: Install pinned dependencies including external codes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-external.txt
+
+      - name: Run cross-code tests (must not skip)
+        run: python -m pytest tests/test_external_codes.py -q -ra -p no:cacheprovider

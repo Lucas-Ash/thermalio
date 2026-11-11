@@ -1,0 +1,8 @@
+# Independent external codes used only for cross-code validation
+# (heat_solver/external_codes.py, external_code_comparison.py,
+# tests/test_external_codes.py).  Optional: the core package never imports
+# them, and their tests skip when they are absent.  Pinned to the versions the
+# comparison was produced with; install on top of requirements-dev.txt.
+-r requirements-dev.txt
+fipy==4.0.3
+scikit-fem==12.0.2

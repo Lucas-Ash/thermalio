@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 
 from heat_solver import interface_diagnostics as idiag
@@ -146,6 +147,18 @@ def test_pulsed_laser_melting_runner(tmp_path, monkeypatch):
     assert summary["final_liquid_fraction"] > 0.0
 
 
+def _assert_flux_audit(rows):
+    for row in rows:
+        # The reconstructed boundary flux closes the scheme's own discrete balance
+        # exactly; the enthalpy-closure residual is an independent measurement
+        # (apparent-capacity defect + unconverged steps), no longer zero by
+        # construction.
+        assert abs(row["flux_identity_residual"]) < 1e-9
+        assert row["flux_extracted_energy"] > 0.0
+        expected = row["capacity_defect"] + row["nonlinear_residual_energy"]
+        assert row["energy_closure_residual"] == pytest.approx(expected, abs=1e-9)
+
+
 def test_cryosurgery_freezing_runner(tmp_path, monkeypatch):
     dca = _application_module(tmp_path, monkeypatch)
 
@@ -155,6 +168,7 @@ def test_cryosurgery_freezing_runner(tmp_path, monkeypatch):
     _assert_step6_step7_fields(summary, rows)
     assert summary["final_frozen_fraction"] > 0.0      # the probe freezes some tissue
     assert summary["enthalpy_removed"] > 0.0           # energy is extracted
+    _assert_flux_audit(rows)
     frozen = [r["frozen_fraction"] for r in rows]
     assert frozen[-1] >= frozen[0]                     # freezing advances in time
 
@@ -193,6 +207,7 @@ def test_rapid_solidification_quench_runner(tmp_path, monkeypatch):
     _assert_step6_step7_fields(summary, rows)
     assert summary["final_liquid_fraction"] < summary["initial_liquid_fraction"]
     assert summary["enthalpy_removed"] > 0.0
+    _assert_flux_audit(rows)
     assert rows[-1]["solid_fraction"] >= rows[0]["solid_fraction"]
 
 

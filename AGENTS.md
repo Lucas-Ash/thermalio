@@ -89,6 +89,15 @@ with support for:
   `direction_c_enthalpy_studies.py`, `direction_d_adjoint_studies.py`; report:
   `direction_CD_enthalpy_adjoint_report.tex` (`pdflatex`, run twice).
 
+- `heat_solver/boundary_flux.py`, `heat_solver/external_codes.py`
+  Dirichlet reaction-flux energy audits (set `solver.record_history = True` on
+  `HyperbolicStefanSolver`), and FiPy / scikit-fem adapters for cross-code
+  validation (`pip install -r requirements-external.txt`; their tests skip if
+  absent; CI runs them in the `external-validation` job). Studies:
+  `dmp_source_study.py`, `direction_c_flux_audit_study.py`,
+  `external_code_comparison.py`; report:
+  `direction_ABC_bounds_flux_crosscode_report.tex`.
+
 - `heat_solver/inverse.py`, `heat_solver/pinn_jax.py`
   Direction D inverse problems (least squares, Pennes adjoint, UQ, field inversion,
   ML/PINN baselines). `pinn_jax.py` needs optional JAX and its tests skip without it.
@@ -97,11 +106,12 @@ with support for:
   One design / status note per research direction (A-D). Update the matching note
   when you land work on a direction.
 
-- `requirements.txt`, `requirements-dev.txt`
-  Exact-pinned runtime and test dependencies.
+- `requirements.txt`, `requirements-dev.txt`, `requirements-external.txt`
+  Exact-pinned runtime, test, and optional external-code dependencies.
 
 - `.github/workflows/ci.yml`
-  CI: installs the pinned deps on Python 3.13, byte-compiles, runs `pytest tests`.
+  CI: installs the pinned deps on Python 3.13, byte-compiles, runs `pytest tests`;
+  a second job installs `requirements-external.txt` and runs the cross-code tests.
 
 ## Environment Setup
 

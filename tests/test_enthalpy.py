@@ -170,3 +170,25 @@ def test_newton_failure_triggers_step_reduction(mesh, monkeypatch):
     solver.solve(_mode(solver), 0.0, 0.3)
     assert solver.solve_report["rejected_newton"] == 1
     assert solver.solve_report["dts"][0] == pytest.approx(0.05)
+
+
+def test_neumann_stefan_similarity_solution():
+    from scipy.optimize import brentq
+    from scipy.special import erf
+
+    alpha, L, Tw, nx = 0.05, 2.0, 1.0, 80
+    lam = brentq(lambda z: z * np.exp(z * z) * erf(z) - (Tw / L) / np.sqrt(np.pi), 1e-6, 5.0)
+    dx = 1.0 / nx
+
+    def exact(x, t):
+        xi = np.maximum(np.asarray(x, float) - 0.5 * dx, 0.0)
+        s = 2 * lam * np.sqrt(alpha * max(t, 1e-12))
+        return np.where(xi < s, Tw * (1 - erf(xi / (2 * np.sqrt(alpha * max(t, 1e-12)))) / erf(lam)), 0.0)
+
+    v, p, _ = generate_square_polygonal_mesh(nx=nx, ny=5, bbox=(0.0, 1.0, 0.0, 5 * dx))
+    model = ApparentHeatCapacityModel(0.0, 1e-3, latent_heat=L)
+    s = EnthalpyStefanSolver(v, p, alpha, 4e-3, model, bc_type="dirichlet", bc_func=lambda x, y, t: exact(x, t))
+    _, u = s.solve(np.zeros(s.M), 0.0, 0.4)
+    row = np.abs(s.cell_centers[:, 1] - 2.5 * dx) < 1e-9
+    melted = np.sum(np.clip(model.enthalpy(u[row]) / L, 0, 1)) * dx - 0.5 * dx
+    assert melted == pytest.approx(2 * lam * np.sqrt(alpha * 0.4), rel=0.02)

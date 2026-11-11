@@ -206,3 +206,76 @@ def test_afc_rejects_bad_limiter():
     v, p, _ = generate_nonorthogonal_polygonal_mesh(nx=4, ny=4, bbox=(-1, 1, -1, 1))
     with pytest.raises(ValueError):
         AFCMonotoneSolver(v, p, 0.1, 0.01, limiter="bogus")
+
+
+# --- PR5: sign-changing sources ---------------------------------------------
+
+def _heater_sink(q0):
+    def src(x, y, t):
+        x = np.asarray(x, float)
+        y = np.asarray(y, float)
+        heat = ((x - 0.55) ** 2 + (y + 0.55) ** 2 < 0.09).astype(float)
+        sink = ((x + 0.55) ** 2 + (y - 0.55) ** 2 < 0.09).astype(float)
+        return q0 * (heat - sink)
+    return src
+
+
+def _zero(x, y, t):
+    return np.zeros_like(np.asarray(x, float))
+
+
+def test_source_envelope_reduces_to_global_without_source():
+    alpha = anisotropic_tensor(ratio=20.0, angle=np.pi / 6)
+    v, p, c = generate_nonorthogonal_tiled_polygonal_mesh(nx_tiles=8, ny_tiles=8, bbox=(-1, 1, -1, 1), skew=0.4)
+    out = {}
+    for lim in ("global", "source_envelope"):
+        s = AFCMonotoneSolver(v, p, alpha, 1.5e-3, bc_func=_zero, source_func=_zero, limiter=lim)
+        out[lim] = s.solve(_block_ic(c), 0.0, 6e-3)[1]
+    assert np.max(np.abs(out["global"] - out["source_envelope"])) < 1e-13
+
+
+def test_source_limiters_respect_rigorous_envelope_where_highorder_violates_it():
+    alpha = anisotropic_tensor(ratio=20.0, angle=np.pi / 6)
+    v, p, c = generate_nonorthogonal_tiled_polygonal_mesh(nx_tiles=10, ny_tiles=10, bbox=(-1, 1, -1, 1), skew=0.4)
+    src, dt, n = _heater_sink(1.0), 1.5e-3, 12
+    high = PolygonalHeatSolver(v, p, alpha, dt, bc_type="dirichlet", bc_func=_zero, source_func=src,
+                               flux_discretization="reconstructed", nonorthogonal_correction=True)
+    q_int = src(c[:, 0], c[:, 1], 0.0)[~high.is_boundary]
+    lo, hi, u, worst = 0.0, 1.0, _block_ic(c), 0.0
+    los, his = [], []
+    for k in range(n):
+        u = high.solve(u, k * dt, (k + 1) * dt)[1]
+        hi += dt * max(q_int.max(), 0.0)
+        lo -= dt * max((-q_int).max(), 0.0)
+        los.append(lo)
+        his.append(hi)
+        worst = max(worst, u.max() - hi, lo - u.min())
+    assert worst > 1e-2  # the high-order scheme leaves the physical envelope
+    for lim in ("source_envelope", "source_local"):
+        s = AFCMonotoneSolver(v, p, alpha, dt, bc_func=_zero, source_func=src, limiter=lim)
+        s.solve(_block_ic(c), 0.0, n * dt)
+        for (t, umin, umax), l_, h_ in zip(s.extrema_history, los, his):
+            assert umax <= h_ + 1e-10 and umin >= l_ - 1e-10
+        assert min(m for _, m, _ in s.extrema_history) < -1e-3  # the sink's minimum is NOT clipped
+
+
+def test_source_envelope_keeps_high_order_accuracy_when_solution_leaves_initial_range():
+    pytest.importorskip("sympy")
+    from heat_solver.mms import manufactured_case
+
+    alpha = anisotropic_tensor(ratio=5.0, angle=np.pi / 6)
+    case = manufactured_case("(0.2+4*t)*sin(pi*x)*sin(pi*y)", alpha=alpha.tolist(), model="diffusion")
+    v, p, c = generate_nonorthogonal_polygonal_mesh(nx=24, ny=24, bbox=(-1, 1, -1, 1), skew=0.3)
+    areas = np.array([polygon_area_and_centroid(v[poly])[0] for poly in p])
+    u0 = case["solution"](c[:, 0], c[:, 1], 0.0)
+    ue = case["solution"](c[:, 0], c[:, 1], 0.05)
+    errs = {}
+    for lim in ("global", "source_envelope"):
+        s = AFCMonotoneSolver(v, p, alpha, 1e-3, bc_func=case["boundary"], source_func=case["source"], limiter=lim)
+        errs[lim] = _rel_l2(s.solve(u0, 0.0, 0.05)[1], ue, areas)
+    high = PolygonalHeatSolver(v, p, alpha, 1e-3, bc_type="dirichlet", bc_func=case["boundary"],
+                               source_func=case["source"], flux_discretization="reconstructed",
+                               nonorthogonal_correction=True)
+    err_high = _rel_l2(high.solve(u0, 0.0, 0.05)[1], ue, areas)
+    assert errs["source_envelope"] < 1.01 * err_high
+    assert errs["global"] > 1.8 * errs["source_envelope"]  # PR4 clips once u leaves [-0.2, 0.2]
