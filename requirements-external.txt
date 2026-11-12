@@ -6,3 +6,6 @@
 -r requirements-dev.txt
 fipy==4.0.3
 scikit-fem==12.0.2
+# Used only by performance_study.py (algebraic multigrid, BLAS thread control).
+pyamg==5.4.1
+threadpoolctl==3.8.0

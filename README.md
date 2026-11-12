@@ -160,6 +160,7 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/adjoint.py` | Exact discrete adjoints: conductivity/perfusion/source fields and Robin coefficient, Caputo L1 (`beta`), nonlinear enthalpy Stefan (`L`, `alpha`, `tau`); Taylor tests; study script `direction_d_adjoint_studies.py`. Write-up: `direction_CD_enthalpy_adjoint_report.tex`. |
 | `heat_solver/inverse.py`, `heat_solver/pinn_jax.py` | Direction D inverse problems: least squares, Pennes adjoint, UQ, field inversion, ML/PINN baselines (JAX optional). |
 | `tests/` | Pytest unit suite run by CI (`.github/workflows/ci.yml`). |
+| `docs/performance_guide.md` | Measured accuracy/timing vs FiPy and scikit-fem, where Thermalio's time goes, linear-solver choice, higher order as acceleration, and what parallelism buys (`performance_study.py`). |
 | `docs/boundary_conditions.md` | Boundary types, conventions, per-solver discretization, standard test problems and the capability matrix. |
 | `docs/research/gap_analysis_vs_established_codes.md` | Measured gaps vs FiPy / scikit-fem / FEniCS / deal.II and a prioritized roadmap. |
 | `docs/research/` | Research notes for directions A–D (all landed): design decisions, findings, open follow-ups. |

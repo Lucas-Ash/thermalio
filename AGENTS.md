@@ -132,6 +132,12 @@ with support for:
   Direction D inverse problems (least squares, Pennes adjoint, UQ, field inversion,
   ML/PINN baselines). `pinn_jax.py` needs optional JAX and its tests skip without it.
 
+- `performance_study.py`, `docs/performance_guide.md`
+  Measured performance study (phase breakdown, linear solvers incl. pyamg AMG,
+  process/thread parallelism, Amdahl, higher order as acceleration); figures under
+  `test_plots/benchmark/performance/`. `external_code_comparison.py --replot`
+  redraws the cross-code accuracy/timing figures from `summary.json`.
+
 - `docs/research/`
   One design / status note per research direction (A-D). Update the matching note
   when you land work on a direction.
