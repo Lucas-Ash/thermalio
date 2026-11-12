@@ -107,7 +107,7 @@ class _TransportBase:
       ``alpha * du/dn + beta * u = value``.
     """
 
-    _BC_TYPES = ("dirichlet", "neumann", "robin", "flux")
+    _BC_TYPES = ("dirichlet", "neumann", "robin", "flux", "radiative")
 
     def __init__(
         self,
@@ -125,10 +125,7 @@ class _TransportBase:
             raise ValueError(
                 f"{type(self).__name__} supports bc_type in {self._BC_TYPES}; got {bc_type!r}."
             )
-        # 'flux' reuses the base solver's Neumann face bookkeeping (normals,
-        # midpoints, callback signature detection); the flux value itself is
-        # integrated directly in _boundary_system without an alpha factor.
-        base_bc = "neumann" if self.bc_type == "flux" else self.bc_type
+        base_bc = self.bc_type
         self._base = PolygonalHeatSolver(
             vertices,
             polygons,
@@ -156,9 +153,10 @@ class _TransportBase:
         ):
             raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
         self.phase_change_options = self._base.phase_change_options
-        # Only Robin data can change the LHS matrix between steps; Dirichlet rows
-        # are replaced and Neumann/flux data only feed the right-hand side.
-        self._bc_lhs_constant = self.bc_type != "robin"
+        # Robin data and the (linearized, temperature-dependent) radiative closure
+        # change the LHS between steps; Dirichlet rows are replaced and
+        # Neumann/flux data only feed the right-hand side.
+        self._bc_lhs_constant = self.bc_type not in ("robin", "radiative")
 
     @staticmethod
     def _uniform_schedule(t0, t_end, dt):
@@ -269,35 +267,48 @@ class _TransportBase:
             return relaxation * u_raw + (1.0 - relaxation) * u_iter
         return u_raw
 
-    def _boundary_system(self, t):
+    def _boundary_system(self, t, temperature=None):
         """Boundary closure ``(B, b)`` so that ``A_total = A + B`` and ``rhs += b``.
 
         ``B`` is ``None`` when the boundary adds no matrix coupling (Dirichlet
         rows are replaced instead; Neumann/flux data only contribute to ``b``).
+        Radiative closures are Newton-linearized about ``temperature``.
         """
         if self.bc_type == "dirichlet":
             return None, np.zeros(self.M)
-        if self.bc_type == "flux":
-            faces = self._base.boundary_faces
-            cells = faces["cells"]
-            if cells.size == 0:
-                return None, np.zeros(self.M)
-            midpoints = faces["midpoints"]
-            flux_in = np.broadcast_to(
-                np.asarray(
-                    self._base._evaluate_bc(
-                        midpoints[:, 0], midpoints[:, 1], t, normals=faces["normals"]
-                    ),
-                    dtype=float,
-                ),
-                (cells.size,),
-            )
-            b = np.bincount(cells, weights=faces["lengths"] * flux_in, minlength=self.M)
-            return None, b
-        if self.bc_type == "neumann":
+        if self.bc_type in ("neumann", "flux"):
             _, b = self._base._assemble_boundary_system(t)
             return None, b
+        if self.bc_type == "radiative":
+            if temperature is None:
+                raise ValueError("radiative boundaries need the current temperature iterate.")
+            return self._base._assemble_boundary_system(t, temperature=temperature)
         return self._base._assemble_boundary_system(t)  # robin
+
+    def _boundary_solve(self, lhs_base, rhs_base, t, coef, u_guess, factor=None, max_iters=60, tol=1e-12):
+        """Solve ``(lhs_base + coef B) u = rhs_base + coef b`` for non-Dirichlet boundaries.
+
+        Linear boundary types need one solve (``factor`` reuses a factorization
+        when the LHS is constant).  Radiative boundaries are nonlinear: the
+        closure is re-linearized about the latest iterate until the update is
+        below ``tol`` (Newton on the boundary nonlinearity).
+        """
+        if self.bc_type != "radiative":
+            B, b = self._boundary_system(t)
+            rhs = rhs_base + coef * b
+            if factor is not None:
+                return factor(rhs)
+            lhs = lhs_base if B is None else (lhs_base + coef * B)
+            return spsolve(lhs.tocsr(), rhs)
+        u = np.asarray(u_guess, dtype=float).copy()
+        for _ in range(max_iters):
+            B, b = self._boundary_system(t, temperature=u)
+            u_new = spsolve((lhs_base + coef * B).tocsr(), rhs_base + coef * b)
+            err = float(np.max(np.abs(u_new - u)))
+            u = u_new
+            if err <= tol * max(1.0, float(np.max(np.abs(u)))):
+                return u
+        raise RuntimeError("radiative boundary iteration did not converge; reduce dt.")
 
 
 class HyperbolicHeatSolver(_TransportBase):
@@ -360,7 +371,7 @@ class HyperbolicHeatSolver(_TransportBase):
         #   tau a0 = -v0 - ((A + B) u0 - b)/area + Q0
         #   u^{-1} = u0 - dt v0 + dt^2/2 a0
         q0 = self._source(t0)
-        B0, b0 = self._boundary_system(t0)
+        B0, b0 = self._boundary_system(t0, temperature=u_n)
         A0 = self.A if B0 is None else (self.A + B0).tocsr()
         a0 = (q0 + (b0 - A0 @ u_n) / self.cell_areas - v0) / self.tau
         u_nm1 = u_n - dt * v0 + 0.5 * dt * dt * a0
@@ -387,12 +398,7 @@ class HyperbolicHeatSolver(_TransportBase):
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u_np1 = factor(rhs)
             else:
-                B, b = self._boundary_system(t_next)
-                rhs = rhs + b
-                if factor is not None:
-                    u_np1 = factor(rhs)
-                else:
-                    u_np1 = spsolve((base_lhs + B).tocsr(), rhs)
+                u_np1 = self._boundary_solve(base_lhs, rhs, t_next, 1.0, u_n, factor)
             u_nm1, u_n = u_n, u_np1
             t = t_next
         return t, u_n
@@ -409,7 +415,7 @@ class HyperbolicHeatSolver(_TransportBase):
             return float(t0), u_n
 
         q0 = self._source(t0)
-        B0, b0 = self._boundary_system(t0)
+        B0, b0 = self._boundary_system(t0, temperature=u_n)
         A0 = self.A if B0 is None else (self.A + B0).tocsr()
         cp0 = self._effective_heat_capacity(u_n)
         a0 = (q0 + (b0 - A0 @ u_n) / self.cell_areas - cp0 * v0) / self.tau
@@ -450,7 +456,7 @@ class HyperbolicHeatSolver(_TransportBase):
                     lhs = self._apply_dirichlet(lhs)
                     rhs[bidx] = bc[bidx]
                 else:
-                    B, b = self._boundary_system(t_next)
+                    B, b = self._boundary_system(t_next, temperature=u_iter)
                     rhs = rhs + b
                     if B is not None:
                         lhs = (lhs + B).tocsr()
@@ -515,10 +521,27 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
         if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
             raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
         self.C = self._assemble_convection().tocsr()
-        if self.bc_type != "dirichlet":
-            # Boundary rows stay active for Neumann/Robin/flux data, so div(v u)
-            # must keep its boundary-face contribution.
+        faces = self._base.boundary_faces
+        if faces["cells"].size:
+            vx, vy = self.velocity(faces["midpoints"][:, 0], faces["midpoints"][:, 1], 0.0)
+            self._boundary_flow = (np.ravel(vx) * faces["normals"][:, 0]
+                                   + np.ravel(vy) * faces["normals"][:, 1]) * faces["lengths"]
+        else:
+            self._boundary_flow = np.zeros(0)
+        # Faces whose convective flux uses the BC-consistent face value u_f:
+        # every face for the central scheme, inflow faces only for upwind (an
+        # upwind outflow face keeps the donor-cell value so the scheme stays monotone).
+        self._face_value_mask = (np.ones(self._boundary_flow.size, dtype=bool) if self.scheme == "central"
+                                 else self._boundary_flow < 0.0)
+        if self.bc_type in ("neumann", "flux"):
+            # Boundary rows stay active, so div(v u) keeps its boundary-face
+            # contribution flow * u_f with u_f = u_c + d du/dn: the u_c part is
+            # constant (here), the data part enters the RHS in _boundary_system.
             self.C = (self.C + self._convection_boundary_closure()).tocsr()
+        elif self.bc_type in ("robin", "radiative") and self._boundary_flow.size:
+            donor = np.where(self._face_value_mask, 0.0, self._boundary_flow)
+            cells = faces["cells"]
+            self.C = (self.C + diags(np.bincount(cells, weights=donor, minlength=self.M))).tocsr()
 
     def _assemble_convection(self):
         """Cell-centered FV convection matrix C with (C u)_i ~ int_cell_i div(v u)."""
@@ -579,6 +602,31 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
         ) * faces["lengths"]
         return diags(np.bincount(cells, weights=flow, minlength=self.M), format="csr")
 
+    def _boundary_system(self, t, temperature=None):
+        """Diffusive closure plus the convective boundary flux ``flow_f u_f``.
+
+        The face value comes from the boundary condition itself
+        (``u_f = lam (T u)_f + mu``, see ``PolygonalHeatSolver._boundary_face_relations``)
+        instead of the cell value, which makes the convective boundary flux
+        second-order consistent for every boundary type.  With ``scheme="upwind"``
+        only inflow faces use it; outflow faces keep the donor-cell value.
+        """
+        B, b = super()._boundary_system(t, temperature=temperature)
+        if self.bc_type == "dirichlet" or self._boundary_flow.size == 0:
+            return B, b
+        from scipy.sparse import coo_matrix
+
+        cells = self._base.boundary_faces["cells"]
+        T, _, _, lam, mu = self._base._boundary_face_relations(t, temperature=temperature)
+        flow = np.where(self._face_value_mask, self._boundary_flow, 0.0)
+        b = b - np.bincount(cells, weights=flow * mu, minlength=self.M)
+        if self.bc_type in ("robin", "radiative"):
+            E = coo_matrix((flow * lam, (cells, np.arange(cells.size))),
+                           shape=(self.M, cells.size)).tocsr()
+            Cb = (E @ T).tocsr()
+            B = Cb if B is None else (B + Cb).tocsr()
+        return B, b
+
     def peclet_number(self, length_scale):
         """Mesh/representative Peclet number ``|v| * L / alpha`` (scalar alpha)."""
         alpha = self._base.alpha
@@ -622,18 +670,13 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u = factor(rhs)
             else:
-                B_next, b_next = self._boundary_system(t_next)
-                if self.time_scheme == "backward_euler":
-                    rhs = rhs + dt * b_next
-                else:
-                    B_prev, b_prev = self._boundary_system(t)
-                    rhs = rhs + 0.5 * dt * (b_prev + b_next)
+                if self.time_scheme == "crank_nicolson":
+                    # Explicit half at the old level (radiation linearized about u^n).
+                    B_prev, b_prev = self._boundary_system(t, temperature=u)
+                    rhs = rhs + 0.5 * dt * b_prev
                     if B_prev is not None:
                         rhs = rhs - 0.5 * dt * (B_prev @ u)
-                if factor is not None:
-                    u = factor(rhs)
-                else:
-                    u = spsolve((base_lhs + theta * dt * B_next).tocsr(), rhs)
+                u = self._boundary_solve(base_lhs, rhs, t_next, theta * dt, u, factor)
             t = t_next
         return t, u
 
@@ -712,12 +755,7 @@ class FractionalHeatSolver(_TransportBase):
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u_np1 = factor(rhs)
             else:
-                B, b = self._boundary_system(t_next)
-                rhs = rhs + b
-                if factor is not None:
-                    u_np1 = factor(rhs)
-                else:
-                    u_np1 = spsolve((base_lhs + B).tocsr(), rhs)
+                u_np1 = self._boundary_solve(base_lhs, rhs, t_next, 1.0, history[n], factor)
             history.append(u_np1)
             t = t_next
         return t, history[-1]
@@ -763,7 +801,7 @@ class FractionalHeatSolver(_TransportBase):
                     lhs = self._apply_dirichlet(lhs)
                     rhs[bidx] = bc[bidx]
                 else:
-                    B, b = self._boundary_system(t_next)
+                    B, b = self._boundary_system(t_next, temperature=u_iter)
                     rhs = rhs + b
                     if B is not None:
                         lhs = (lhs + B).tocsr()
@@ -910,17 +948,12 @@ class ReactionDiffusionHeatSolver(_TransportBase):
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u = factor(rhs)
             else:
-                B_next, b_next = self._boundary_system(t_next)
-                if self.time_scheme == "backward_euler":
-                    rhs = rhs + dt * b_next
-                else:
-                    B_prev, b_prev = self._boundary_system(t)
-                    rhs = rhs + 0.5 * dt * (b_prev + b_next)
+                if self.time_scheme == "crank_nicolson":
+                    # Explicit half at the old level (radiation linearized about u^n).
+                    B_prev, b_prev = self._boundary_system(t, temperature=u)
+                    rhs = rhs + 0.5 * dt * b_prev
                     if B_prev is not None:
                         rhs = rhs - 0.5 * dt * (B_prev @ u)
-                if factor is not None:
-                    u = factor(rhs)
-                else:
-                    u = spsolve((base_lhs + theta * dt * B_next).tocsr(), rhs)
+                u = self._boundary_solve(base_lhs, rhs, t_next, theta * dt, u, factor)
             t = t_next
         return t, u

@@ -291,14 +291,21 @@ class EnthalpyStefanSolver(_TransportBase):
     def temperature(self, enthalpy):
         return np.asarray(self.model.temperature_from_enthalpy(enthalpy), dtype=float)
 
-    def _operator(self, t):
-        B, b = self._boundary_system(t)
+    def _operator(self, t, temperature=None):
+        B, b = self._boundary_system(t, temperature=temperature)
         K = self.A if B is None else (self.A + B).tocsr()
         return K, b
 
     def _residual(self, h, gamma, rhs_hist, K, b, dir_h):
-        """Nonlinear residual; Dirichlet rows read ``H_i - H(g_i)``."""
+        """Nonlinear residual; Dirichlet rows read ``H_i - H(g_i)``.
+
+        For radiative boundaries the closure is re-assembled at the current
+        temperature: its tangent form satisfies ``B(T) T - b(T) = -q_rad(T)``
+        exactly, so the residual is the exact nonlinear one.
+        """
         temp = self.temperature(h)
+        if self.bc_type == "radiative":
+            K, b = self._operator(self._step_time, temperature=temp)
         res = self.cell_areas * (gamma * h - rhs_hist) + K @ temp - b
         if dir_h is not None:
             idx = self._boundary_idx
@@ -308,6 +315,9 @@ class EnthalpyStefanSolver(_TransportBase):
     def jacobian(self, h, gamma, K):
         """Newton Jacobian ``gamma diag(area) + K diag(dT/dH)`` with identity Dirichlet rows."""
         temp = self.temperature(h)
+        if self.bc_type == "radiative":
+            # diag(B(T)) = -dq_rad/dT, so (A + B(T)) diag(dT/dH) is the exact Jacobian.
+            K, _ = self._operator(self._step_time, temperature=temp)
         dTdH = 1.0 / np.asarray(self.model.effective_heat_capacity(temp), dtype=float)
         J = (diags(gamma * self.cell_areas, format="csr") + K @ diags(dTdH, format="csr")).tocsr()
         if self.bc_type == "dirichlet":
@@ -351,7 +361,8 @@ class EnthalpyStefanSolver(_TransportBase):
             np.asarray(du0, dtype=float), (self.M,)
         ).astype(float)
         v0 = np.asarray(self.model.effective_heat_capacity(t0_temp), dtype=float) * v_temp
-        K0, b0 = self._operator(t0)
+        self._step_time = t0
+        K0, b0 = self._operator(t0, temperature=t0_temp)
         a0 = (self._source(t0) + (b0 - K0 @ t0_temp) / self.cell_areas - v0) / self.tau
         return h0 - k0 * v0 + 0.5 * k0 * k0 * a0
 
@@ -411,7 +422,8 @@ class EnthalpyStefanSolver(_TransportBase):
             gamma, p, s = three_level_coefficients(k_try, k_prev, self.tau)
             q_next = self._source(t_next)
             rhs_hist = q_next + p * h_n + s * h_nm1
-            K, b = self._operator(t_next)
+            self._step_time = t_next
+            K, b = self._operator(t_next, temperature=self.temperature(h_n))
             dir_h = None
             if self.bc_type == "dirichlet":
                 dir_h = self.enthalpy(self._bc_values(t_next))
@@ -467,6 +479,8 @@ class EnthalpyStefanSolver(_TransportBase):
             # ---- accept ----
             rejections = 0
             temp_new = self.temperature(h_new)
+            if self.bc_type == "radiative":
+                K, b = self._operator(t_next, temperature=temp_new)
             interior = self._interior
             flux_term = (self.cell_areas * q_next - K @ temp_new + b)
             if self.tau == 0.0:
@@ -550,7 +564,7 @@ class ApparentCapacityPicardSolver(_TransportBase):
         for _ in range(nsteps):
             t_next = t + dt
             q = self._source(t_next)
-            B, b = self._boundary_system(t_next)
+            B, b = self._boundary_system(t_next, temperature=u)
             K = self.A if B is None else (self.A + B).tocsr()
             bc = self._bc_values(t_next) if self.bc_type == "dirichlet" else None
             u_iter = u.copy()
@@ -558,6 +572,9 @@ class ApparentCapacityPicardSolver(_TransportBase):
             converged = False
             iters = max_iters
             for it in range(max_iters):
+                if self.bc_type == "radiative":
+                    B, b = self._boundary_system(t_next, temperature=u_iter)
+                    K = (self.A + B).tocsr()
                 cap = np.asarray(self.model.effective_heat_capacity(u_iter), dtype=float)
                 lhs = (diags(self.cell_areas * cap / dt, format="csr") + K).tocsr()
                 rhs = self.cell_areas * (cap * u / dt + q) + b

@@ -20,7 +20,7 @@ generalisation):
 
 The limited anti-diffusion is treated by a fixed-point (Picard) iteration on the
 right-hand side, so the implicit operator stays the monotone M-matrix
-``M + dt A_L``.  Dirichlet boundary data only (first increment).
+``M + dt A_L`` (plus the boundary closure).  All boundary types are supported.
 
 References: Kuzmin (2009), "Explicit and implicit FEM-FCT algorithms with flux
 linearization"; Zalesak (1979).
@@ -40,8 +40,11 @@ class AFCMonotoneSolver:
     _LIMITERS = ("local", "global", "source_envelope", "source_local")
     """Bound-preserving high-resolution diffusion via algebraic flux correction.
 
-    Parameters mirror the diffusion subset of :class:`PolygonalHeatSolver`
-    (Dirichlet only).  ``flux_discretization`` selects the high-order target
+    Parameters mirror the diffusion subset of :class:`PolygonalHeatSolver`.
+    ``bc_type`` accepts every boundary type of
+    :mod:`heat_solver.boundary_conditions`; the (diagonal, non-negative)
+    boundary closure is added to both operators, so the low-order operator
+    stays an M-matrix.  ``flux_discretization`` selects the high-order target
     operator (``"reconstructed"`` by default, or ``"tpfa"`` with the
     nonorthogonal correction).
 
@@ -94,9 +97,13 @@ class AFCMonotoneSolver:
         bounds=None,
         max_iters=50,
         tol=1e-10,
+        bc_type="dirichlet",
     ):
+        from .boundary_conditions import normalize_bc_type
+
+        self.bc_type = normalize_bc_type(bc_type)
         self._base = PolygonalHeatSolver(
-            vertices, polygons, alpha, dt, bc_type="dirichlet",
+            vertices, polygons, alpha, dt, bc_type=self.bc_type,
             bc_func=bc_func, source_func=source_func,
             flux_discretization=flux_discretization,
             nonorthogonal_correction=nonorthogonal_correction,
@@ -165,11 +172,44 @@ class AFCMonotoneSolver:
                 umax[i] = max(umax[i], vals.max())
         return umin, umax
 
+    def _ambient_range(self, t):
+        """Ambient temperatures of Robin (``value / beta``) or radiative (``T_inf``) boundaries.
+
+        By the comparison principle these bound the solution together with the
+        initial data, so they enter the global and envelope bounds.
+        """
+        if self.bc_type not in ("robin", "radiative"):
+            return None
+        from .boundary_conditions import parse_radiative, parse_robin
+
+        faces = self._base.boundary_faces
+        mid, nrm = faces["midpoints"], faces["normals"]
+        if mid.size == 0:
+            return None
+        data = self._base._evaluate_bc(mid[:, 0], mid[:, 1], t, normals=nrm)
+        if self.bc_type == "robin":
+            beta, value = parse_robin(data, mid.shape[0])
+            amb = value[beta > 0] / beta[beta > 0]
+        else:
+            amb = parse_radiative(data, mid.shape[0])[1]
+        return (float(np.min(amb)), float(np.max(amb))) if amb.size else None
+
+    def _boundary(self, t, temperature=None):
+        """``(B, b)`` closure for non-Dirichlet boundaries (``B`` diagonal, non-negative)."""
+        if self.bc_type == "dirichlet":
+            return None, np.zeros(self.M)
+        # Diagonal closure (no tangential correction) keeps A_L + B an M-matrix.
+        B, b = self._base._assemble_boundary_system(
+            t, temperature=temperature if self.bc_type == "radiative" else None, tangential=False)
+        return B.tocsr(), b
+
     def _global_bounds(self, u0, t0, t_end):
         """Physical maximum-principle bounds [m, M] for the global limiter.
 
         Uses ``bounds`` if supplied, else the extrema of the initial data and the
-        Dirichlet boundary sampled across the time interval.
+        Dirichlet boundary (or Robin/radiative ambient) data across the time
+        interval.  With non-zero Neumann/flux inflow there is no a-priori
+        maximum principle: use ``limiter="source_envelope"``.
         """
         if self._user_bounds is not None:
             return self._user_bounds
@@ -177,9 +217,14 @@ class AFCMonotoneSolver:
         lo = float(np.min(u0))
         hi = float(np.max(u0))
         for t in (t0, 0.5 * (t0 + t_end), t_end):
-            bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t), dtype=float), (self.M,))
-            lo = min(lo, float(bc[self._boundary_idx].min()) if self._boundary_idx.size else lo)
-            hi = max(hi, float(bc[self._boundary_idx].max()) if self._boundary_idx.size else hi)
+            if self.bc_type == "dirichlet":
+                bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t), dtype=float), (self.M,))
+                lo = min(lo, float(bc[self._boundary_idx].min()) if self._boundary_idx.size else lo)
+                hi = max(hi, float(bc[self._boundary_idx].max()) if self._boundary_idx.size else hi)
+            else:
+                amb = self._ambient_range(t)
+                if amb is not None:
+                    lo, hi = min(lo, amb[0]), max(hi, amb[1])
         return lo, hi
 
     def _zalesak_alpha(self, u_iter, umin, umax):
@@ -228,6 +273,8 @@ class AFCMonotoneSolver:
         u = np.array(u0, dtype=float)
         nsteps = max(int(round((t_end - t0) / self.dt)), 1)
         dt = (t_end - t0) / nsteps
+        dirichlet = self.bc_type == "dirichlet"
+        bidx = self._boundary_idx
 
         # Smoothness tolerance from the solution scale (range of the initial data).
         if self.smoothness_factor > 0.0:
@@ -236,9 +283,18 @@ class AFCMonotoneSolver:
         else:
             self._eps = np.zeros(self.M)
 
-        sys_L = (diags(self.cell_areas, format="csr") + dt * self.A_L).tocsr()
-        _apply_dirichlet_rows_csr(sys_L, self._boundary_idx)
-        factor = factorized(sys_L.tocsc())
+        mass = diags(self.cell_areas, format="csr")
+        constant_lhs = self.bc_type in ("dirichlet", "neumann", "flux")
+        if constant_lhs:
+            sys_L = (mass + dt * self.A_L).tocsr()
+            if dirichlet:
+                _apply_dirichlet_rows_csr(sys_L, bidx)
+            factor = factorized(sys_L.tocsc())
+
+        def low_order_factor(B):
+            # The boundary closure B is diagonal and non-negative, so A_L + B is
+            # still an M-matrix: the low-order scheme stays bound-preserving.
+            return factor if constant_lhs else factorized((mass + dt * (self.A_L + B)).tocsc())
 
         cx, cy = self.cell_centers[:, 0], self.cell_centers[:, 1]
         global_m, global_M = self._global_bounds(u, t0, t_end) if self.limiter == "global" else (None, None)
@@ -246,11 +302,15 @@ class AFCMonotoneSolver:
             if self._user_bounds is not None:
                 env_lo, env_hi = self._user_bounds
             else:
-                bc0 = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t0), dtype=float), (self.M,))
-                vals = np.concatenate([u, bc0[self._boundary_idx]])
-                env_lo, env_hi = float(vals.min()), float(vals.max())
+                vals = [u]
+                if dirichlet:
+                    bc0 = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t0), dtype=float), (self.M,))
+                    vals.append(bc0[bidx])
+                env_lo = float(min(v.min() for v in vals if v.size))
+                env_hi = float(max(v.max() for v in vals if v.size))
         interior = np.ones(self.M, dtype=bool)
-        interior[self._boundary_idx] = False
+        if dirichlet:
+            interior[bidx] = False
         self.bound_history = []
         self.limiter_activity = []
         self.extrema_history = []
@@ -259,22 +319,42 @@ class AFCMonotoneSolver:
         for _ in range(nsteps):
             t_next = t + dt
             src = np.broadcast_to(np.asarray(self._base.source_func(cx, cy, t_next), dtype=float), (self.M,))
-            bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t_next), dtype=float), (self.M,))
-            rhs_base = self.cell_areas * u + dt * (self.cell_areas * src)
-            rhs_base[self._boundary_idx] = bc[self._boundary_idx]
+            B, b = self._boundary(t_next, temperature=u)
+            rhs_core = self.cell_areas * u + dt * (self.cell_areas * src)
+            if dirichlet:
+                bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t_next), dtype=float), (self.M,))
+                rhs_base = rhs_core.copy()
+                rhs_base[bidx] = bc[bidx]
+            else:
+                rhs_base = rhs_core + dt * b
+            solve_L = low_order_factor(B)
+            u_low = solve_L(rhs_base)  # low-order (M-matrix) solution, source and boundary included
+            if self.bc_type == "radiative":  # converge the nonlinear boundary for the predictor
+                for _ in range(self.max_iters):
+                    B, b = self._boundary(t_next, temperature=u_low)
+                    solve_L = low_order_factor(B)
+                    rhs_base = rhs_core + dt * b
+                    u_prev, u_low = u_low, solve_L(rhs_base)
+                    if np.max(np.abs(u_low - u_prev)) <= self.tol * max(1.0, np.max(np.abs(u_low))):
+                        break
 
-            u_low = factor(rhs_base)  # low-order (M-matrix) solution, source included
             if self.limiter == "global":
-                # Physical maximum-principle bounds for every node.
                 umin = np.full(self.M, global_m)
                 umax = np.full(self.M, global_M)
             elif self.limiter == "source_envelope":
-                q_int = src[interior] if np.any(interior) else src
-                g_b = bc[self._boundary_idx]
-                env_hi = max(env_hi + dt * max(float(np.max(q_int)), 0.0),
-                             float(g_b.max()) if g_b.size else -np.inf)
-                env_lo = min(env_lo - dt * max(float(np.max(-q_int)), 0.0),
-                             float(g_b.min()) if g_b.size else np.inf)
+                # Discrete comparison principle: boundary inflow (Neumann/flux) acts as
+                # a source b_i/|Omega_i| in boundary cells; Robin/radiative ambient
+                # temperatures and Dirichlet data bound the envelope from outside.
+                q_eff = src + (b / self.cell_areas if self.bc_type in ("neumann", "flux") else 0.0)
+                q_eff = q_eff[interior] if np.any(interior) else q_eff
+                env_hi = env_hi + dt * max(float(np.max(q_eff)), 0.0)
+                env_lo = env_lo - dt * max(float(np.max(-q_eff)), 0.0)
+                if dirichlet and bidx.size:
+                    env_hi = max(env_hi, float(bc[bidx].max()))
+                    env_lo = min(env_lo, float(bc[bidx].min()))
+                amb = self._ambient_range(t_next)
+                if amb is not None:
+                    env_lo, env_hi = min(env_lo, amb[0]), max(env_hi, amb[1])
                 umin = np.full(self.M, env_lo)
                 umax = np.full(self.M, env_hi)
             elif self.limiter == "source_local":
@@ -282,16 +362,22 @@ class AFCMonotoneSolver:
             else:
                 # Bounds from the previous time level's local neighbourhood.
                 umin, umax = self._local_bounds(u)
-                umin[self._boundary_idx] = np.minimum(umin[self._boundary_idx], bc[self._boundary_idx])
-                umax[self._boundary_idx] = np.maximum(umax[self._boundary_idx], bc[self._boundary_idx])
+                if dirichlet:
+                    umin[bidx] = np.minimum(umin[bidx], bc[bidx])
+                    umax[bidx] = np.maximum(umax[bidx], bc[bidx])
 
             self.bound_history.append((t_next, float(np.min(umin)), float(np.max(umax))))
             u_iter = u_low  # low-order predictor
             for _ in range(self.max_iters):
                 limited = self._zalesak_alpha(u_iter, umin, umax)
+                if self.bc_type == "radiative":
+                    B, b = self._boundary(t_next, temperature=u_iter)
+                    solve_L = low_order_factor(B)
+                    rhs_base = rhs_core + dt * b
                 rhs = rhs_base + dt * self._scatter_edges(limited)
-                rhs[self._boundary_idx] = bc[self._boundary_idx]
-                u_new = factor(rhs)
+                if dirichlet:
+                    rhs[bidx] = bc[bidx]
+                u_new = solve_L(rhs)
                 err = np.max(np.abs(u_new - u_iter))
                 u_iter = u_new
                 if err <= self.tol * max(1.0, np.max(np.abs(u_new))):

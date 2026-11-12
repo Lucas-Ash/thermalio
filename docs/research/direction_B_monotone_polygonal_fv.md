@@ -118,6 +118,17 @@ Dirichlet data):
   inconsistent behavior — the classic linear-monotone-scheme limitation that
   motivates PR2.
 
+### Update (2026-11): AFC with every boundary type
+
+`AFCMonotoneSolver` accepts `bc_type` in {dirichlet, neumann, robin, flux,
+radiative}. The low-order operator adds the boundary closure without the
+tangential correction (`A_L + B` stays an M-matrix). Robin and radiative ambient
+temperatures (`value/beta`, `T_inf`) extend the global bounds and the local
+envelopes. Neumann and flux inflow `b_i/|Omega_i|` enters the envelope as a
+source. Radiative runs re-assemble the closure for the predictor and the
+limited step. Tests: `tests/test_boundary_conditions.py` (relaxation stays in
+`[T_inf, max u0]`, second-order convergence for all types).
+
 ## Design sketch
 - Landed: `heat_solver/dmp.py`; `monotone` flag in `heat_solver/polygonal.py`
   (`_apply_monotone` applied to each assembled diffusion matrix).

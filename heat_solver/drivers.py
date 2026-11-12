@@ -479,10 +479,6 @@ def run_test(
         raise ValueError("run_test supports only 'delaunay'. Use polygonal test drivers for polygonal meshes.")
     case_info = get_analytical_case(case, alpha=alpha, t_end=t_end)
     bc_type = case_info.get("bc_type", "dirichlet")
-    if bc_type != "dirichlet":
-        raise ValueError(
-            f"Case '{case}' requires {bc_type} boundary conditions, but the triangular solver supports only Dirichlet."
-        )
     if bbox is None:
         bbox = case_info["bbox"]
     points, tris = _driver_mesh(mesh, use_library, "delaunay", nx=nx, ny=ny, jitter=jitter, bbox=bbox,
@@ -502,8 +498,8 @@ def run_test(
         tris,
         alpha=alpha,
         dt=dt,
-        bc_type="dirichlet",
-        bc_func=g,
+        bc_type=bc_type,
+        bc_func=g if bc_type == "dirichlet" else case_info["boundary"],
         source_func=source_func,
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,

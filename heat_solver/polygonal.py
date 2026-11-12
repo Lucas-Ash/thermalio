@@ -176,8 +176,9 @@ class PolygonalHeatSolver:
         self.bc_type = str(bc_type).lower()
         self.bc_func = bc_func if bc_func is not None else (lambda x, y, t: np.zeros_like(x, dtype=float))
         self.source_func = source_func if source_func is not None else (lambda x, y, t: np.zeros_like(x, dtype=float))
-        if self.bc_type not in {"dirichlet", "neumann", "robin", "radiative"}:
-            raise ValueError("bc_type must be one of: dirichlet, neumann, robin, radiative")
+        from .boundary_conditions import normalize_bc_type
+
+        self.bc_type = normalize_bc_type(self.bc_type)
         self.nonorthogonal_correction = bool(nonorthogonal_correction)
         self.monotone = bool(monotone)
         self.linear_solver = str(linear_solver).lower().strip()
@@ -258,6 +259,7 @@ class PolygonalHeatSolver:
                 and self.nonorthogonal_correction
             )
             or (self.flux_scheme == "mpfa" and self.bc_type != "dirichlet")
+            or (self.flux_discretization == "quadratic" and self.bc_type in ("robin", "radiative"))
         )
         self.gradient_coeffs = None
         if need_tpfa_gradients:
@@ -421,116 +423,125 @@ class PolygonalHeatSolver:
         return process_alpha(self.alpha, x, y, temperature=temp)
 
     def _parse_robin_data(self, data, count):
-        if isinstance(data, dict):
-            beta = data.get("beta")
-            value = data.get("value", data.get("gamma", data.get("rhs")))
-        else:
-            try:
-                beta, value = data
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "Robin boundary conditions require bc_func to return (beta, value) "
-                    "for alpha * du/dn + beta * u = value."
-                ) from exc
+        from .boundary_conditions import parse_robin
 
-        if beta is None or value is None:
-            raise ValueError(
-                "Robin boundary conditions require bc_func to provide both beta and value."
-            )
-
-        beta = np.broadcast_to(np.asarray(beta, dtype=float), (count,))
-        value = np.broadcast_to(np.asarray(value, dtype=float), (count,))
-        return beta, value
+        return parse_robin(data, count)
 
     def _parse_radiative_data(self, data, count):
-        if isinstance(data, dict):
-            emissivity = data.get("epsilon", data.get("emissivity"))
-            t_inf = data.get("t_inf", data.get("ambient_temperature", data.get("T_inf")))
-            sigma = data.get("sigma", 5.670374419e-8)
-        else:
-            try:
-                if len(data) == 2:
-                    emissivity, t_inf = data
-                    sigma = 5.670374419e-8
-                else:
-                    emissivity, t_inf, sigma = data
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "Radiative boundary conditions require bc_func to return "
-                    "(epsilon, T_inf) or (epsilon, T_inf, sigma), or a dict with "
-                    "'epsilon'/'emissivity' and 't_inf'/'ambient_temperature'."
-                ) from exc
+        from .boundary_conditions import parse_radiative
 
-        if emissivity is None or t_inf is None:
-            raise ValueError(
-                "Radiative boundary conditions require both emissivity and ambient temperature."
-            )
+        return parse_radiative(data, count)
 
-        emissivity = np.broadcast_to(np.asarray(emissivity, dtype=float), (count,))
-        t_inf = np.broadcast_to(np.asarray(t_inf, dtype=float), (count,))
-        sigma = np.broadcast_to(np.asarray(sigma, dtype=float), (count,))
-        if np.any(emissivity < 0.0):
-            raise ValueError("Radiative emissivity must be non-negative.")
-        if np.any(sigma <= 0.0):
-            raise ValueError("Stefan-Boltzmann coefficient sigma must be positive.")
-        return emissivity, t_inf, sigma
+    def _boundary_tangential_operator(self):
+        """Sparse ``(n_faces x M)`` map ``u -> u_c + s_f . grad_h u_c`` for boundary faces.
 
-    def _assemble_boundary_system(self, t, temperature=None):
-        cells = self.boundary_faces["cells"]
-        if cells.size == 0:
-            return diags(np.zeros(self.M), format="csr"), np.zeros(self.M)
+        ``s_f`` is the tangential part of the offset from the cell centroid to
+        the face midpoint.  On orthogonal boundary cells ``s_f = 0`` and the map
+        is the plain cell value; on skewed cells it removes the O(h) error that
+        the one-sided closure would otherwise make in the face value (the
+        boundary analogue of the interior non-orthogonal correction).
+        """
+        cached = getattr(self, "_tangential_op", None)
+        if cached is not None:
+            return cached
+        from scipy.sparse import coo_matrix
 
-        lengths = self.boundary_faces["lengths"]
-        distances = self.boundary_faces["distances"]
-        midpoints = self.boundary_faces["midpoints"]
-        normals = self.boundary_faces["normals"]
+        faces = self.boundary_faces
+        cells, mids, normals = faces["cells"], faces["midpoints"], faces["normals"]
+        rows, cols, vals = list(range(cells.size)), cells.tolist(), [1.0] * cells.size
+        if self.gradient_coeffs is not None:
+            for f, c in enumerate(cells.tolist()):
+                r = mids[f] - self.cell_centers[c]
+                s_vec = r - np.dot(r, normals[f]) * normals[f]
+                if np.hypot(*s_vec) <= 1e-14 * max(1.0, np.hypot(*r)):
+                    continue
+                for k, g in self.gradient_coeffs[c].items():
+                    rows.append(f)
+                    cols.append(int(k))
+                    vals.append(float(np.dot(s_vec, g)))
+        op = coo_matrix((vals, (rows, cols)), shape=(cells.size, self.M)).tocsr()
+        self._tangential_op = op
+        return op
 
+    def _boundary_face_relations(self, t, temperature=None, tangential=True):
+        """Per-face boundary relations in terms of the corrected cell value ``v = T u``.
+
+        Returns ``(T, a, c, lam, mu)`` with the inward flux ``q_in ~ c - a v``
+        and the face value ``u_f ~ lam v + mu`` for every non-Dirichlet type
+        (linear types exactly; radiation Newton-linearized about ``temperature``
+        after solving the scalar face balance).  ``T`` applies the tangential
+        correction for Robin/radiative closures when gradients are available
+        (non-orthogonal correction or the quadratic flux); otherwise it is the
+        plain face-to-cell map.
+        """
+        from scipy.sparse import coo_matrix
+
+        faces = self.boundary_faces
+        cells = faces["cells"]
+        lengths, distances = faces["lengths"], faces["distances"]
+        midpoints, normals = faces["midpoints"], faces["normals"]
+        n_f = cells.size
         boundary_temperature = None if temperature is None else np.asarray(temperature, dtype=float)[cells]
         Alpha_faces = self._process_alpha(midpoints[:, 0], midpoints[:, 1], temperature=boundary_temperature)
         alpha_n = np.einsum("ij,ij->i", normals, np.einsum("ijk,ik->ij", Alpha_faces, normals))
+        data = self._evaluate_bc(midpoints[:, 0], midpoints[:, 1], t, normals=normals)
+        if tangential and self.bc_type in ("robin", "radiative") and self.gradient_coeffs is not None:
+            T = self._boundary_tangential_operator()
+        else:
+            T = coo_matrix((np.ones(n_f), (np.arange(n_f), cells)), shape=(n_f, self.M)).tocsr()
+        if self.bc_type in ("neumann", "flux"):
+            g = np.broadcast_to(np.asarray(data, dtype=float), (n_f,))
+            q_in = alpha_n * g if self.bc_type == "neumann" else g
+            return T, np.zeros(n_f), q_in, np.ones(n_f), distances * q_in / alpha_n
+        if self.bc_type == "robin":
+            beta, value = self._parse_robin_data(data, n_f)
+            denom = alpha_n + beta * distances
+            if np.any(np.abs(denom) <= 1e-14):
+                raise ValueError("Robin boundary condition is singular because alpha + beta * d is too small.")
+            a = alpha_n * beta / denom
+            c = alpha_n * value / denom
+            return T, a, c, alpha_n / denom, distances * value / denom
+        # radiative
+        if temperature is None:
+            raise ValueError("Radiative boundary assembly requires the current temperature iterate.")
+        emissivity, t_inf, sigma = self._parse_radiative_data(data, n_f)
+        v = T @ np.asarray(temperature, dtype=float)
+        es = emissivity * sigma
+        t_inf4 = np.maximum(t_inf, 0.0) ** 4
+        w = alpha_n / distances
+        u_f = v.copy()
+        for _ in range(50):
+            uf_pos = np.maximum(u_f, 0.0)
+            step = (w * (u_f - v) + es * (uf_pos**4 - t_inf4)) / (w + 4.0 * es * uf_pos**3)
+            u_f = u_f - step
+            if np.max(np.abs(step)) <= 1e-14 * max(1.0, float(np.max(np.abs(u_f)))):
+                break
+        uf_pos = np.maximum(u_f, 0.0)
+        q = -es * (uf_pos**4 - t_inf4)
+        dfdv = w / (w + 4.0 * es * uf_pos**3)
+        a = 4.0 * es * uf_pos**3 * dfdv
+        return T, a, q + a * v, dfdv, u_f - dfdv * v
 
-        if self.bc_type == "neumann":
-            normal_derivative = np.broadcast_to(
-                np.asarray(
-                    self._evaluate_bc(midpoints[:, 0], midpoints[:, 1], t, normals=normals),
-                    dtype=float,
-                ),
-                (cells.size,),
-            )
-            rhs = np.bincount(cells, weights=alpha_n * lengths * normal_derivative, minlength=self.M)
+    def _assemble_boundary_system(self, t, temperature=None, tangential=True):
+        """Boundary closure ``(B, b)``: ``(A + B) u = ... + b`` for non-Dirichlet types.
+
+        Built from :meth:`_boundary_face_relations`: ``B = E^T diag(|f| a) T`` and
+        ``b = E^T (|f| c)`` with ``E`` the face-to-cell incidence.  ``B`` is
+        diagonal on orthogonal boundary cells and gains the tangential-correction
+        stencil on skewed ones.
+        """
+        cells = self.boundary_faces["cells"]
+        if cells.size == 0:
+            return diags(np.zeros(self.M), format="csr"), np.zeros(self.M)
+        T, a, c, _, _ = self._boundary_face_relations(t, temperature=temperature, tangential=tangential)
+        lengths = self.boundary_faces["lengths"]
+        rhs = np.bincount(cells, weights=lengths * c, minlength=self.M)
+        if not np.any(a):
             return diags(np.zeros(self.M), format="csr"), rhs
+        from scipy.sparse import coo_matrix
 
-        if self.bc_type == "radiative":
-            if temperature is None:
-                raise ValueError("Radiative boundary assembly requires the current temperature iterate.")
-            emissivity, t_inf, sigma = self._parse_radiative_data(
-                self._evaluate_bc(midpoints[:, 0], midpoints[:, 1], t, normals=normals),
-                cells.size,
-            )
-            t_face = np.asarray(temperature, dtype=float)[cells]
-            # Tangent linearization around current iterate:
-            # q(T) = eps*sigma*(T^4 - T_inf^4) ≈ a*T - b,
-            # a = 4*eps*sigma*T_k^3, b = 3*eps*sigma*T_k^4 + eps*sigma*T_inf^4
-            # and alpha*du/dn = -q contributes +a*T on lhs and +b on rhs.
-            coeff = 4.0 * emissivity * sigma * np.maximum(t_face, 0.0) ** 3
-            const = 3.0 * emissivity * sigma * np.maximum(t_face, 0.0) ** 4 + emissivity * sigma * np.maximum(t_inf, 0.0) ** 4
-            diag = np.bincount(cells, weights=lengths * coeff, minlength=self.M)
-            rhs = np.bincount(cells, weights=lengths * const, minlength=self.M)
-            return diags(diag, format="csr"), rhs
-
-        robin_beta, robin_value = self._parse_robin_data(
-            self._evaluate_bc(midpoints[:, 0], midpoints[:, 1], t, normals=normals),
-            cells.size,
-        )
-        denom = alpha_n + robin_beta * distances
-        if np.any(np.abs(denom) <= 1e-14):
-            raise ValueError("Robin boundary condition is singular because alpha + beta * d is too small.")
-
-        effective_beta = alpha_n * robin_beta / denom
-        effective_value = alpha_n * robin_value / denom
-        diag = np.bincount(cells, weights=lengths * effective_beta, minlength=self.M)
-        rhs = np.bincount(cells, weights=lengths * effective_value, minlength=self.M)
-        return diags(diag, format="csr"), rhs
+        E = coo_matrix((lengths * a, (cells, np.arange(cells.size))), shape=(self.M, cells.size)).tocsr()
+        return (E @ T).tocsr(), rhs
 
     def _build_gradient_reconstruction(self):
         coeffs = []

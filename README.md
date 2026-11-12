@@ -8,7 +8,7 @@ $$
 \frac{\partial u}{\partial t} - \nabla \cdot (\boldsymbol{\alpha} \nabla u) = Q(\mathbf{x}, t)
 $$
 
-with **Dirichlet**, **Neumann**, **Robin**, and **nonlinear radiative** boundary data where supported. Extensions include **anisotropic** diffusivity $\boldsymbol{\alpha}$, **temperature-dependent** $\alpha(u)$, and **phase change** via an **apparent heat capacity** formulation.
+with **Dirichlet**, **Neumann**, **Robin**, **prescribed-flux**, and **nonlinear radiative** boundary data, supported by every solver (see [`docs/boundary_conditions.md`](docs/boundary_conditions.md)). Extensions include **anisotropic** diffusivity $\boldsymbol{\alpha}$, **temperature-dependent** $\alpha(u)$, and **phase change** via an **apparent heat capacity** formulation.
 
 ---
 
@@ -105,12 +105,18 @@ Representative **numerical vs. exact fields and pointwise error** on the *same* 
 
 **Radiation boundary conditions** — **Nonlinear radiative** boundaries (emissivity / Stefan–Boltzmann-type closure) with a manufactured solution that closes the forcing and boundary residuals.
 
+**One boundary-condition system for every solver** — `heat_solver/boundary_conditions.py` defines the five types (`dirichlet`, `neumann`, `robin`, `flux`, `radiative`) and their callback conventions once; the polygonal (all flux discretizations), AFC, enthalpy / apparent-capacity, triangular P1, curvilinear and transport solvers all accept every type. `boundary_conditions_study.py` checks each solver x type on standard problems (insulated plate, Carslaw–Jaeger convective cooling, uniform wall heating, radiating plate) and observes second order almost everywhere:
+
+<p align="center">
+  <img src="test_plots/boundary_conditions/capability_matrix.png" alt="Boundary-condition capability matrix" width="95%" />
+</p>
+
 <p align="center">
   <img src="test_plots/radiative_manufactured/level_05_superfine/square_polygonal.png" alt="Radiative BC manufactured solution" width="48%" />
   <img src="test_plots/radiative_manufactured/level_03_fine/nonorthogonal_tiled_polygonal.png" alt="Radiative BC on non-orthogonal tiled mesh" width="48%" />
 </p>
 
-**Extended transport models** — beyond the classical parabolic Fourier law, `heat_solver/transport.py` adds three research-oriented transport models (manufactured-solution verified, reusing the polygonal FV diffusion operator). All three support **Dirichlet**, **Neumann**, **Robin**, and **prescribed-flux** boundary data — `bc_type='flux'` prescribes the inward boundary heat flux $q_{\mathrm{in}}=\alpha\,\partial u/\partial n$ directly (the natural form for pulsed-laser/contact heating of the Cattaneo model), and is discretely energy-conservative:
+**Extended transport models** — beyond the classical parabolic Fourier law, `heat_solver/transport.py` adds three research-oriented transport models (manufactured-solution verified, reusing the polygonal FV diffusion operator). All of them support **Dirichlet**, **Neumann**, **Robin**, **prescribed-flux**, and **radiative** boundary data — `bc_type='flux'` prescribes the inward boundary heat flux $q_{\mathrm{in}}=\alpha\,\partial u/\partial n$ directly (the natural form for pulsed-laser/contact heating of the Cattaneo model), and is discretely energy-conservative:
 
 - **Non-Fourier / Cattaneo–Vernotte thermal waves** — $\tau\,\partial_{tt} u + \partial_t u - \nabla\cdot(\alpha\nabla u) = Q$, giving heat a finite propagation speed $c=\sqrt{\alpha/\tau}$ ("second sound"), integrated with an unconditionally stable three-level scheme (`HyperbolicHeatSolver`; first order in time, since diffusion and source are evaluated at the new time level).
 - **Advection–diffusion (convective transport)** — $\partial_t u + \nabla\cdot(\mathbf{v}\,u) - \nabla\cdot(\alpha\nabla u) = Q$, with a prescribed velocity field and a choice of first-order monotone **upwind** or second-order **central** face flux (Péclet-number aware) (`AdvectionDiffusionHeatSolver`).
@@ -154,6 +160,7 @@ Runnable examples and convergence tables: `python transport_demo.py` (writes `te
 | `heat_solver/adjoint.py` | Exact discrete adjoints: conductivity/perfusion/source fields and Robin coefficient, Caputo L1 (`beta`), nonlinear enthalpy Stefan (`L`, `alpha`, `tau`); Taylor tests; study script `direction_d_adjoint_studies.py`. Write-up: `direction_CD_enthalpy_adjoint_report.tex`. |
 | `heat_solver/inverse.py`, `heat_solver/pinn_jax.py` | Direction D inverse problems: least squares, Pennes adjoint, UQ, field inversion, ML/PINN baselines (JAX optional). |
 | `tests/` | Pytest unit suite run by CI (`.github/workflows/ci.yml`). |
+| `docs/boundary_conditions.md` | Boundary types, conventions, per-solver discretization, standard test problems and the capability matrix. |
 | `docs/research/gap_analysis_vs_established_codes.md` | Measured gaps vs FiPy / scikit-fem / FEniCS / deal.II and a prioritized roadmap. |
 | `docs/research/` | Research notes for directions A–D (all landed): design decisions, findings, open follow-ups. |
 
@@ -177,7 +184,7 @@ cd /path/to/thermalio
 MPLCONFIGDIR=/tmp/matplotlib python tests.py
 ```
 
-**Boundary-condition spot checks** (polygonal Neumann / Robin): `tests/test_polygonal_boundary_conditions.py`.
+**Boundary-condition checks**: `tests/test_polygonal_boundary_conditions.py` (polygonal Neumann / Robin) and `tests/test_boundary_conditions.py` (every solver x every boundary type on standard problems).
 
 **Verification & Validation tooling** — the convergence summaries report the **observed order of accuracy**, **Richardson-extrapolated error**, and an **asymptotic-range flag** (via `heat_solver/verification.py`). Manufactured-solution sources can be **auto-derived symbolically** with `heat_solver/mms.py` (reproducing the hand-coded cases to machine precision, including sums of real powers of `t` for fractional cases; needs the optional `sympy` dependency, `pip install -r requirements-dev.txt`). Cross-scheme and cross-mesh agreement (TPFA vs reconstructed-gradient vs MPFA) is checked by `python -m heat_solver.nversion --case source_driven_sine`, and the FV solvers are validated against an **independent finite-difference reference** (`heat_solver/reference_fd.py`). The consolidated **benchmark runner** ties these together:
 

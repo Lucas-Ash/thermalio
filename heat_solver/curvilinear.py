@@ -43,8 +43,9 @@ class CurvilinearHeatSolver:
         self.bc_func = bc_func if bc_func is not None else (lambda x, y, t: np.zeros_like(x, dtype=float))
         self.source_func = source_func if source_func is not None else (lambda x, y, t: np.zeros_like(x, dtype=float))
         self.bc_type = str(bc_type).lower()
-        if self.bc_type not in {"dirichlet", "neumann", "robin", "radiative"}:
-            raise ValueError("bc_type must be one of: dirichlet, neumann, robin, radiative")
+        from .boundary_conditions import normalize_bc_type
+
+        self.bc_type = normalize_bc_type(self.bc_type)
         self.time_scheme = str(time_scheme).lower().strip()
         if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
             raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
@@ -450,6 +451,12 @@ class CurvilinearHeatSolver:
                 owners.shape,
             )
             bc_rhs = alpha_n * normal_derivative
+        elif self.bc_type == "flux":
+            # Prescribed inward heat flux q_in = alpha du/dn (no alpha factor).
+            bc_rhs = np.broadcast_to(
+                np.asarray(self._evaluate_bc(x, y, t, normals=normals), dtype=float),
+                owners.shape,
+            )
         elif self.bc_type == "robin":
             beta, value = self._parse_robin_data(
                 self._evaluate_bc(x, y, t, normals=normals),

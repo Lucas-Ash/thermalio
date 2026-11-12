@@ -169,7 +169,9 @@ def enthalpy_solver_flux_audit(solver):
     For ``tau = 0`` each step satisfies
     ``|Omega|(H^{n+1}-H^n)/k + K T^{n+1} = |Omega| q + b + r`` on every cell, so
     ``Delta E = source + b + flux`` holds to the Newton tolerance; any residual
-    is a solver (not formulation) error.
+    is a solver (not formulation) error.  For natural boundary types the
+    ``prescribed_flux_energy`` is the full boundary inflow ``sum(b - B T)``
+    (the Robin / radiative closure ``B`` lives in ``K``).
     """
     from .enthalpy import three_level_coefficients
 
@@ -188,16 +190,22 @@ def enthalpy_solver_flux_audit(solver):
         h_prev2 = h_m1 if n == 0 else H[n - 1]
         if n == 0 and solver.tau > 0:
             raise ValueError("enthalpy_solver_flux_audit currently supports tau = 0.")
-        K, b = solver._operator(times[n + 1])
         q = solver._source(times[n + 1])
         temp = solver.temperature(H[n + 1])
+        K, b = solver._operator(times[n + 1], temperature=temp)
         residual = area * (gamma * H[n + 1] - p * H[n] - s * h_prev2 - q) + K @ temp - b
         r_b = residual[bidx] if solver.bc_type == "dirichlet" else np.zeros(0)
         flux.append(k * float(np.sum(r_b)))
         if r_b.size:
             per_cell += k * r_b
         src.append(k * float(np.sum(area * q)))
-        bnd.append(k * float(np.sum(b)))
+        if solver.bc_type == "dirichlet":
+            bnd.append(k * float(np.sum(b)))
+        else:
+            # Natural boundaries: the boundary inflow is sum(b - B T) (Robin /
+            # radiative closures carry a temperature-dependent part in K); the
+            # conservative interior part of K sums to zero.
+            bnd.append(k * float(np.sum(b) - np.sum(K @ temp)))
     delta_e = float(np.sum(area * (H[-1] - H[0])))
     flux_energy = float(np.sum(flux))
     closure = delta_e - (float(np.sum(src)) + float(np.sum(bnd)) + flux_energy)

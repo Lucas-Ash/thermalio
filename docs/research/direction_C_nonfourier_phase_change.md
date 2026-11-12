@@ -178,6 +178,19 @@ manufactured exactness, runner smoke test).
   `test_plots/direction_C_nonfourier_phase_change/sweeps/`, alongside a sweeps
   README describing all Direction C sweep artifacts.
 
+## Boundary coverage (2026-11)
+
+The Cattaneo, Cattaneo-Stefan, fractional, advection-diffusion and Pennes solvers,
+plus `EnthalpyStefanSolver` and `ApparentCapacityPicardSolver`, accept all five
+boundary types, radiation included. Each implicit step iterates the
+Newton-linearized radiative closure. In the enthalpy Newton solver the closure
+is part of the residual, and its exact derivative is in the Jacobian. The
+advection boundary flux uses the BC-consistent face value. Manufactured
+problems (`bc_test_problems.transport_problem`) converge at second order for
+every model x type. `enthalpy_solver_flux_audit` re-assembles the closure at
+each stored temperature, so radiative runs still close their energy balance.
+See `docs/boundary_conditions.md`.
+
 ## Additional computing capabilities that would help
 
 1. **Adaptive time stepping for stiff phase change.** *Landed* for the

@@ -30,8 +30,11 @@ class NonUniformHeatSolver:
         self.N = self.points.shape[0]
         self.alpha = alpha
         self.dt = float(dt)
-        self.bc_type = bc_type
+        from .boundary_conditions import callback_accepts_normals, normalize_bc_type
+
+        self.bc_type = normalize_bc_type(bc_type)
         self.bc_func = bc_func if bc_func is not None else (lambda x, y, t: 0.0)
+        self._bc_accepts_normals = self.bc_type != "dirichlet" and callback_accepts_normals(self.bc_func)
         self.source_func = source_func if source_func is not None else (lambda x, y, t: 0.0)
         if phase_change_model is not None and not isinstance(phase_change_model, ApparentHeatCapacityModel):
             raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
@@ -40,8 +43,19 @@ class NonUniformHeatSolver:
         if phase_change_options is not None:
             self.phase_change_options.update(dict(phase_change_options))
         self._build_topology()
+        self._build_boundary_edges()
         self._build_dual_geometry()
         self._assemble_diffusion_matrix()
+        if self.bc_type != "dirichlet":
+            # Boundary vertices are unknowns for natural boundary conditions.  Their
+            # circumcentre-based control volumes can extend outside the domain
+            # (obtuse boundary triangles); use the lumped-P1 volume (one third of
+            # each incident triangle) there.  Dirichlet runs never use these
+            # volumes, so their results are unchanged.
+            lumped = np.zeros(self.N)
+            np.add.at(lumped, self.tris.ravel(), np.repeat(self.tri_areas / 3.0, 3))
+            self.cv_area = self.cv_area.copy()
+            self.cv_area[self.is_boundary] = lumped[self.is_boundary]
         self._build_mass_matrix()
         self.t = 0.0
         self.u = np.zeros(self.N)
@@ -70,6 +84,75 @@ class NonUniformHeatSolver:
         self.tri_centroids = np.mean(self.points[self.tris], axis=1)
         self.tri_areas = self._triangle_areas(self.points[self.tris])
         self.edge_to_tris = edges
+
+    def _build_boundary_edges(self):
+        """Boundary edges with lengths and outward unit normals (away from the owning triangle)."""
+        if self.boundary_edges.size == 0:
+            self._bedge_len = np.zeros(0)
+            self._bedge_normal = np.zeros((0, 2))
+            return
+        lengths, normals = [], []
+        for i, j in self.boundary_edges:
+            tri = self.tris[self.edge_to_tris[(int(i), int(j))][0]]
+            k = int([v for v in tri if v != i and v != j][0])
+            e = self.points[j] - self.points[i]
+            length = float(np.hypot(*e))
+            n = np.array([e[1], -e[0]]) / length
+            if np.dot(n, self.points[k] - self.points[i]) > 0:
+                n = -n
+            lengths.append(length)
+            normals.append(n)
+        self._bedge_len = np.asarray(lengths)
+        self._bedge_normal = np.asarray(normals)
+
+    def boundary_closure(self, t, temperature=None):
+        """Lumped natural-boundary terms ``(diag, rhs)`` for non-Dirichlet conditions.
+
+        The weak form contributes ``int_dOmega q_in phi_i ds`` with the inward
+        flux ``q_in = alpha du/dn ~ c - a u`` (see
+        :mod:`heat_solver.boundary_conditions`).  Each boundary edge gives half
+        its length to each endpoint (trapezoid rule), with the data evaluated
+        at the endpoint using that edge's outward normal.
+        """
+        from .boundary_conditions import evaluate, inflow_linearization
+        from .materials import process_alpha
+
+        diag = np.zeros(self.N)
+        rhs = np.zeros(self.N)
+        if self.bc_type == "dirichlet" or self.boundary_edges.size == 0:
+            return diag, rhs
+        ends = self.boundary_edges.reshape(-1)  # (2E,) endpoints
+        normals = np.repeat(self._bedge_normal, 2, axis=0)
+        weights = np.repeat(0.5 * self._bedge_len, 2)
+        x, y = self.points[ends, 0], self.points[ends, 1]
+        data = evaluate(self.bc_func, x, y, t, normals=normals, accepts_normals=self._bc_accepts_normals)
+        alpha_n = None
+        if self.bc_type == "neumann":
+            K = process_alpha(self.alpha, x, y)
+            alpha_n = np.einsum("ij,ij->i", normals, np.einsum("ijk,ik->ij", K, normals))
+        temp = None if temperature is None else np.asarray(temperature, dtype=float)[ends]
+        a, c = inflow_linearization(self.bc_type, data, ends.size, alpha_n=alpha_n, temperature=temp)
+        np.add.at(diag, ends, weights * a)
+        np.add.at(rhs, ends, weights * c)
+        return diag, rhs
+
+    def _solve_with_boundary(self, lhs, rhs, t, u_guess, max_iters=60, tol=1e-12):
+        """Add the natural-boundary closure and solve (Newton iteration for radiation)."""
+        if self.bc_type == "dirichlet":
+            lhs, rhs = self.apply_dirichlet(lhs, rhs, t)
+            return spsolve(lhs, rhs)
+        if self.bc_type != "radiative":
+            d, b = self.boundary_closure(t)
+            return spsolve((lhs + diags(d)).tocsr(), rhs + b)
+        u = np.asarray(u_guess, dtype=float).copy()
+        for _ in range(max_iters):
+            d, b = self.boundary_closure(t, temperature=u)
+            u_new = spsolve((lhs + diags(d)).tocsr(), rhs + b)
+            err = float(np.max(np.abs(u_new - u)))
+            u = u_new
+            if err <= tol * max(1.0, float(np.max(np.abs(u)))):
+                return u
+        raise RuntimeError("radiative boundary iteration did not converge; reduce dt.")
 
     @staticmethod
     def _triangle_areas(tri_points):
@@ -258,9 +341,7 @@ class NonUniformHeatSolver:
             mass_over_dt = diags(self.cv_area / dt_step, format="csr")
             rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
             lhs = (mass_over_dt + self.A).tocsr()
-            if self.bc_type.lower() == "dirichlet":
-                lhs, rhs = self.apply_dirichlet(lhs, rhs, t + dt_step)
-            return spsolve(lhs, rhs)
+            return self._solve_with_boundary(lhs, rhs, t + dt_step, u)
 
         max_iters = int(self.phase_change_options["max_iters"])
         tol = float(self.phase_change_options["tol"])
@@ -271,8 +352,12 @@ class NonUniformHeatSolver:
             mass_over_dt = diags((self.cv_area * cp_eff) / dt_step, format="csr")
             rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
             lhs = (mass_over_dt + self.A).tocsr()
-            if self.bc_type.lower() == "dirichlet":
+            if self.bc_type == "dirichlet":
                 lhs, rhs = self.apply_dirichlet(lhs, rhs, t + dt_step)
+            else:
+                d, b = self.boundary_closure(t + dt_step, temperature=u_iter)
+                lhs = (lhs + diags(d)).tocsr()
+                rhs = rhs + b
             u_next = spsolve(lhs, rhs)
             if relaxation != 1.0:
                 u_next = relaxation * u_next + (1.0 - relaxation) * u_iter
@@ -294,7 +379,7 @@ class NonUniformHeatSolver:
         use_cache = (
             self.reuse_linear_lhs
             and self.phase_change_model is None
-            and str(self.bc_type).lower() == "dirichlet"
+            and self.bc_type in ("dirichlet", "neumann", "flux")  # constant LHS
         )
         lhs_by_dt = {}
         factor_by_dt = {}
@@ -302,7 +387,7 @@ class NonUniformHeatSolver:
             for key in sorted({round(float(d), 12) for d in dts}):
                 mass_over_dt = diags(self.cv_area / key, format="csr")
                 lhs = (mass_over_dt + self.A).tocsr()
-                lhs_by_dt[key] = self._apply_dirichlet_matrix_only(lhs)
+                lhs_by_dt[key] = self._apply_dirichlet_matrix_only(lhs) if self.bc_type == "dirichlet" else lhs
                 factor_by_dt[key] = factorized(lhs_by_dt[key])
 
         for k in range(nsteps):
@@ -319,8 +404,11 @@ class NonUniformHeatSolver:
                 )
                 mass_over_dt = diags(self.cv_area / dt_step, format="csr")
                 rhs = (mass_over_dt @ self.u).copy() + self.cv_area * source_vals
-                for i in np.where(self.is_boundary)[0]:
-                    rhs[i] = self.bc_func(*self.points[i], t_next)
+                if self.bc_type == "dirichlet":
+                    for i in np.where(self.is_boundary)[0]:
+                        rhs[i] = self.bc_func(*self.points[i], t_next)
+                else:
+                    rhs = rhs + self.boundary_closure(t_next)[1]
                 self.u = factor_by_dt[dt_key](rhs)
             else:
                 self.u = self.step(self.u, self.t, dt_step)

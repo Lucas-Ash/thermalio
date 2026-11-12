@@ -10,9 +10,8 @@ The main PDE handled here is:
 
 with support for:
 
-- Dirichlet boundary conditions
-- Neumann boundary conditions
-- Robin boundary conditions
+- Dirichlet, Neumann, Robin, prescribed-flux and radiative boundary conditions
+  (every solver supports all five; see `docs/boundary_conditions.md`)
 - Volumetric source terms
 
 ## Important Files
@@ -20,12 +19,18 @@ with support for:
 - `heat_solver/polygonal.py`
   Polygonal cell-centered finite-volume solver.
   This is the main solver used by the current verification workflow.
-  Supports Dirichlet, Neumann, Robin, and `source_func`.
+  Supports every `bc_type` and `source_func`.
 
 - `heat_solver/triangular.py`
-  Vertex-centered solver on Delaunay meshes.
-  Supports Dirichlet and `source_func`.
-  It does not support Neumann or Robin. The drivers intentionally reject those cases for triangular runs.
+  Vertex-centered P1 solver on Delaunay meshes.
+  Supports every `bc_type` (natural BCs via lumped boundary-edge integrals) and `source_func`.
+
+- `heat_solver/boundary_conditions.py`, `heat_solver/bc_test_problems.py`
+  The shared BC set (`BC_TYPES`), callback parsing and the inflow linearization
+  `q_in ~ c - a u` used by every solver; standard test problems per BC type
+  (`heat_problem`, `transport_problem`). Capability study:
+  `boundary_conditions_study.py`; tests: `tests/test_boundary_conditions.py`.
+  If you add a solver, accept all of `BC_TYPES` and add it to that test file.
 
 - `heat_solver/cases.py`
   Manufactured / analytical solutions and case metadata.
@@ -81,7 +86,8 @@ with support for:
 
 - `tests/`
   Pytest unit-test suite (fast, ~2 min). This is what CI runs.
-  `tests/test_polygonal_boundary_conditions.py` holds the polygonal Neumann / Robin checks.
+  `tests/test_polygonal_boundary_conditions.py` holds the polygonal Neumann / Robin checks;
+  `tests/test_boundary_conditions.py` checks every solver x every boundary type.
 
 - `heat_solver/transport.py`, `heat_solver/interface_diagnostics.py`
   Extended transport models (Cattaneo, advection-diffusion, fractional, Pennes)
@@ -194,7 +200,7 @@ Run:
 
 ```bash
 cd /home/user/thermalio
-MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tests/test_polygonal_boundary_conditions.py -q
+MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tests/test_polygonal_boundary_conditions.py tests/test_boundary_conditions.py -q
 ```
 
 ## Boundary and Source Conventions
@@ -205,7 +211,7 @@ MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tes
 
 ### Neumann
 
-The polygonal solver interprets Neumann data as the outward normal derivative:
+All solvers interpret Neumann data as the outward normal derivative:
 
 `du/dn`
 
@@ -215,7 +221,7 @@ If normals are accepted by the callback:
 
 ### Robin
 
-The polygonal solver uses:
+All solvers use:
 
 `alpha * du/dn + beta * u = value`
 
@@ -227,6 +233,17 @@ The callback may return:
 If normals are accepted:
 
 `bc_func(x, y, t, nx, ny) -> (beta, value)`
+
+### Flux
+
+`bc_func(x, y, t[, nx, ny]) -> q_in`, the inward heat flux `alpha * du/dn`.
+
+### Radiative
+
+`alpha * du/dn = -eps * sigma * (u^4 - T_inf^4)`; the callback returns
+`(eps, T_inf)`, `(eps, T_inf, sigma)` or a dict (`sigma` defaults to the SI
+Stefan-Boltzmann constant). Implicit steppers iterate the Newton-linearized
+boundary closure to convergence.
 
 ### Source term
 
@@ -260,7 +277,6 @@ with
 ## Practical Change Rules
 
 - If you add a new analytical case, update `heat_solver/cases.py` and usually `tests.py`.
-- If the case uses Neumann or Robin, do not route it through the Delaunay / triangular solver.
 - If you change mesh/job definitions in `tests.py`, remember that `qa_regression.py` consumes `tests.iter_test_jobs()`.
 - If you intentionally change numerical output, rerun `qa_regression.py` once to seed/update baselines, then rerun it again to confirm clean comparison mode.
 - For simple syntax validation, use:

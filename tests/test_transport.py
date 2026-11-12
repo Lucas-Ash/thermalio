@@ -237,15 +237,20 @@ def test_fractional_stefan_requires_phase_change_model():
 # --------------------------------------------------------------------------- #
 # Neumann / Robin / prescribed-flux boundary conditions
 # --------------------------------------------------------------------------- #
-def test_transport_rejects_radiative_bc():
+def test_transport_rejects_unknown_bc_and_accepts_radiative():
     vertices, polygons, _ = generate_square_polygonal_mesh(nx=4, ny=4)
+    radiative = lambda x, y, t: (0.5, 1.0, 1.0)
     for cls, kwargs in (
         (HyperbolicHeatSolver, {"relaxation_time": 0.2}),
         (AdvectionDiffusionHeatSolver, {"velocity": (1.0, 0.0)}),
         (FractionalHeatSolver, {"beta": 0.6}),
     ):
         with pytest.raises(ValueError):
-            cls(vertices, polygons, 0.1, 0.01, bc_type="radiative", **kwargs)
+            cls(vertices, polygons, 0.1, 0.01, bc_type="convective", **kwargs)
+        # Radiation is supported by every transport solver (Newton-linearized closure).
+        solver = cls(vertices, polygons, 0.1, 0.01, bc_type="radiative", bc_func=radiative, **kwargs)
+        _, u = solver.solve(np.full(16, 2.0), 0.0, 0.03)
+        assert np.all(np.isfinite(u)) and u.max() < 2.0  # the plate cools towards T_inf = 1
 
 
 def test_hyperbolic_flux_matches_neumann_exactly():
@@ -291,22 +296,27 @@ def test_hyperbolic_boundary_manufactured_temporal_convergence(bc_type):
 
 @pytest.mark.parametrize("bc_type", ["neumann", "robin"])
 def test_advection_boundary_manufactured_convergence(bc_type):
+    # The profile is linear in space and the boundary convective flux uses the
+    # BC-consistent face value, so the scheme is exact in space: the error is
+    # the backward-Euler time error (independent of the mesh, first order in dt).
     case = transport_linear_boundary_case("advection", bc_type, alpha=0.05, velocity=(0.4, 0.3))
     t_end = 0.3
-    errors = []
-    for n in (12, 24):
+
+    def error(n, nt):
         vertices, polygons, centers, areas = _square(n, case["bbox"])
         solver = AdvectionDiffusionHeatSolver(
-            vertices, polygons, case["alpha"], t_end / 200, case["velocity"],
+            vertices, polygons, case["alpha"], t_end / nt, case["velocity"],
             scheme="central", bc_type=bc_type,
             bc_func=case["boundary"], source_func=case["source"],
         )
         u0 = case["solution"](centers[:, 0], centers[:, 1], 0.0)
         _, u = solver.solve(u0, 0.0, t_end)
-        u_exact = case["solution"](centers[:, 0], centers[:, 1], t_end)
-        errors.append(_rel_l2(u, u_exact, areas))
-    assert errors[0] < 2e-2
-    assert errors[1] < 0.7 * errors[0]
+        return _rel_l2(u, case["solution"](centers[:, 0], centers[:, 1], t_end), areas)
+
+    e12, e24 = error(12, 200), error(24, 200)
+    assert e12 < 1e-3
+    assert abs(e24 - e12) < 0.05 * e12  # no spatial error left
+    assert np.log2(error(12, 100) / e12) > 0.9  # first order in time
 
 
 def test_advection_crank_nicolson_robin():
