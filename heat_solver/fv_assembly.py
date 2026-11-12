@@ -35,13 +35,15 @@ def interior_faces(vertices, cell_centers, edge_to_cells):
     legacy assembly), ``length``, ``midpoint`` and ``d`` (``c_j - c_i``).
     Zero-length faces are dropped.
     """
-    pairs = [(edge, cells) for edge, cells in edge_to_cells.items() if len(cells) == 2]
-    if not pairs:
+    keys = list(edge_to_cells.keys())
+    vals = list(edge_to_cells.values())
+    sel = np.flatnonzero(np.fromiter(map(len, vals), dtype=np.intp, count=len(vals)) == 2)
+    if sel.size == 0:
         empty = np.zeros(0)
         return {"i": np.zeros(0, np.intp), "j": np.zeros(0, np.intp), "normal": np.zeros((0, 2)),
                 "dn": empty, "length": empty, "midpoint": np.zeros((0, 2)), "d": np.zeros((0, 2))}
-    edges = np.array([e for e, _ in pairs], dtype=np.intp)
-    cells = np.array([c for _, c in pairs], dtype=np.intp)
+    edges = np.array(keys, dtype=np.intp)[sel]
+    cells = np.array([vals[k] for k in sel], dtype=np.intp)
     ci = np.minimum(cells[:, 0], cells[:, 1])
     cj = np.maximum(cells[:, 0], cells[:, 1])
     v0 = vertices[edges[:, 0]]
