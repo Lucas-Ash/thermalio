@@ -459,9 +459,12 @@ def plot_parallelism(ens, kern, breakdown):
         b = before[r["cells"]]
         curves.append(((b["factorization"] + b["backsolve_per_run"]) / (b["setup"] + b["solve_wall"]),
                        "before (only LU + back-solves parallel)", "tab:red"))
-    total_now = r["setup_cached"] + r["solve_first"]
+    # Fractions of the separately measured phases (as in where_time_goes.png panel a): LU
+    # factorization and back-solves count as parallelizable in principle (parallel sparse
+    # direct solvers exist, but triangular solves scale poorly).
+    serial_now = r["setup_cached"] + r["lhs_build"] + r["framework_overhead"]
     par_now = r["assembly"] + r["rhs_per_run"] + r["factorization"] + r["backsolve_per_run"]
-    curves.append((min(par_now / total_now, 0.999), "now (assembly, RHS, LU parallel)", "tab:green"))
+    curves.append((par_now / (par_now + serial_now), "now (assembly, RHS, LU parallel)", "tab:green"))
     curves.append((0.99, "well-engineered parallel code", "tab:blue"))
     for f, lab, col in curves:
         S = 1.0 / ((1 - f) + f / P)
@@ -570,5 +573,19 @@ def main():
     print("done", time.perf_counter() - t_start)
 
 
+def replot():
+    """Redraw the figures from ``summary.json`` without re-measuring."""
+    summary = json.loads((OUT / "summary.json").read_text())
+    rows = summary["where_time_goes"]
+    plot_where_time_goes(rows)
+    plot_linear_solvers(summary["linear_solvers"])
+    plot_parallelism(summary["ensemble"], summary["threaded_kernels"],
+                     next(r for r in rows if r["cells"] == 65536))
+    ext_path = Path("test_plots/benchmark/external_codes/summary.json")
+    plot_accuracy(summary["time_order"], json.loads(ext_path.read_text()) if ext_path.exists() else None)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    replot() if "--replot" in sys.argv else main()
