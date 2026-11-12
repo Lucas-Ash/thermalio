@@ -4,18 +4,18 @@ This checks observed error trends; it does not constitute a mathematical guarant
 square_polygonal
   L2 monotone decrease: False
   Linf monotone decrease: False
-  level_01_coarse: h=6.666667e-02, L2_rel=1.759614e-05, Linf_rel=2.352505e-05, L2_rate=, Linf_rate=
-  level_02_medium: h=2.564103e-02, L2_rel=1.878674e-05, Linf_rel=2.361363e-05, L2_rate=-0.068520, Linf_rate=-0.003933
-  level_03_fine: h=1.612903e-02, L2_rel=1.904405e-05, Linf_rel=2.362293e-05, L2_rate=-0.029345, Linf_rate=-0.000849
-  level_04_finer: h=1.162791e-02, L2_rel=1.916345e-05, Linf_rel=2.362659e-05, L2_rate=-0.019100, Linf_rate=-0.000474
-  level_05_superfine: h=9.090909e-03, L2_rel=1.923007e-05, Linf_rel=2.362820e-05, L2_rate=-0.014101, Linf_rate=-0.000277
+  level_01_coarse: h=6.666667e-02, L2_rel=4.498929e-07, Linf_rel=6.923597e-07, L2_rate=, Linf_rate=
+  level_02_medium: h=2.564103e-02, L2_rel=4.841360e-07, Linf_rel=6.980678e-07, L2_rate=-0.076772, Linf_rate=-0.008593
+  level_03_fine: h=1.612903e-02, L2_rel=4.917306e-07, Linf_rel=6.986290e-07, L2_rate=-0.033577, Linf_rate=-0.001734, p_obs=-0.033577, p_3grid=1.057797, extrap_err=1.376429e-21, asymptotic=False
+  level_04_finer: h=1.162791e-02, L2_rel=4.952795e-07, Linf_rel=6.988732e-07, L2_rate=-0.021977, Linf_rate=-0.001068, p_obs=-0.021977, p_3grid=1.031083, extrap_err=-2.011703e-21, asymptotic=False
+  level_05_superfine: h=9.090909e-03, L2_rel=4.972671e-07, Linf_rel=6.989886e-07, L2_rate=-0.016272, Linf_rate=-0.000671, p_obs=-0.016272, p_3grid=1.021908, extrap_err=-2.117582e-21, asymptotic=False
 
 nonorthogonal_tiled_polygonal
   L2 monotone decrease: True
   Linf monotone decrease: True
-  level_01_coarse: h=4.166667e-02, L2_rel=5.334139e-05, Linf_rel=7.229670e-04, L2_rate=, Linf_rate=
-  level_02_medium: h=1.666667e-02, L2_rel=1.880575e-05, Linf_rel=2.889316e-04, L2_rate=1.137794, Linf_rate=1.000963
-  level_03_fine: h=1.075269e-02, L2_rel=1.748645e-05, Linf_rel=1.863978e-04, L2_rate=0.165967, Linf_rate=1.000119
-  level_04_finer: h=7.751938e-03, L2_rel=1.734557e-05, Linf_rel=1.343817e-04, L2_rate=0.024723, Linf_rate=0.999956
-  level_05_superfine: h=6.060606e-03, L2_rel=1.734488e-05, Linf_rel=1.050643e-04, L2_rate=0.000161, Linf_rate=0.999914
+  level_01_coarse: h=4.166667e-02, L2_rel=5.160094e-05, Linf_rel=7.244212e-04, L2_rate=, Linf_rate=
+  level_02_medium: h=1.666667e-02, L2_rel=8.328076e-06, Linf_rel=2.892109e-04, L2_rate=1.990534, Linf_rate=1.002102
+  level_03_fine: h=1.075269e-02, L2_rel=3.489008e-06, Linf_rel=1.865209e-04, L2_rate=1.985180, Linf_rate=1.000816, p_obs=1.985180, p_3grid=1.992703, extrap_err=-4.235165e-22, asymptotic=True
+  level_04_finer: h=7.751938e-03, L2_rel=1.847184e-06, Linf_rel=1.344479e-04, L2_rate=1.943551, Linf_rate=1.000470, p_obs=1.943551, p_3grid=2.023266, extrap_err=-2.117582e-22, asymptotic=True
+  level_05_superfine: h=6.060606e-03, L2_rel=1.174865e-06, Linf_rel=1.051056e-04, L2_rate=1.838472, Linf_rate=1.000318, p_obs=1.838472, p_3grid=2.091817, extrap_err=0.000000e+00, asymptotic=True
 
