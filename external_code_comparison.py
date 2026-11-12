@@ -278,15 +278,25 @@ def _dofs(row, code):
     return row["thermalio_dofs"]
 
 
-def time_to_accuracy(times, errs, target):
-    """Log-log interpolation of wall time at which ``err = target`` (None if not bracketed)."""
+def time_to_accuracy(times, errs, target, with_status=False):
+    """Wall time at which ``err = target``, by log-log interpolation between runs.
+
+    Status: ``"interpolated"``; ``"coarsest"`` when even the coarsest run is
+    already below the target (the time returned is that run's, an upper
+    bound); ``"not reached"`` when the finest run is still above it (``None``).
+    """
     t, e = np.log(np.asarray(times, float)), np.log(np.asarray(errs, float))
-    for k in range(len(e) - 1):
-        lo, hi = sorted((e[k], e[k + 1]))
-        if lo <= np.log(target) <= hi and e[k] != e[k + 1]:
-            w = (np.log(target) - e[k]) / (e[k + 1] - e[k])
-            return float(np.exp(t[k] + w * (t[k + 1] - t[k])))
-    return None
+    result = (None, "not reached")
+    if e[0] <= np.log(target):
+        result = (float(np.exp(t[0])), "coarsest")
+    else:
+        for k in range(len(e) - 1):
+            lo, hi = sorted((e[k], e[k + 1]))
+            if lo <= np.log(target) <= hi and e[k] != e[k + 1]:
+                w = (np.log(target) - e[k]) / (e[k + 1] - e[k])
+                result = (float(np.exp(t[k] + w * (t[k + 1] - t[k]))), "interpolated")
+                break
+    return result if with_status else result[0]
 
 
 def timing_figure(results, case_meta):
@@ -317,19 +327,28 @@ def timing_figure(results, case_meta):
         for key in keys:
             rr = results[key]
             if code in rr[0] and f"{code}_time" in rr[0]:
-                vals.append(time_to_accuracy([r[f"{code}_time"] for r in rr], [r[code] for r in rr], targets[0]))
+                vals.append(time_to_accuracy([r[f"{code}_time"] for r in rr], [r[code] for r in rr], targets[0],
+                                             with_status=True))
             else:
-                vals.append(np.nan)
+                vals.append((np.nan, "absent"))
         xs = np.arange(len(keys)) + ci * width
         lab, _, col = TIMING_STYLES[code]
-        a.bar(xs, [v if v is not None else np.nan for v in vals], width, color=col, label=lab)
-        for x_, v in zip(xs, vals):
-            if v is None:
-                a.text(x_, 0.02, "not\nreached", ha="center", va="bottom", fontsize=5, rotation=90,
+        heights = [v if v is not None else np.nan for v, _ in vals]
+        bars = a.bar(xs, heights, width, color=col, label=lab)
+        for x_, bar, (v, status) in zip(xs, bars, vals):
+            if status == "not reached":
+                a.text(x_, 0.02, "not reached", ha="center", va="bottom", fontsize=5.5, rotation=90,
                        transform=a.get_xaxis_transform())
+            elif status == "coarsest":
+                bar.set_hatch("///"); bar.set_alpha(0.55)
+                a.text(x_, v, "\u2264", ha="center", va="bottom", fontsize=7)
     a.set_yscale("log"); a.set_xticks(np.arange(len(keys)) + 0.4 - width / 2); a.set_xticklabels(keys, fontsize=8)
-    a.set_ylabel("wall time [s]"); a.set_title(f"(c) time to reach {targets[0]:.0e} relative error")
-    a.legend(fontsize=6)
+    a.set_ylabel("wall time [s]")
+    a.set_title(f"(c) time to reach {targets[0]:.0e} relative error\n(hatched \u2264: already below on the "
+                "coarsest mesh; upper bound)", fontsize=9)
+    lo, hi = a.get_ylim()
+    a.set_ylim(lo, hi * 30)  # headroom for the legend
+    a.legend(fontsize=6, ncol=2, loc="upper center")
     for a, key, title in zip(ax[1], keys, ("(d) work-precision: isotropic", "(e) work-precision: anisotropic",
                                             "(f) work-precision: Pennes + Robin")):
         rr = results[key]
@@ -431,8 +450,9 @@ def main():
     import skfem
     summary["versions"] = {"fipy": fipy.__version__, "scikit-fem": skfem.__version__}
     summary["time_to_accuracy"] = {
-        key: {code: {f"{tg:.0e}": time_to_accuracy([r[f"{code}_time"] for r in rows], [r[code] for r in rows], tg)
-                     for tg in (1e-3, 1e-4)}
+        key: {code: {f"{tg:.0e}": dict(zip(("time", "status"), time_to_accuracy(
+            [r[f"{code}_time"] for r in rows], [r[code] for r in rows], tg, with_status=True)))
+            for tg in (1e-3, 1e-4)}
               for code in TIMING_STYLES if code in rows[0] and f"{code}_time" in rows[0]}
         for key, rows in results.items()
     }
@@ -448,5 +468,24 @@ def main():
     print("total", time.perf_counter() - t0)
 
 
+def replot():
+    """Redraw the timing figure from ``summary.json`` without rerunning the codes."""
+    summary = json.loads((OUT / "summary.json").read_text())
+    results = {k: summary[k] for k in ("isotropic", "anisotropic", "pennes_robin")}
+    timing_figure(results, {k: int(round(c["t_end"] / c["dt"])) for k, c in
+                            (("isotropic", isotropic_case()), ("anisotropic", anisotropic_case()),
+                             ("pennes_robin", pennes_robin_case()))})
+    summary["time_to_accuracy"] = {
+        key: {code: {f"{tg:.0e}": dict(zip(("time", "status"), time_to_accuracy(
+            [r[f"{code}_time"] for r in rows], [r[code] for r in rows], tg, with_status=True)))
+            for tg in (1e-3, 1e-4)}
+            for code in TIMING_STYLES if code in rows[0] and f"{code}_time" in rows[0]}
+        for key, rows in results.items()
+    }
+    (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    replot() if "--replot" in sys.argv else main()
