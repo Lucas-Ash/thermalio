@@ -11,7 +11,10 @@ the exact solution and with each other.  A fourth panel checks Thermalio's
 enthalpy Stefan solver against Neumann's classical similarity solution.
 
 Outputs ``test_plots/benchmark/external_codes/{external_code_comparison.png,
-summary.json, convergence.csv}``.
+external_code_timing.png, summary.json, convergence.csv}``.  The timing
+figure compares time-to-solution, work-precision and per-step cost; every
+code runs single-threaded SciPy sparse kernels on the same machine, so the
+timings compare implementations, not hardware.
 
 Run: ``pip install -r requirements-external.txt`` then
 ``MPLCONFIGDIR=/tmp/matplotlib python external_code_comparison.py``
@@ -256,8 +259,92 @@ def neumann_stefan(nx=160, t_end=0.5):
 
 
 # ---------------------------------------------------------------------------
-# Figure
+# Figures
 # ---------------------------------------------------------------------------
+
+TIMING_STYLES = {
+    "thermalio": ("Thermalio FV", "o-", "tab:blue"),
+    "thermalio_skewed": ("Thermalio FV skewed (reconstructed)", "o--", "tab:cyan"),
+    "thermalio_skewed_quadratic": ("Thermalio FV skewed (quadratic)", "D-", "tab:purple"),
+    "fipy": ("FiPy FV", "s-", "tab:orange"),
+    "skfem_p1": ("scikit-fem P1", "^-", "tab:green"),
+    "skfem_p2": ("scikit-fem P2", "v-", "tab:red"),
+}
+
+
+def _dofs(row, code):
+    if code.startswith("skfem"):
+        return row[f"{code}_dofs"]
+    return row["thermalio_dofs"]
+
+
+def time_to_accuracy(times, errs, target):
+    """Log-log interpolation of wall time at which ``err = target`` (None if not bracketed)."""
+    t, e = np.log(np.asarray(times, float)), np.log(np.asarray(errs, float))
+    for k in range(len(e) - 1):
+        lo, hi = sorted((e[k], e[k + 1]))
+        if lo <= np.log(target) <= hi and e[k] != e[k + 1]:
+            w = (np.log(target) - e[k]) / (e[k + 1] - e[k])
+            return float(np.exp(t[k] + w * (t[k + 1] - t[k])))
+    return None
+
+
+def timing_figure(results, case_meta):
+    fig, ax = plt.subplots(2, 3, figsize=(15, 8.6))
+    rows = results["isotropic"]
+    a = ax[0, 0]
+    for code, (lab, mk, col) in TIMING_STYLES.items():
+        if code in rows[0] and f"{code}_time" in rows[0]:
+            a.loglog([_dofs(r, code) for r in rows], [r[f"{code}_time"] for r in rows], mk, color=col, label=lab)
+    d = np.array([64, 20000])
+    a.loglog(d, 2e-4 * d, "k:", lw=0.8, label=r"$\propto N$ (linear scaling)")
+    a.set_xlabel("degrees of freedom $N$"); a.set_ylabel("wall time [s] (setup + %d steps)" % case_meta["isotropic"])
+    a.set_title("(a) time to solution, isotropic case"); a.legend(fontsize=6.5)
+    a = ax[0, 1]
+    for code, (lab, mk, col) in TIMING_STYLES.items():
+        if code in rows[0] and f"{code}_time" in rows[0]:
+            per = [1e6 * r[f"{code}_time"] / case_meta["isotropic"] / _dofs(r, code) for r in rows]
+            a.loglog([_dofs(r, code) for r in rows], per, mk, color=col, label=lab)
+    a.set_xlabel("degrees of freedom $N$"); a.set_ylabel(r"cost per step per DOF [$\mu$s]")
+    a.set_title("(b) per-DOF cost: fixed overheads dominate small problems"); a.legend(fontsize=6.5)
+    a = ax[0, 2]
+    targets = (1e-3, 1e-4)
+    codes = [c for c in TIMING_STYLES if any(c in results[k][0] and f"{c}_time" in results[k][0] for k in results)]
+    keys = list(results)
+    width = 0.8 / len(codes)
+    for ci, code in enumerate(codes):
+        vals = []
+        for key in keys:
+            rr = results[key]
+            if code in rr[0] and f"{code}_time" in rr[0]:
+                vals.append(time_to_accuracy([r[f"{code}_time"] for r in rr], [r[code] for r in rr], targets[0]))
+            else:
+                vals.append(np.nan)
+        xs = np.arange(len(keys)) + ci * width
+        lab, _, col = TIMING_STYLES[code]
+        a.bar(xs, [v if v is not None else np.nan for v in vals], width, color=col, label=lab)
+        for x_, v in zip(xs, vals):
+            if v is None:
+                a.text(x_, 0.02, "not\nreached", ha="center", va="bottom", fontsize=5, rotation=90,
+                       transform=a.get_xaxis_transform())
+    a.set_yscale("log"); a.set_xticks(np.arange(len(keys)) + 0.4 - width / 2); a.set_xticklabels(keys, fontsize=8)
+    a.set_ylabel("wall time [s]"); a.set_title(f"(c) time to reach {targets[0]:.0e} relative error")
+    a.legend(fontsize=6)
+    for a, key, title in zip(ax[1], keys, ("(d) work-precision: isotropic", "(e) work-precision: anisotropic",
+                                            "(f) work-precision: Pennes + Robin")):
+        rr = results[key]
+        for code, (lab, mk, col) in TIMING_STYLES.items():
+            if code in rr[0] and f"{code}_time" in rr[0]:
+                a.loglog([r[f"{code}_time"] for r in rr], [r[code] for r in rr], mk, color=col, label=lab)
+        for tg in targets:
+            a.axhline(tg, color="0.6", lw=0.6, ls="--")
+        a.set_xlabel("wall time [s]"); a.set_ylabel("relative $L^2$ error"); a.set_title(title)
+        a.legend(fontsize=6.5)
+    fig.suptitle("Accuracy vs cost: Thermalio, FiPy and scikit-fem on identical problems "
+                 "(single core, backward Euler, same $\\Delta t$)")
+    fig.tight_layout()
+    fig.savefig(OUT / "external_code_timing.png", dpi=160)
+    plt.close(fig)
 
 
 def main():
@@ -267,6 +354,9 @@ def main():
         "anisotropic": study_case(anisotropic_case(), include_skewed=True),
         "pennes_robin": study_case(pennes_robin_case(), include_fipy=False),
     }
+    timing_figure(results, {k: int(round(c["t_end"] / c["dt"])) for k, c in
+                            (("isotropic", isotropic_case()), ("anisotropic", anisotropic_case()),
+                             ("pennes_robin", pennes_robin_case()))})
     stefan = neumann_stefan()
     print("stefan", stefan["max_front_error"], stefan["max_T_error_final"], "elapsed", time.perf_counter() - t0)
 
@@ -340,6 +430,12 @@ def main():
     import fipy
     import skfem
     summary["versions"] = {"fipy": fipy.__version__, "scikit-fem": skfem.__version__}
+    summary["time_to_accuracy"] = {
+        key: {code: {f"{tg:.0e}": time_to_accuracy([r[f"{code}_time"] for r in rows], [r[code] for r in rows], tg)
+                     for tg in (1e-3, 1e-4)}
+              for code in TIMING_STYLES if code in rows[0] and f"{code}_time" in rows[0]}
+        for key, rows in results.items()
+    }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     with open(OUT / "convergence.csv", "w", newline="") as fh:
         keys = sorted({k for rows in results.values() for r in rows for k in r})
