@@ -7,9 +7,10 @@ numbers come from this machine; nothing is assumed except where a panel says
 
 1. ``where_time_goes.png``      Where does a Thermalio run spend its time?
    Wall-clock phases (setup, operator assembly, factorization, time loop,
-   framework overhead) for a 100-step transient solve, and the effect of
-   assembling the operator with Thermalio's own vectorized (COO) path instead
-   of the per-face Python loop.
+   framework overhead) of a 100-step transient solve; the legacy per-face
+   assembly loop (still available as ``_assemble_tpfa_loop``) against the
+   vectorized assembly; and the end-to-end run before vectorization (previous
+   measurements, ``summary_before_vectorization.json``) against now.
 2. ``linear_solvers.png``       Algorithmic acceleration of the linear solve:
    refactorize every step vs factorize once vs CG (Jacobi) vs CG + algebraic
    multigrid (pyamg), in the accuracy-balanced transient regime
@@ -89,20 +90,40 @@ def _best(fn, repeat=3):
 # ---------------------------------------------------------------------------
 
 
+BEFORE = OUT / "summary_before_vectorization.json"  # measured with the per-face loop (commit 45dd494)
+
+
+def _legacy_identity_rows(K, mask):
+    """The LIL row replacement the solver used before vectorization (for timing only)."""
+    lil = K.tolil()
+    for i in np.flatnonzero(mask):
+        lil.rows[i] = [i]
+        lil.data[i] = [1.0]
+    return lil.tocsr()
+
+
 def where_time_goes(n, nsteps=100, dt=2.5e-4):
     mesh = generate("square", nx=n, ny=n, bbox=BBOX)
+    make = lambda: PolygonalHeatSolver(*mesh, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source)
     t0 = time.perf_counter()
-    s = PolygonalHeatSolver(*mesh, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source)
+    s = make()
     setup = time.perf_counter() - t0
     # Second construction on the same mesh: derived geometry comes from the
     # content-hash cache (what a mesh loaded from the mesh library gets).
     t0 = time.perf_counter()
-    PolygonalHeatSolver(*mesh, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source)
+    s2 = make()
     setup_cached = time.perf_counter() - t0
     t0 = time.perf_counter()
-    s._assemble_system()
+    A_loop = s._assemble_tpfa_loop()  # the legacy per-face loop, kept as a reference
+    assembly_loop = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    s._assemble_system()  # vectorized
     assembly = time.perf_counter() - t0
-    A_loop = s.A.copy()
+    diff = abs(s.A - A_loop).max() / abs(A_loop).max()
+    K = s.M_diag + dt * s.A
+    t0 = time.perf_counter()
+    _legacy_identity_rows(K, s.is_boundary)
+    lhs_legacy = time.perf_counter() - t0
     t0 = time.perf_counter()
     lhs = s._build_linear_lhs_csr(dt)
     lhs_build = time.perf_counter() - t0
@@ -125,40 +146,37 @@ def where_time_goes(n, nsteps=100, dt=2.5e-4):
         u = lu(rhs)
         t_rhs += b - a
         t_solve += time.perf_counter() - b
-    # The full public solve() for the same run (re-assembles, rebuilds the LHS, factorizes, loops).
+    # The public solve(): first call assembles, builds the LHS, factorizes and loops;
+    # a repeated call reuses the cached operator and factorization.
     u0 = exact(c[:, 0], c[:, 1], 0.0)
     t0 = time.perf_counter()
-    _, u_full = s.solve(u0, 0.0, nsteps * dt)
-    full = time.perf_counter() - t0
-    # Thermalio's vectorized COO assembly (temperature-dependent path with a constant alpha).
+    _, u_full = s2.solve(u0, 0.0, nsteps * dt)
+    solve_first = time.perf_counter() - t0
     t0 = time.perf_counter()
-    sv = PolygonalHeatSolver(*mesh, lambda x, y, T: ALPHA + 0.0 * x, dt, bc_type="dirichlet", bc_func=exact,
-                             source_func=source)
-    vec_setup = time.perf_counter() - t0
-    vec_assembly = _best(lambda: sv._assemble_diffusion_vectorized(u0), repeat=3)
-    diff = abs(sv.A - A_loop).max() / abs(A_loop).max()
-    framework = max(full - (assembly + lhs_build + factor + t_rhs + t_solve), 0.0)
+    s2.solve(u0, 0.0, nsteps * dt)
+    solve_repeat = time.perf_counter() - t0
+    framework = max(solve_first - (assembly + lhs_build + factor + t_rhs + t_solve), 0.0)
     out = {"n": n, "cells": int(s.M), "nsteps": nsteps, "setup": setup, "setup_cached": setup_cached,
-           "assembly_loop": assembly,
-           "lhs_build": lhs_build, "factorization": factor, "rhs_per_run": t_rhs, "backsolve_per_run": t_solve,
-           "solve_wall": full, "framework_overhead": framework, "vectorized_setup": vec_setup,
-           "vectorized_assembly": vec_assembly, "vectorized_vs_loop_rel_diff": float(diff),
+           "assembly_loop": assembly_loop, "assembly": assembly, "lhs_legacy": lhs_legacy, "lhs_build": lhs_build,
+           "factorization": factor, "rhs_per_run": t_rhs, "backsolve_per_run": t_solve,
+           "solve_first": solve_first, "solve_repeat": solve_repeat, "framework_overhead": framework,
+           "vectorized_vs_loop_rel_diff": float(diff),
            "lean_vs_solve_rel_diff": float(np.max(np.abs(u - u_full)) / np.max(np.abs(u_full)))}
     print(f"[1] n={n:4d} " + " ".join(f"{k}={v:.3g}" for k, v in out.items() if isinstance(v, float)))
     return out
 
 
-def _lean_total(r):
-    """Same algorithm without the serial overheads: cached geometry, vectorized assembly, lean loop."""
-    return (r["setup_cached"] + r["vectorized_assembly"] + r["lhs_build"] + r["factorization"] + r["rhs_per_run"]
-            + r["backsolve_per_run"])
+def _before_rows():
+    if not BEFORE.exists():
+        return None
+    return {r["cells"]: r for r in json.loads(BEFORE.read_text())["where_time_goes"]}
 
 
 def plot_where_time_goes(rows):
     fig, ax = plt.subplots(1, 3, figsize=(15, 4.8))
     labels = [f"{r['cells']:,}" for r in rows]
-    parts = [("setup", "mesh geometry, first build (constructor)", "0.75"),
-             ("assembly_loop", "operator assembly (per-face loop)", "tab:red"),
+    parts = [("setup_cached", "mesh geometry (cached, as from the mesh library)", "0.75"),
+             ("assembly", "operator assembly (vectorized)", "tab:red"),
              ("lhs_build", "LHS + Dirichlet rows", "tab:pink"),
              ("factorization", "sparse LU factorization", "tab:purple"),
              ("rhs_per_run", "right-hand sides (100 steps)", "tab:olive"),
@@ -173,33 +191,40 @@ def plot_where_time_goes(rows):
         bottom += frac
     a.set_ylabel("fraction of measured phases"); a.set_xlabel("cells")
     a.set_ylim(0, 1)
-    a.set_title("(a) where a 100-step Thermalio run spends its time")
+    a.set_title("(a) a 100-step run now: linear algebra dominates")
     a.legend(fontsize=6.5, loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)
     a = ax[1]
     cells = np.array([r["cells"] for r in rows])
-    a.loglog(cells, [r["assembly_loop"] for r in rows], "o-", color="tab:red", label="per-face Python loop (today)")
-    a.loglog(cells, [r["vectorized_assembly"] for r in rows], "s-", color="tab:green",
-             label="vectorized COO assembly (Thermalio's own T-dependent path)")
+    a.loglog(cells, [r["assembly_loop"] for r in rows], "o-", color="tab:red", label="per-face Python loop (before)")
+    a.loglog(cells, [r["assembly"] for r in rows], "s-", color="tab:green", label="vectorized assembly (now)")
+    a.loglog(cells, [r["lhs_legacy"] for r in rows], "o:", color="tab:pink", label="Dirichlet rows, LIL loop (before)")
+    a.loglog(cells, [r["lhs_build"] for r in rows], "s:", color="tab:olive", label="Dirichlet rows, vectorized (now)")
     a.loglog(cells, [r["factorization"] for r in rows], "^--", color="tab:purple", label="LU factorization (C)")
-    a.loglog(cells, [r["backsolve_per_run"] / r["nsteps"] for r in rows], "v--", color="tab:blue",
-             label="one LU back-solve (C)")
-    for r in rows[-1:]:
-        a.annotate(f"{r['assembly_loop'] / r['vectorized_assembly']:.0f}x faster,\nsame matrix "
-                   f"(rel. diff {r['vectorized_vs_loop_rel_diff']:.0e})",
-                   xy=(r["cells"], r["vectorized_assembly"]), xytext=(0.35, 0.12), textcoords="axes fraction",
-                   fontsize=7, arrowprops={"arrowstyle": "->", "lw": 0.7})
+    r = rows[-1]
+    a.annotate(f"{r['assembly_loop'] / r['assembly']:.0f}x faster,\nrel. diff {r['vectorized_vs_loop_rel_diff']:.0e}",
+               xy=(r["cells"], r["assembly"]), xytext=(0.45, 0.1), textcoords="axes fraction",
+               fontsize=7, arrowprops={"arrowstyle": "->", "lw": 0.7})
     a.set_xlabel("cells"); a.set_ylabel("wall time [s]")
-    a.set_title("(b) vectorizing assembly: the cheapest big win"); a.legend(fontsize=6.5)
+    a.set_title("(b) assembly and Dirichlet rows: loop vs vectorized"); a.legend(fontsize=6.5)
     a = ax[2]
-    today = np.array([r["setup"] + r["solve_wall"] for r in rows])
-    lean = np.array([_lean_total(r) for r in rows])
+    before = _before_rows()
+    if before is not None:
+        bc = [c for c in cells if c in before]
+        a.loglog(bc, [before[c]["setup"] + before[c]["solve_wall"] for c in bc], "o-", color="tab:red",
+                 label="before: solve() + first-build setup")
+    now = np.array([r["setup"] + r["solve_first"] for r in rows])
+    cached = np.array([r["setup_cached"] + r["solve_first"] for r in rows])
+    repeat = np.array([r["solve_repeat"] for r in rows])
     kernel = np.array([r["factorization"] + r["backsolve_per_run"] for r in rows])
-    a.loglog(cells, today, "o-", color="tab:red", label="solve() today (incl. setup)")
-    a.loglog(cells, lean, "s-", color="tab:green",
-             label="same algorithm: cached geometry, vectorized assembly, lean loop")
+    a.loglog(cells, now, "s-", color="tab:orange", label="now: solve() + first-build setup")
+    a.loglog(cells, cached, "D-", color="tab:green", label="now: solve() with cached geometry")
+    a.loglog(cells, repeat, "v-", color="tab:cyan", label="now: repeated solve() (operator + LU reused)")
     a.loglog(cells, kernel, "^--", color="tab:blue", label="linear-algebra kernels only (LU + back-solves)")
+    if before is not None and cells[-1] in before:
+        b = before[cells[-1]]
+        a.set_title(f"(c) 100-step run at {cells[-1]:,} cells: "
+                    f"{(b['setup'] + b['solve_wall']) / cached[-1]:.1f}x faster with cached geometry", fontsize=9)
     a.set_xlabel("cells"); a.set_ylabel("wall time [s], 100 steps")
-    a.set_title(f"(c) serial headroom before any parallelism ({today[-1] / lean[-1]:.1f}x at the largest mesh)")
     a.legend(fontsize=6.5)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.27)
@@ -427,14 +452,18 @@ def plot_parallelism(ens, kern, breakdown):
     a.legend(fontsize=6.5)
     a = ax[2]
     r = breakdown
-    total_today = r["setup"] + r["solve_wall"]
-    kern_part = r["factorization"] + r["backsolve_per_run"]
-    lean_total = _lean_total(r)
-    lean_par = r["factorization"] + r["backsolve_per_run"] + r["rhs_per_run"] + r["vectorized_assembly"]
     P = np.unique(np.logspace(0, 8, 60, base=2).astype(int))
-    for f, lab, col in ((kern_part / total_today, "Thermalio today (only LU + back-solves parallel)", "tab:red"),
-                        (lean_par / lean_total, "lean pipeline (assembly, RHS, LU parallel)", "tab:green"),
-                        (0.99, "well-engineered parallel code", "tab:blue")):
+    curves = []
+    before = _before_rows()
+    if before is not None and r["cells"] in before:
+        b = before[r["cells"]]
+        curves.append(((b["factorization"] + b["backsolve_per_run"]) / (b["setup"] + b["solve_wall"]),
+                       "before (only LU + back-solves parallel)", "tab:red"))
+    total_now = r["setup_cached"] + r["solve_first"]
+    par_now = r["assembly"] + r["rhs_per_run"] + r["factorization"] + r["backsolve_per_run"]
+    curves.append((min(par_now / total_now, 0.999), "now (assembly, RHS, LU parallel)", "tab:green"))
+    curves.append((0.99, "well-engineered parallel code", "tab:blue"))
+    for f, lab, col in curves:
         S = 1.0 / ((1 - f) + f / P)
         a.loglog(P, S, color=col, label=f"{lab}: f = {f:.2f}, limit {1 / (1 - f):.1f}x")
     a.loglog(P, P, "k:", lw=0.8, label="ideal")
@@ -464,7 +493,7 @@ def time_order_study(n=48, t_end=0.5, steps=(5, 10, 20, 40, 80, 160, 320)):
 
     ref, _, area = run("crank_nicolson", 2560)  # same spatial discretization: isolates the time error
     out = {}
-    for scheme in ("backward_euler", "crank_nicolson"):
+    for scheme in ("backward_euler", "bdf2", "crank_nicolson"):
         errs, walls = [], []
         for k in steps:
             u, wall, _ = run(scheme, k)
@@ -480,6 +509,7 @@ def plot_accuracy(timeord, ext):
     a = ax[0]
     target = 1e-5
     for scheme, lab, col in (("backward_euler", "backward Euler (order 1)", "tab:red"),
+                             ("bdf2", "BDF2 (order 2, damping; driver default)", "tab:purple"),
                              ("crank_nicolson", "Crank-Nicolson (order 2)", "tab:green")):
         d = timeord[scheme]
         a.loglog(d["steps"], d["errors"], "o-", color=col, label=lab)

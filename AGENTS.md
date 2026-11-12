@@ -20,6 +20,14 @@ with support for:
   Polygonal cell-centered finite-volume solver.
   This is the main solver used by the current verification workflow.
   Supports every `bc_type` and `source_func`.
+  The two-point and reconstructed fluxes are assembled vectorized
+  (`heat_solver/fv_assembly.py`); the legacy per-face loops remain as
+  `_assemble_tpfa_loop` / `_assemble_diffusion_reconstructed_loop` and
+  `tests/test_fv_assembly.py` checks the two agree (pattern equal, values to
+  round-off). `solve()` reuses the assembled operator and its factorizations
+  across calls while `solver.A` is the operator it assembled; anything that
+  replaces `solver.A` invalidates the cache. Do not reintroduce per-face or
+  per-row Python loops (LIL row edits) in hot paths.
 
 - `heat_solver/triangular.py`
   Vertex-centered P1 solver on Delaunay meshes.
@@ -45,6 +53,11 @@ with support for:
 - `heat_solver/drivers.py`
   High-level mesh runners that connect cases, meshes, solvers, and error reporting.
   Use these rather than calling solvers directly for verification work.
+  They default to `time_scheme="bdf2"` (`drivers.DEFAULT_TIME_SCHEME`): second
+  order like Crank-Nicolson but damping, so it does not ring on the rough
+  verification cases. The solver classes themselves still default to
+  backward Euler. Polygonal, curvilinear and triangular solvers all accept
+  `"bdf2"` (`tests/test_bdf2.py`).
 
 - `heat_solver/meshes.py`
   Mesh generators.

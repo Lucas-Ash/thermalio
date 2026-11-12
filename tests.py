@@ -506,6 +506,8 @@ def _augment_with_gci(rows):
             errors = [float(r["L2_rel"]) for r in window]
             if any(e <= 0.0 for e in errors) or len(set(hs)) < 3:
                 continue
+            if max(errors) < 1e-12:  # solution reproduced to round-off: no convergence order to fit
+                continue
             rep = triplet_report(hs, errors)
             finest = window[-1]
             finest["L2_p_obs"] = "" if rep["p_obs"] is None else f"{rep['p_obs']:.6f}"

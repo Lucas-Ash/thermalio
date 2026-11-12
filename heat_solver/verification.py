@@ -71,17 +71,22 @@ def richardson_order(f_coarse, f_medium, f_fine, r_cm, r_mf, max_iter=100, tol=1
         return p, oscillatory
 
     p = math.log(abs(ratio)) / math.log(r_mf)  # initial guess (q = 0)
-    for _ in range(max_iter):
-        denom = r_cm**p - s
-        numer = r_mf**p - s
-        if numer == 0.0 or denom == 0.0:
-            break
-        q = math.log(abs(numer / denom))
-        p_new = abs(math.log(abs(ratio)) + q) / math.log(r_mf)
-        if abs(p_new - p) < tol:
+    try:
+        for _ in range(max_iter):
+            denom = r_cm**p - s
+            numer = r_mf**p - s
+            if numer == 0.0 or denom == 0.0:
+                break
+            q = math.log(abs(numer / denom))
+            p_new = abs(math.log(abs(ratio)) + q) / math.log(r_mf)
+            if abs(p_new - p) < tol:
+                p = p_new
+                break
             p = p_new
-            break
-        p = p_new
+    except OverflowError:
+        # The fixed point diverged (e.g. errors at round-off level, where no
+        # power law exists): no observed order.
+        return None, oscillatory
     return p, oscillatory
 
 

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 
 from heat_solver.verification import (
@@ -96,4 +98,12 @@ def test_triplet_report_oscillatory_flagged():
     errors = [0.1, 0.2, 0.05]  # non-monotone
     rep = triplet_report(hs, errors)
     assert rep["oscillatory"] is True
+    assert rep["asymptotic"] is False
+
+
+def test_richardson_order_round_off_errors_do_not_overflow():
+    # Errors at round-off level (no power law): the fixed point diverges; report no order.
+    p, _ = richardson_order(7.4e-16, 1.24e-15, 1.83e-15, r_cm=2.6, r_mf=1.59)
+    assert p is None or math.isfinite(p)
+    rep = triplet_report([0.0667, 0.0256, 0.0161], [7.4e-16, 1.24e-15, 1.83e-15])
     assert rep["asymptotic"] is False
