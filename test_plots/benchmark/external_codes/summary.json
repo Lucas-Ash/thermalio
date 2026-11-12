@@ -5,17 +5,17 @@
       "n": 8,
       "h": 0.25,
       "thermalio": 0.021169876336671924,
-      "thermalio_time": 0.023549886000182596,
+      "thermalio_time": 0.014235955999993166,
       "thermalio_dofs": 64,
       "fipy": 0.004867537124548203,
-      "fipy_time": 2.9103704999997717,
+      "fipy_time": 2.0122745849998864,
       "diff_thermalio_fipy": 0.016736153487983033,
       "skfem_p1": 0.12243798390551006,
-      "skfem_p1_time": 0.1985706730001766,
+      "skfem_p1_time": 0.17143022199979896,
       "skfem_p1_dofs": 81,
       "diff_thermalio_skfem_p1": 0.26779445802616414,
       "skfem_p2": 0.006630507842422794,
-      "skfem_p2_time": 0.4355195550001554,
+      "skfem_p2_time": 0.2703964779998387,
       "skfem_p2_dofs": 289,
       "diff_thermalio_skfem_p2": 0.022315571359958004
     },
@@ -24,17 +24,17 @@
       "n": 16,
       "h": 0.125,
       "thermalio": 0.005585914331540756,
-      "thermalio_time": 0.15388430000029985,
+      "thermalio_time": 0.03004027099996165,
       "thermalio_dofs": 256,
       "fipy": 0.001238048770479392,
-      "fipy_time": 3.9481745170000977,
+      "fipy_time": 1.9895652469999732,
       "diff_thermalio_fipy": 0.004405523084023915,
       "skfem_p1": 0.03191008646765356,
-      "skfem_p1_time": 0.33326443200030553,
+      "skfem_p1_time": 0.2611007129999052,
       "skfem_p1_dofs": 289,
       "diff_thermalio_skfem_p1": 0.06292746643320192,
       "skfem_p2": 0.0008861568399565254,
-      "skfem_p2_time": 1.2461023519999799,
+      "skfem_p2_time": 0.8871699500000432,
       "skfem_p2_dofs": 1089,
       "diff_thermalio_skfem_p2": 0.005653529681623794
     },
@@ -43,17 +43,17 @@
       "n": 32,
       "h": 0.0625,
       "thermalio": 0.0013635323417436661,
-      "thermalio_time": 0.39360619699982635,
+      "thermalio_time": 0.0869931459997133,
       "thermalio_dofs": 1024,
       "fipy": 0.000315129963114041,
-      "fipy_time": 4.119946742000138,
+      "fipy_time": 2.615922884000156,
       "diff_thermalio_fipy": 0.001064460200086085,
       "skfem_p1": 0.008055903880487065,
-      "skfem_p1_time": 1.3320360900002015,
+      "skfem_p1_time": 0.8132241630000863,
       "skfem_p1_dofs": 1089,
       "diff_thermalio_skfem_p1": 0.01540244323974447,
       "skfem_p2": 0.00011305552572549717,
-      "skfem_p2_time": 5.7270522250000795,
+      "skfem_p2_time": 4.265733601999727,
       "skfem_p2_dofs": 4225,
       "diff_thermalio_skfem_p2": 0.001362158696098974
     },
@@ -62,17 +62,17 @@
       "n": 64,
       "h": 0.03125,
       "thermalio": 0.00032972112508396846,
-      "thermalio_time": 1.4586875049999435,
+      "thermalio_time": 0.38926946700030385,
       "thermalio_dofs": 4096,
       "fipy": 8.342177343009655e-05,
-      "fipy_time": 6.460001036999984,
+      "fipy_time": 4.898882696999863,
       "diff_thermalio_fipy": 0.00024842839826489,
       "skfem_p1": 0.0020151643127332324,
-      "skfem_p1_time": 3.980385092999768,
+      "skfem_p1_time": 3.136786901999585,
       "skfem_p1_dofs": 4225,
       "diff_thermalio_skfem_p1": 0.0038246377163330732,
       "skfem_p2": 1.5287674868865325e-05,
-      "skfem_p2_time": 43.98026465799967,
+      "skfem_p2_time": 31.512620198999684,
       "skfem_p2_dofs": 16641,
       "diff_thermalio_skfem_p2": 0.00032402526940682706
     }
@@ -83,21 +83,21 @@
       "n": 8,
       "h": 0.25,
       "thermalio": 0.0013905792451256703,
-      "thermalio_time": 0.025586629999907018,
+      "thermalio_time": 0.010633782999775576,
       "thermalio_dofs": 64,
       "thermalio_skewed": 0.001371588628357696,
-      "thermalio_skewed_time": 0.026586198000131844,
+      "thermalio_skewed_time": 0.014075149999825953,
       "thermalio_skewed_quadratic": 0.0004425705894218197,
-      "thermalio_skewed_quadratic_time": 0.11993613399999958,
+      "thermalio_skewed_quadratic_time": 0.08389532000001054,
       "fipy": 0.0023273932629751634,
-      "fipy_time": 2.13600378000001,
+      "fipy_time": 1.8236481909998474,
       "diff_thermalio_fipy": 0.0025053734678699446,
       "skfem_p1": 0.11706308843199333,
-      "skfem_p1_time": 0.19443086699993728,
+      "skfem_p1_time": 0.1467181459997846,
       "skfem_p1_dofs": 81,
       "diff_thermalio_skfem_p1": 0.24573160183490497,
       "skfem_p2": 0.00714688946635274,
-      "skfem_p2_time": 0.35765462200015463,
+      "skfem_p2_time": 0.28927575400030037,
       "skfem_p2_dofs": 289,
       "diff_thermalio_skfem_p2": 0.001255223762460488
     },
@@ -106,21 +106,21 @@
       "n": 16,
       "h": 0.125,
       "thermalio": 0.00038686022304485623,
-      "thermalio_time": 0.0688657770001555,
+      "thermalio_time": 0.017256805000215536,
       "thermalio_dofs": 256,
       "thermalio_skewed": 0.0005416813066202132,
-      "thermalio_skewed_time": 0.08104159599997729,
+      "thermalio_skewed_time": 0.03236795600014375,
       "thermalio_skewed_quadratic": 0.0001377336200755783,
-      "thermalio_skewed_quadratic_time": 0.409303297000406,
+      "thermalio_skewed_quadratic_time": 0.23474351200002275,
       "fipy": 0.0015453730715622252,
-      "fipy_time": 2.860263104999831,
+      "fipy_time": 2.086312991000341,
       "diff_thermalio_fipy": 0.001570563236186811,
       "skfem_p1": 0.030489277309244802,
-      "skfem_p1_time": 0.47686660599993047,
+      "skfem_p1_time": 0.2911950660000002,
       "skfem_p1_dofs": 289,
       "diff_thermalio_skfem_p1": 0.05758418320080587,
       "skfem_p2": 0.0009014741358909779,
-      "skfem_p2_time": 1.2749670389998755,
+      "skfem_p2_time": 0.9359378859999197,
       "skfem_p2_dofs": 1089,
       "diff_thermalio_skfem_p2": 0.0003513945511019102
     },
@@ -129,21 +129,21 @@
       "n": 32,
       "h": 0.0625,
       "thermalio": 0.00010400953655169167,
-      "thermalio_time": 0.41078060500012725,
+      "thermalio_time": 0.0511510520000229,
       "thermalio_dofs": 1024,
-      "thermalio_skewed": 0.0002585968425100758,
-      "thermalio_skewed_time": 0.4697337279999374,
+      "thermalio_skewed": 0.0002585968425092255,
+      "thermalio_skewed_time": 0.0952542589998302,
       "thermalio_skewed_quadratic": 4.147368626107001e-05,
-      "thermalio_skewed_quadratic_time": 1.328186708999965,
+      "thermalio_skewed_quadratic_time": 1.1024596470001597,
       "fipy": 0.0009931246224792105,
-      "fipy_time": 3.9767844160001005,
+      "fipy_time": 2.7556051629999274,
       "diff_thermalio_fipy": 0.0009971944785644015,
       "skfem_p1": 0.0076976719966041565,
-      "skfem_p1_time": 1.1897294160003185,
+      "skfem_p1_time": 0.8865694030000668,
       "skfem_p1_dofs": 1089,
       "diff_thermalio_skfem_p1": 0.014138548116652357,
       "skfem_p2": 0.00011338236723523227,
-      "skfem_p2_time": 6.380701539999791,
+      "skfem_p2_time": 4.7934296419998645,
       "skfem_p2_dofs": 4225,
       "diff_thermalio_skfem_p2": 9.558218229827585e-05
     },
@@ -152,21 +152,21 @@
       "n": 64,
       "h": 0.03125,
       "thermalio": 3.0879503232252365e-05,
-      "thermalio_time": 1.5577177169998322,
+      "thermalio_time": 0.22347237600024528,
       "thermalio_dofs": 4096,
-      "thermalio_skewed": 0.00014069077251242394,
-      "thermalio_skewed_time": 2.0081546209999033,
+      "thermalio_skewed": 0.00014069077251248463,
+      "thermalio_skewed_time": 0.4818566640001336,
       "thermalio_skewed_quadratic": 1.4522750022181856e-05,
-      "thermalio_skewed_quadratic_time": 6.036756817999958,
+      "thermalio_skewed_quadratic_time": 3.793395086000146,
       "fipy": 0.0005249714147235048,
-      "fipy_time": 6.785145930999988,
+      "fipy_time": 5.201084854999863,
       "diff_thermalio_fipy": 0.0005255854741111117,
       "skfem_p1": 0.0019253737407249258,
-      "skfem_p1_time": 4.034573939999973,
+      "skfem_p1_time": 3.4873532169999635,
       "skfem_p1_dofs": 4225,
       "diff_thermalio_skfem_p1": 0.003518774072860198,
       "skfem_p2": 1.5419902028837962e-05,
-      "skfem_p2_time": 90.96002881000004,
+      "skfem_p2_time": 31.410023322999677,
       "skfem_p2_dofs": 16641,
       "diff_thermalio_skfem_p2": 2.5437178044707996e-05
     }
@@ -177,14 +177,14 @@
       "n": 8,
       "h": 0.125,
       "thermalio": 0.0011540326273582879,
-      "thermalio_time": 0.10548191299994869,
+      "thermalio_time": 0.09330274600006305,
       "thermalio_dofs": 64,
       "skfem_p1": 0.006539445376339342,
-      "skfem_p1_time": 0.1534664599998905,
+      "skfem_p1_time": 0.1275510749997011,
       "skfem_p1_dofs": 81,
       "diff_thermalio_skfem_p1": 0.01331922675786929,
       "skfem_p2": 0.0002084349515900388,
-      "skfem_p2_time": 0.444186549999813,
+      "skfem_p2_time": 0.2993503339998824,
       "skfem_p2_dofs": 289,
       "diff_thermalio_skfem_p2": 0.001171337392918196
     },
@@ -193,14 +193,14 @@
       "n": 16,
       "h": 0.0625,
       "thermalio": 0.00035916478238762575,
-      "thermalio_time": 0.3039579490000506,
+      "thermalio_time": 0.1831596530000752,
       "thermalio_dofs": 256,
       "skfem_p1": 0.0016595885823263788,
-      "skfem_p1_time": 0.37040956300006656,
+      "skfem_p1_time": 0.2803079269997397,
       "skfem_p1_dofs": 289,
       "diff_thermalio_skfem_p1": 0.003396248112123083,
       "skfem_p2": 2.7456152104600717e-05,
-      "skfem_p2_time": 1.0619994680000673,
+      "skfem_p2_time": 0.945892965999974,
       "skfem_p2_dofs": 1089,
       "diff_thermalio_skfem_p2": 0.00035939084294413725
     },
@@ -209,14 +209,14 @@
       "n": 32,
       "h": 0.03125,
       "thermalio": 9.565218173017652e-05,
-      "thermalio_time": 0.6154485580000255,
+      "thermalio_time": 0.5546625869997115,
       "thermalio_dofs": 1024,
       "skfem_p1": 0.00041573718633151674,
-      "skfem_p1_time": 0.9213366439998936,
+      "skfem_p1_time": 0.8527494589998241,
       "skfem_p1_dofs": 1089,
       "diff_thermalio_skfem_p1": 0.0008535517145429455,
       "skfem_p2": 6.4010443750783666e-06,
-      "skfem_p2_time": 4.430832192999787,
+      "skfem_p2_time": 4.508708084999853,
       "skfem_p2_dofs": 4225,
       "diff_thermalio_skfem_p2": 9.474408459385021e-05
     },
@@ -225,14 +225,14 @@
       "n": 64,
       "h": 0.015625,
       "thermalio": 2.5369549596605795e-05,
-      "thermalio_time": 2.255940573999851,
+      "thermalio_time": 2.096291661000123,
       "thermalio_dofs": 4096,
       "skfem_p1": 0.00010337584500613141,
-      "skfem_p1_time": 3.660021232999952,
+      "skfem_p1_time": 3.4551202120001108,
       "skfem_p1_dofs": 4225,
       "diff_thermalio_skfem_p1": 0.0002136682549838137,
       "skfem_p2": 5.45252145204171e-06,
-      "skfem_p2_time": 34.64139053400004,
+      "skfem_p2_time": 33.17947083600029,
       "skfem_p2_dofs": 16641,
       "diff_thermalio_skfem_p2": 2.3979564344622088e-05
     }
@@ -268,8 +268,8 @@
       ],
       "thermalio_skewed": [
         1.3403316387735755,
-        1.066739644550441,
-        0.8781769502054803
+        1.0667396445551849,
+        0.8781769502001142
       ],
       "thermalio_skewed_quadratic": [
         1.6840268245180188,
@@ -406,7 +406,7 @@
     "isotropic": {
       "thermalio": {
         "1e-03": {
-          "time": 0.5239938072217869,
+          "time": 0.12067878579234449,
           "status": "interpolated"
         },
         "1e-04": {
@@ -416,11 +416,11 @@
       },
       "fipy": {
         "1e-03": {
-          "time": 3.97450175312606,
+          "time": 2.0763875285808453,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 6.075636271676173,
+          "time": 4.497146040357465,
           "status": "interpolated"
         }
       },
@@ -436,11 +436,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 1.1698664333078177,
+          "time": 0.8260733087427219,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 6.48973974202948,
+          "time": 4.822334578167197,
           "status": "interpolated"
         }
       }
@@ -448,17 +448,17 @@
     "anisotropic": {
       "thermalio": {
         "1e-03": {
-          "time": 0.03302379155036137,
+          "time": 0.012046964982582628,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 0.42889351444239493,
+          "time": 0.05365184936141768,
           "status": "interpolated"
         }
       },
       "thermalio_skewed": {
         "1e-03": {
-          "time": 0.038840303710860904,
+          "time": 0.01868334555165222,
           "status": "interpolated"
         },
         "1e-04": {
@@ -468,17 +468,17 @@
       },
       "thermalio_skewed_quadratic": {
         "1e-03": {
-          "time": 0.11993613399999958,
+          "time": 0.08389532000001053,
           "status": "coarsest"
         },
         "1e-04": {
-          "time": 0.5602780481314715,
+          "time": 0.35463171494265683,
           "status": "interpolated"
         }
       },
       "fipy": {
         "1e-03": {
-          "time": 3.956387697136187,
+          "time": 2.7436679731648153,
           "status": "interpolated"
         },
         "1e-04": {
@@ -498,11 +498,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 1.1963075496338762,
+          "time": 0.8824702337657395,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 7.542472953964802,
+          "time": 5.395623527320973,
           "status": "interpolated"
         }
       }
@@ -510,17 +510,17 @@
     "pennes_robin": {
       "thermalio": {
         "1e-03": {
-          "time": 0.1201135552995594,
+          "time": 0.10135572191609332,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 0.6010328325575183,
+          "time": 0.5343942280641663,
           "status": "interpolated"
         }
       },
       "skfem_p1": {
         "1e-03": {
-          "time": 0.5170119111664446,
+          "time": 0.4211683730869611,
           "status": "interpolated"
         },
         "1e-04": {
@@ -530,11 +530,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 0.444186549999813,
+          "time": 0.2993503339998824,
           "status": "coarsest"
         },
         "1e-04": {
-          "time": 0.6091563284510988,
+          "time": 0.4541742601865513,
           "status": "interpolated"
         }
       }
