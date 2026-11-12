@@ -94,6 +94,11 @@ def where_time_goes(n, nsteps=100, dt=2.5e-4):
     t0 = time.perf_counter()
     s = PolygonalHeatSolver(*mesh, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source)
     setup = time.perf_counter() - t0
+    # Second construction on the same mesh: derived geometry comes from the
+    # content-hash cache (what a mesh loaded from the mesh library gets).
+    t0 = time.perf_counter()
+    PolygonalHeatSolver(*mesh, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source)
+    setup_cached = time.perf_counter() - t0
     t0 = time.perf_counter()
     s._assemble_system()
     assembly = time.perf_counter() - t0
@@ -133,7 +138,8 @@ def where_time_goes(n, nsteps=100, dt=2.5e-4):
     vec_assembly = _best(lambda: sv._assemble_diffusion_vectorized(u0), repeat=3)
     diff = abs(sv.A - A_loop).max() / abs(A_loop).max()
     framework = max(full - (assembly + lhs_build + factor + t_rhs + t_solve), 0.0)
-    out = {"n": n, "cells": int(s.M), "nsteps": nsteps, "setup": setup, "assembly_loop": assembly,
+    out = {"n": n, "cells": int(s.M), "nsteps": nsteps, "setup": setup, "setup_cached": setup_cached,
+           "assembly_loop": assembly,
            "lhs_build": lhs_build, "factorization": factor, "rhs_per_run": t_rhs, "backsolve_per_run": t_solve,
            "solve_wall": full, "framework_overhead": framework, "vectorized_setup": vec_setup,
            "vectorized_assembly": vec_assembly, "vectorized_vs_loop_rel_diff": float(diff),
@@ -142,10 +148,16 @@ def where_time_goes(n, nsteps=100, dt=2.5e-4):
     return out
 
 
+def _lean_total(r):
+    """Same algorithm without the serial overheads: cached geometry, vectorized assembly, lean loop."""
+    return (r["setup_cached"] + r["vectorized_assembly"] + r["lhs_build"] + r["factorization"] + r["rhs_per_run"]
+            + r["backsolve_per_run"])
+
+
 def plot_where_time_goes(rows):
     fig, ax = plt.subplots(1, 3, figsize=(15, 4.8))
     labels = [f"{r['cells']:,}" for r in rows]
-    parts = [("setup", "mesh geometry (constructor)", "0.75"),
+    parts = [("setup", "mesh geometry, first build (constructor)", "0.75"),
              ("assembly_loop", "operator assembly (per-face loop)", "tab:red"),
              ("lhs_build", "LHS + Dirichlet rows", "tab:pink"),
              ("factorization", "sparse LU factorization", "tab:purple"),
@@ -154,14 +166,15 @@ def plot_where_time_goes(rows):
              ("framework_overhead", "other solve() overhead", "tab:orange")]
     a = ax[0]
     bottom = np.zeros(len(rows))
+    tot = np.array([sum(r[k] for k, _, _ in parts) for r in rows])  # phases are timed separately
     for key, lab, col in parts:
-        tot = np.array([r["setup"] + r["solve_wall"] for r in rows])
         frac = np.array([r[key] for r in rows]) / tot
         a.bar(labels, frac, bottom=bottom, color=col, label=lab)
         bottom += frac
-    a.set_ylabel("fraction of wall time"); a.set_xlabel("cells")
+    a.set_ylabel("fraction of measured phases"); a.set_xlabel("cells")
+    a.set_ylim(0, 1)
     a.set_title("(a) where a 100-step Thermalio run spends its time")
-    a.legend(fontsize=6.5, loc="lower left")
+    a.legend(fontsize=6.5, loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)
     a = ax[1]
     cells = np.array([r["cells"] for r in rows])
     a.loglog(cells, [r["assembly_loop"] for r in rows], "o-", color="tab:red", label="per-face Python loop (today)")
@@ -179,16 +192,17 @@ def plot_where_time_goes(rows):
     a.set_title("(b) vectorizing assembly: the cheapest big win"); a.legend(fontsize=6.5)
     a = ax[2]
     today = np.array([r["setup"] + r["solve_wall"] for r in rows])
-    lean = np.array([r["setup"] + r["vectorized_assembly"] + r["lhs_build"] + r["factorization"]
-                     + r["rhs_per_run"] + r["backsolve_per_run"] for r in rows])
+    lean = np.array([_lean_total(r) for r in rows])
     kernel = np.array([r["factorization"] + r["backsolve_per_run"] for r in rows])
     a.loglog(cells, today, "o-", color="tab:red", label="solve() today (incl. setup)")
-    a.loglog(cells, lean, "s-", color="tab:green", label="same algorithm, vectorized assembly, lean loop")
+    a.loglog(cells, lean, "s-", color="tab:green",
+             label="same algorithm: cached geometry, vectorized assembly, lean loop")
     a.loglog(cells, kernel, "^--", color="tab:blue", label="linear-algebra kernels only (LU + back-solves)")
     a.set_xlabel("cells"); a.set_ylabel("wall time [s], 100 steps")
     a.set_title(f"(c) serial headroom before any parallelism ({today[-1] / lean[-1]:.1f}x at the largest mesh)")
     a.legend(fontsize=6.5)
     fig.tight_layout()
+    fig.subplots_adjust(bottom=0.27)
     fig.savefig(OUT / "where_time_goes.png", dpi=160)
     plt.close(fig)
 
@@ -303,12 +317,11 @@ def plot_linear_solvers(rows, nsteps=200):
             if len(pts) < 2:
                 continue
             N_, T_ = map(np.array, zip(*pts))
-            a.loglog(N_, T_, ls, marker="o", ms=3, color=cols[name], label=f"{name}, {regime}")
             p = np.polyfit(np.log(N_[-3:]), np.log(T_[-3:]), 1)
+            a.loglog(N_, T_, ls, marker="o", ms=3, color=cols[name],
+                     label=f"{name}, {regime}: $\\propto N^{{{p[0]:.2f}}}$")
             Ne = np.array([N_[-1], 1e7])
             a.loglog(Ne, np.exp(np.polyval(p, np.log(Ne))), ":", color=cols[name], lw=0.9)
-            a.annotate(f"$N^{{{p[0]:.2f}}}$", (1e7, np.exp(np.polyval(p, np.log(1e7)))), fontsize=6,
-                       color=cols[name])
     a.axvspan(1.1e6, 1e7, color="0.92", zorder=0)
     a.text(1.3e6, a.get_ylim()[0] * 3 if a.get_ylim()[0] > 0 else 1e-2, "extrapolated\n(dotted)", fontsize=7)
     a.set_xlabel("unknowns $N$"); a.set_ylabel(f"wall time for {nsteps} steps incl. setup [s]")
@@ -416,15 +429,14 @@ def plot_parallelism(ens, kern, breakdown):
     r = breakdown
     total_today = r["setup"] + r["solve_wall"]
     kern_part = r["factorization"] + r["backsolve_per_run"]
-    lean_total = (r["setup"] + r["vectorized_assembly"] + r["lhs_build"] + r["factorization"] + r["rhs_per_run"]
-                  + r["backsolve_per_run"])
+    lean_total = _lean_total(r)
     lean_par = r["factorization"] + r["backsolve_per_run"] + r["rhs_per_run"] + r["vectorized_assembly"]
     P = np.unique(np.logspace(0, 8, 60, base=2).astype(int))
     for f, lab, col in ((kern_part / total_today, "Thermalio today (only LU + back-solves parallel)", "tab:red"),
-                        (lean_par / lean_total, "after vectorizing (assembly, RHS, solves parallel)", "tab:green"),
-                        (0.99, "well-engineered parallel code (f = 0.99)", "tab:blue")):
+                        (lean_par / lean_total, "lean pipeline (assembly, RHS, LU parallel)", "tab:green"),
+                        (0.99, "well-engineered parallel code", "tab:blue")):
         S = 1.0 / ((1 - f) + f / P)
-        a.loglog(P, S, color=col, label=f"{lab}: f = {f:.2f}, max {1 / (1 - f):.0f}x")
+        a.loglog(P, S, color=col, label=f"{lab}: f = {f:.2f}, limit {1 / (1 - f):.1f}x")
     a.loglog(P, P, "k:", lw=0.8, label="ideal")
     a.set_xlabel("cores $P$"); a.set_ylabel("speedup $S(P)$")
     a.set_title(f"(c) Amdahl's law with the measured serial fraction ({r['cells']:,} cells)")
@@ -476,6 +488,13 @@ def plot_accuracy(timeord, ext):
             a.plot(np.exp(k), target, "*", color=col, ms=10)
             a.annotate(f"{np.exp(k):.0f} steps", (np.exp(k), target), textcoords="offset points",
                        xytext=(5, 6), fontsize=7, color=col)
+        elif d["errors"][-1] > target:  # extrapolate with the observed order of the last pair
+            order = np.log(d["errors"][-2] / d["errors"][-1]) / np.log(d["steps"][-1] / d["steps"][-2])
+            k_ext = d["steps"][-1] * (d["errors"][-1] / target) ** (1 / order)
+            a.loglog([d["steps"][-1], k_ext], [d["errors"][-1], target], ":", color=col, lw=0.9)
+            a.plot(k_ext, target, "*", color=col, ms=10, mfc="none")
+            a.annotate(f"~{k_ext:,.0f} steps\n(extrapolated)", (k_ext, target), textcoords="offset points",
+                       xytext=(-60, 10), fontsize=7, color=col)
     a.axhline(target, color="0.6", ls="--", lw=0.8)
     a.set_xlabel("time steps"); a.set_ylabel("temporal error (vs fine-$\\Delta t$ reference)")
     a.set_title("(a) higher order in time: fewer steps for the same accuracy"); a.legend(fontsize=7)
