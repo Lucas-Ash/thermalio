@@ -16,6 +16,8 @@ class CurvilinearHeatSolver:
     ``time_scheme='backward_euler'`` (default) is first-order accurate in time.
     ``time_scheme='crank_nicolson'`` uses the trapezoidal step for the semi-discrete
     system ``u' = A u + S`` and is second-order accurate in time for smooth solutions.
+    ``time_scheme='bdf2'`` is the variable-step BDF2 (first step backward Euler): second
+    order and strongly damping, so it does not ring on rough data.
     """
 
     def __init__(
@@ -47,8 +49,8 @@ class CurvilinearHeatSolver:
 
         self.bc_type = normalize_bc_type(self.bc_type)
         self.time_scheme = str(time_scheme).lower().strip()
-        if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
-            raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
+        if self.time_scheme not in {"backward_euler", "crank_nicolson", "bdf2"}:
+            raise ValueError("time_scheme must be 'backward_euler', 'crank_nicolson' or 'bdf2'.")
         if phase_change_model is not None and not isinstance(phase_change_model, ApparentHeatCapacityModel):
             raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
         self.phase_change_model = phase_change_model
@@ -493,9 +495,10 @@ class CurvilinearHeatSolver:
             lhs.data[row] = [coeffs[col] for col in cols]
             rhs[row] = row_rhs[row]
 
-    def _dirichlet_lhs_csr(self, dt_eff, is_boundary_flat):
-        theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
-        lhs = (self.M_diag - theta * dt_eff * self.A).copy().tolil()
+    def _dirichlet_lhs_csr(self, dt_eff, is_boundary_flat, mass_coeff=1.0):
+        theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
+        mass = self.M_diag if mass_coeff == 1.0 else mass_coeff * self.M_diag
+        lhs = (mass - theta * dt_eff * self.A).copy().tolil()
         for i in np.where(is_boundary_flat)[0]:
             lhs.rows[i] = [i]
             lhs.data[i] = [1.0]
@@ -517,16 +520,27 @@ class CurvilinearHeatSolver:
 
         X_flat = self.X.flatten()
         Y_flat = self.Y.flatten()
-        theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
+        theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
         requires_nonlinear = self.phase_change_model is not None or self.bc_type == "radiative"
+        # (a0, a1, a2): u_t ~ (a0 u^{n+1} - a1 u^n + a2 u^{n-1}) / dt_n; BDF2 after a backward-Euler start.
+        step_coeffs = []
+        for n, d in enumerate(dts):
+            if self.time_scheme == "bdf2" and n > 0:
+                w = d / dts[n - 1]
+                step_coeffs.append(((1.0 + 2.0 * w) / (1.0 + w), 1.0 + w, w * w / (1.0 + w)))
+            else:
+                step_coeffs.append((1.0, 1.0, 0.0))
+        lin_keys = [(round(float(d), 12), round(c[0], 12)) for d, c in zip(dts, step_coeffs)]
 
         factor_by_dt = {}
         if self.reuse_linear_lhs and self.bc_type == "dirichlet" and not requires_nonlinear:
             is_boundary_flat = np.zeros(self.N, dtype=bool)
             is_boundary_flat[self._boundary_idx] = True
-            for key in sorted({round(float(d), 12) for d in dts}):
-                factor_by_dt[key] = factorized(self._dirichlet_lhs_csr(key, is_boundary_flat))
+            for key in dict.fromkeys(lin_keys):
+                a0 = step_coeffs[lin_keys.index(key)][0]
+                factor_by_dt[key] = factorized(self._dirichlet_lhs_csr(key[0], is_boundary_flat, mass_coeff=a0))
 
+        u_prev = None
         for k in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = dts[k]
@@ -534,8 +548,11 @@ class CurvilinearHeatSolver:
                 np.asarray(self.source_func(X_flat, Y_flat, t_next), dtype=float),
                 (self.N,),
             )
-            if self.time_scheme == "backward_euler":
-                rhs = self.M_diag @ u + dt_eff * source_vals
+            a0, a1, a2 = step_coeffs[k]
+            hist = u if a2 == 0.0 else a1 * u - a2 * u_prev
+            u_prev = u
+            if self.time_scheme != "crank_nicolson":
+                rhs = self.M_diag @ hist + dt_eff * source_vals
             else:
                 source_prev = np.broadcast_to(
                     np.asarray(self.source_func(X_flat, Y_flat, t), dtype=float),
@@ -548,7 +565,7 @@ class CurvilinearHeatSolver:
                     np.asarray(self.bc_func(self._boundary_data["x_nodes"], self._boundary_data["y_nodes"], t_next), dtype=float),
                     self._boundary_idx.shape,
                 )
-                dt_key = round(float(dt_eff), 12)
+                dt_key = lin_keys[k]
                 rhs[self._boundary_idx] = bc_vals
                 u = factor_by_dt[dt_key](rhs)
             elif requires_nonlinear:
@@ -559,15 +576,16 @@ class CurvilinearHeatSolver:
                 for _ in range(max_iters):
                     cp_eff = self._effective_heat_capacity(u_iter)
                     mass_diag = diags(cp_eff, format="csr")
-                    if self.time_scheme == "backward_euler":
-                        rhs_iter = mass_diag @ u + dt_eff * source_vals
+                    if self.time_scheme != "crank_nicolson":
+                        rhs_iter = mass_diag @ hist + dt_eff * source_vals
                     else:
                         source_prev = np.broadcast_to(
                             np.asarray(self.source_func(X_flat, Y_flat, t), dtype=float),
                             (self.N,),
                         )
                         rhs_iter = (mass_diag + 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * (source_prev + source_vals)
-                    lhs = (mass_diag - theta * dt_eff * self.A).copy().tolil()
+                    lead = mass_diag if a0 == 1.0 else a0 * mass_diag
+                    lhs = (lead - theta * dt_eff * self.A).copy().tolil()
                     if self.bc_type == "dirichlet":
                         self._apply_dirichlet_rows(lhs, rhs_iter, t_next)
                     else:
@@ -589,7 +607,8 @@ class CurvilinearHeatSolver:
                     )
                 u = u_iter
             else:
-                lhs = (self.M_diag - theta * dt_eff * self.A).copy().tolil()
+                lead = self.M_diag if a0 == 1.0 else a0 * self.M_diag
+                lhs = (lead - theta * dt_eff * self.A).copy().tolil()
                 if self.bc_type == "dirichlet":
                     self._apply_dirichlet_rows(lhs, rhs, t_next)
                 else:

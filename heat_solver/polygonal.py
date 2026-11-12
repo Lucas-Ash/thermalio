@@ -4,6 +4,7 @@ import numpy as np
 from scipy.sparse import coo_matrix, diags, lil_matrix
 from scipy.sparse.linalg import bicgstab, cg, factorized, spsolve
 
+from .fv_assembly import assemble_reconstructed, assemble_tpfa, flatten_stencils, identity_rows, interior_faces
 from .geometry import polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
 
@@ -98,16 +99,15 @@ class _AndersonAccelerator:
 
 
 def _apply_dirichlet_rows_csr(K, boundary_indices):
-    """Zero boundary rows in a CSR matrix and set their diagonal to 1.0 (in-place)."""
-    indptr = K.indptr
-    indices = K.indices
-    data = K.data
-    for i in boundary_indices:
-        start = indptr[i]
-        end = indptr[i + 1]
-        data[start:end] = 0.0
-        pos = start + np.searchsorted(indices[start:end], i)
-        data[pos] = 1.0
+    """Zero boundary rows in a CSR matrix and set their diagonal to 1.0 (in-place, pattern kept)."""
+    rows = np.asarray(boundary_indices, dtype=np.intp)
+    if rows.size == 0:
+        return
+    starts = K.indptr[rows]
+    counts = K.indptr[rows + 1] - starts
+    entry = np.repeat(starts, counts) + (np.arange(int(counts.sum())) - np.repeat(np.cumsum(counts) - counts, counts))
+    K.data[entry] = 0.0
+    K.data[entry[K.indices[entry] == np.repeat(rows, counts)]] = 1.0
 
 
 class PolygonalHeatSolver:
@@ -118,6 +118,9 @@ class PolygonalHeatSolver:
     ``time_scheme='backward_euler'`` (default) is first-order accurate in time. ``time_scheme='crank_nicolson'``
     uses the Crank–Nicolson (θ=1/2) trapezoidal step for the semi-discrete system ``M u' + A u = M Q``,
     which is second-order accurate in time for smooth data (spatial accuracy is unchanged).
+    ``time_scheme='bdf2'`` is the variable-step second-order backward difference formula (first step
+    backward Euler): second order like Crank–Nicolson but strongly damping stiff modes, so it does not
+    ring on rough initial or boundary data.  It is the default of the verification drivers.
 
     Each step solves a sparse linear system; use ``linear_solver='bicgstab'`` or ``'cg'`` for iterative solves.
 
@@ -189,8 +192,8 @@ class PolygonalHeatSolver:
             )
         self.linear_solver_options = dict(linear_solver_options) if linear_solver_options else {}
         self.time_scheme = str(time_scheme).lower().strip()
-        if self.time_scheme not in {"backward_euler", "crank_nicolson"}:
-            raise ValueError("time_scheme must be 'backward_euler' or 'crank_nicolson'.")
+        if self.time_scheme not in {"backward_euler", "crank_nicolson", "bdf2"}:
+            raise ValueError("time_scheme must be 'backward_euler', 'crank_nicolson' or 'bdf2'.")
         self.flux_scheme = str(flux_scheme).lower().strip()
         if self.flux_scheme not in {"tpfa", "mpfa"}:
             raise ValueError("flux_scheme must be 'tpfa' or 'mpfa'.")
@@ -272,6 +275,9 @@ class PolygonalHeatSolver:
         self.u = np.zeros(self.M)
         self.reuse_linear_lhs = bool(reuse_linear_lhs)
         self._vec_assembly = None
+        self._constant_A = None  # operator from the last temperature-independent assembly (reused by solve())
+        self._linear_cache = {}  # (dt, time-scheme coefficients) -> (lhs, factor), valid for _linear_cache_A
+        self._linear_cache_A = None
         self._boundary_idx = np.where(self.is_boundary)[0]
         if (
             self.temperature_dependent_diffusivity
@@ -566,11 +572,57 @@ class PolygonalHeatSolver:
             coeffs.append(cell_coeffs)
         return coeffs
 
+    def _interior_face_arrays(self):
+        """Interior-face geometry for the vectorized assembly (cached per mesh)."""
+        extras = self._geometry.extras
+        faces = extras.get("interior_faces")
+        if faces is None:
+            faces = interior_faces(self.vertices, self.cell_centers, self.edge_to_cells)
+            extras["interior_faces"] = faces
+        return faces
+
+    def _flat_gradient_stencils(self):
+        if self.gradient_coeffs is None:
+            return None
+        extras = self._geometry.extras
+        if extras.get("gradient_coeffs") is self.gradient_coeffs:
+            flat = extras.get("gradient_coeffs_flat")
+            if flat is None:
+                flat = flatten_stencils(self.gradient_coeffs)
+                extras["gradient_coeffs_flat"] = flat
+            return flat
+        return flatten_stencils(self.gradient_coeffs)
+
+    def _face_tensors(self, faces, temperature=None):
+        """Conductivity tensors ``(n_faces, 2, 2)`` at the face midpoints."""
+        mid = faces["midpoint"]
+        m = mid.shape[0]
+        face_t = None if temperature is None else 0.5 * (temperature[faces["i"]] + temperature[faces["j"]])
+        try:
+            K = np.asarray(self._process_alpha(mid[:, 0], mid[:, 1], temperature=face_t), dtype=float)
+            if K.shape == (m, 2, 2):
+                return K
+        except Exception:  # noqa: BLE001 - alpha callables written for scalar points only
+            pass
+        return np.array([
+            np.asarray(self._process_alpha(mid[k, 0], mid[k, 1],
+                                           temperature=None if face_t is None else face_t[k]), dtype=float).reshape(2, 2)
+            for k in range(m)
+        ]).reshape(m, 2, 2)
+
     def _assemble_diffusion_reconstructed(self, temperature=None):
         """
         Diffusion matrix from face flux F = -edge_len * n^T K grad_face u, with
         grad_face = 0.5 * (grad u_i + grad u_j) and cell gradients from least squares.
         """
+        if self.gradient_coeffs is None:
+            raise RuntimeError("flux_discretization='reconstructed' requires gradient coefficients.")
+        faces = self._interior_face_arrays()
+        self.A = assemble_reconstructed(faces, self._face_tensors(faces, temperature), self.M,
+                                        self._flat_gradient_stencils())
+
+    def _assemble_diffusion_reconstructed_loop(self, temperature=None):
+        """Legacy per-face loop for the reconstructed flux (reference for the vectorized assembly)."""
         if self.gradient_coeffs is None:
             raise RuntimeError("flux_discretization='reconstructed' requires gradient coefficients.")
 
@@ -639,7 +691,7 @@ class PolygonalHeatSolver:
                 diffusion[j, i] -= base
                 diffusion[j, j] += base
 
-        self.A = diffusion.tocsr()
+        return diffusion.tocsr()
 
     def cell_average(self, f, *args):
         """Cell averages of ``f(x, y, *args)`` (degree-4 triangle-fan quadrature).
@@ -662,6 +714,11 @@ class PolygonalHeatSolver:
         return make_monotone(A)
 
     def _assemble_system(self, temperature=None):
+        self._assemble_operator(temperature)
+        # solve() reuses a temperature-independent operator while it is still current.
+        self._constant_A = self.A if temperature is None else None
+
+    def _assemble_operator(self, temperature=None):
         if temperature is not None and self._vec_assembly is not None:
             self._assemble_diffusion_vectorized(temperature)
             self.A = self._apply_monotone(self.A)
@@ -706,6 +763,13 @@ class PolygonalHeatSolver:
             self.A = self._apply_monotone(op.assemble(K))
             return
 
+        faces = self._interior_face_arrays()
+        stencils = self._flat_gradient_stencils() if self.nonorthogonal_correction else None
+        self.M_diag = mass
+        self.A = self._apply_monotone(assemble_tpfa(faces, self._face_tensors(faces, temperature), self.M, stencils))
+
+    def _assemble_tpfa_loop(self, temperature=None):
+        """Legacy per-face loop for the two-point flux (reference for the vectorized assembly)."""
         diffusion = lil_matrix((self.M, self.M))
         centers = self.cell_centers
         verts = self.vertices
@@ -757,8 +821,7 @@ class PolygonalHeatSolver:
                 for idx, coeff in face_coeffs.items():
                     diffusion[i, idx] -= correction_scale * coeff
                     diffusion[j, idx] += correction_scale * coeff
-        self.M_diag = mass
-        self.A = self._apply_monotone(diffusion.tocsr())
+        return diffusion.tocsr()
 
     def _precompute_vectorized_assembly(self):
         """Pre-compute edge topology and COO structure for vectorized diffusion assembly.
@@ -890,6 +953,21 @@ class PolygonalHeatSolver:
             (data, (va["all_rows"], va["all_cols"])), shape=(self.M, self.M)
         ).tocsr()
 
+    def _step_coefficients(self, dts):
+        """Per-step ``(a0, a1, a2)``: ``u_t ~ (a0 u^{n+1} - a1 u^n + a2 u^{n-1}) / dt_n``.
+
+        Backward Euler (and the first BDF2 step) is ``(1, 1, 0)``; BDF2 uses the
+        variable-step coefficients with ``w = dt_n / dt_{n-1}``.
+        """
+        coeffs = []
+        for n, k in enumerate(dts):
+            if self.time_scheme == "bdf2" and n > 0:
+                w = k / dts[n - 1]
+                coeffs.append(((1.0 + 2.0 * w) / (1.0 + w), 1.0 + w, w * w / (1.0 + w)))
+            else:
+                coeffs.append((1.0, 1.0, 0.0))
+        return coeffs
+
     @staticmethod
     def _dt_schedule(t0, t_end, dt):
         t = t0
@@ -914,19 +992,22 @@ class PolygonalHeatSolver:
         return True
 
     def _apply_dirichlet_identity_rows(self, K_csr):
-        lil = K_csr.tolil()
-        for i in np.where(self.is_boundary)[0]:
-            lil.rows[i] = [i]
-            lil.data[i] = [1.0]
-        return lil.tocsr()
+        return identity_rows(K_csr, self.is_boundary)
 
-    def _build_linear_lhs_csr(self, dt_eff):
-        """LHS for linear Dirichlet/Neumann problems (Robin excluded)."""
-        if self.time_scheme == "backward_euler":
-            theta = 1.0
-        else:
-            theta = 0.5
-        K = self.M_diag + (theta * dt_eff) * self.A
+    def _mass(self, coeff):
+        return self.M_diag if coeff == 1.0 else coeff * self.M_diag
+
+    def _dirichlet_values(self, x, y, t):
+        return np.broadcast_to(np.asarray(self.bc_func(x, y, t), dtype=float), (self.M,))
+
+    def _build_linear_lhs_csr(self, dt_eff, mass_coeff=1.0):
+        """LHS ``c M + theta dt A`` for linear Dirichlet/Neumann problems (Robin excluded).
+
+        ``mass_coeff`` is the BDF2 leading coefficient (1 for backward Euler and Crank–Nicolson).
+        """
+        theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
+        mass = self.M_diag if mass_coeff == 1.0 else mass_coeff * self.M_diag
+        K = mass + (theta * dt_eff) * self.A
         if self.bc_type == "dirichlet":
             return self._apply_dirichlet_identity_rows(K)
         return K.tocsr()
@@ -944,8 +1025,8 @@ class PolygonalHeatSolver:
             or has_nonlinear_radiation
         )
 
-        if not has_temp_dependent_diffusion:
-            self._assemble_system()
+        if not has_temp_dependent_diffusion and (self.A is None or self.A is not self._constant_A):
+            self._assemble_system()  # assembled once; reused by later solve() calls
 
         _pc_fast = (
             self.phase_change_model is not None
@@ -986,20 +1067,34 @@ class PolygonalHeatSolver:
             and (not requires_nonlinear)
             and self._linear_operator_reusable()
         )
+        step_coeffs = self._step_coefficients(dts)
+        lin_keys = [(round(float(d), 12), round(c[0], 12)) for d, c in zip(dts, step_coeffs)]
         lhs_by_dt = None
         factor_by_dt = None
         if use_linear_cache:
             uniq_dt = []
             seen = set()
-            for d in dts:
-                key = round(float(d), 12)
+            for key in lin_keys:
                 if key not in seen:
                     seen.add(key)
                     uniq_dt.append(key)
-            lhs_by_dt = {key: self._build_linear_lhs_csr(key) for key in uniq_dt}
-            if self.linear_solver == "direct":
-                factor_by_dt = {key: factorized(lhs_by_dt[key]) for key in uniq_dt}
+            if self._linear_cache_A is not self.A:  # operator changed: drop stale systems
+                self._linear_cache = {}
+                self._linear_cache_A = self.A
+            lhs_by_dt = {}
+            factor_by_dt = {} if self.linear_solver == "direct" else None
+            for key in uniq_dt:
+                cache_key = (key, self.time_scheme, self.linear_solver)
+                if cache_key not in self._linear_cache:
+                    a0 = step_coeffs[lin_keys.index(key)][0]
+                    lhs_new = self._build_linear_lhs_csr(key[0], mass_coeff=a0)
+                    self._linear_cache[cache_key] = (
+                        lhs_new, factorized(lhs_new) if self.linear_solver == "direct" else None)
+                lhs_by_dt[key], factor = self._linear_cache[cache_key]
+                if factor_by_dt is not None:
+                    factor_by_dt[key] = factor
 
+        u_prev = None
         for step_idx in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = dts[step_idx]
@@ -1009,32 +1104,29 @@ class PolygonalHeatSolver:
                 np.asarray(self.source_func(cx, cy, t_next), dtype=float),
                 (self.M,),
             )
+            # Implicit one-/two-step history: u^n for backward Euler, a1 u^n - a2 u^{n-1} for BDF2.
+            a0, a1, a2 = step_coeffs[step_idx]
+            hist = u if a2 == 0.0 else a1 * u - a2 * u_prev
+            u_prev = u
 
             if not requires_nonlinear:
-                dt_key = round(float(dt_eff), 12)
-                if self.time_scheme == "backward_euler":
-                    rhs = self.M_diag @ u + dt_eff * (self.cell_areas * source_next)
+                dt_key = lin_keys[step_idx]
+                if self.time_scheme != "crank_nicolson":
+                    rhs = self.M_diag @ hist + dt_eff * (self.cell_areas * source_next)
                     if self.bc_type == "dirichlet":
-                        bc_vals = self.bc_func(cx, cy, t_next)
+                        bidx = self._boundary_idx
+                        rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
-                            for i in np.where(self.is_boundary)[0]:
-                                rhs[i] = bc_vals[i]
                         else:
-                            lhs = (self.M_diag + dt_eff * self.A).copy().tolil()
-                            for i in np.where(self.is_boundary)[0]:
-                                lhs.rows[i] = [i]
-                                lhs.data[i] = [1.0]
-                            for i in np.where(self.is_boundary)[0]:
-                                rhs[i] = bc_vals[i]
-                            lhs = lhs.tocsr()
+                            lhs = identity_rows(self._mass(a0) + dt_eff * self.A, self.is_boundary)
                     else:
                         boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
                         rhs = rhs + dt_eff * boundary_rhs
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
                         else:
-                            lhs = self.M_diag + dt_eff * (self.A + boundary_matrix)
+                            lhs = self._mass(a0) + dt_eff * (self.A + boundary_matrix)
                 else:
                     source_prev = np.broadcast_to(
                         np.asarray(self.source_func(cx, cy, t), dtype=float),
@@ -1043,17 +1135,12 @@ class PolygonalHeatSolver:
                     src_avg = self.cell_areas * (source_next + source_prev)
                     if self.bc_type == "dirichlet":
                         rhs = (self.M_diag - 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * src_avg
-                        bc_vals = self.bc_func(cx, cy, t_next)
-                        for i in np.where(self.is_boundary)[0]:
-                            rhs[i] = bc_vals[i]
+                        bidx = self._boundary_idx
+                        rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
                         else:
-                            lhs = (self.M_diag + 0.5 * dt_eff * self.A).copy().tolil()
-                            for i in np.where(self.is_boundary)[0]:
-                                lhs.rows[i] = [i]
-                                lhs.data[i] = [1.0]
-                            lhs = lhs.tocsr()
+                            lhs = identity_rows(self.M_diag + 0.5 * dt_eff * self.A, self.is_boundary)
                     else:
                         b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
                         b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
@@ -1233,31 +1320,23 @@ class PolygonalHeatSolver:
                 cp_eff = self._effective_heat_capacity(u_iter)
                 mass_matrix = self._build_mass_matrix(cp_eff)
 
-                if self.time_scheme == "backward_euler":
-                    rhs = mass_matrix @ u + dt_eff * (self.cell_areas * source_next)
+                if self.time_scheme != "crank_nicolson":
+                    rhs = mass_matrix @ hist + dt_eff * (self.cell_areas * source_next)
+                    lead = mass_matrix if a0 == 1.0 else a0 * mass_matrix
                     if self.bc_type == "dirichlet":
-                        bc_vals = self.bc_func(cx, cy, t_next)
-                        lhs = (mass_matrix + dt_eff * self.A).copy().tolil()
-                        for i in np.where(self.is_boundary)[0]:
-                            lhs.rows[i] = [i]
-                            lhs.data[i] = [1.0]
-                            rhs[i] = bc_vals[i]
-                        lhs = lhs.tocsr()
+                        bidx = self._boundary_idx
+                        rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
+                        lhs = identity_rows(lead + dt_eff * self.A, self.is_boundary)
                     else:
                         boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next, temperature=u_iter)
-                        lhs = mass_matrix + dt_eff * (self.A + boundary_matrix)
+                        lhs = lead + dt_eff * (self.A + boundary_matrix)
                         rhs = rhs + dt_eff * boundary_rhs
                 elif self.bc_type == "dirichlet":
                     A_prev = self.A if A_old is None else A_old
                     rhs = (mass_matrix - 0.5 * dt_eff * A_prev) @ u + 0.5 * dt_eff * src_avg
-                    bc_vals = self.bc_func(cx, cy, t_next)
-                    for i in np.where(self.is_boundary)[0]:
-                        rhs[i] = bc_vals[i]
-                    lhs = (mass_matrix + 0.5 * dt_eff * self.A).copy().tolil()
-                    for i in np.where(self.is_boundary)[0]:
-                        lhs.rows[i] = [i]
-                        lhs.data[i] = [1.0]
-                    lhs = lhs.tocsr()
+                    bidx = self._boundary_idx
+                    rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
+                    lhs = identity_rows(mass_matrix + 0.5 * dt_eff * self.A, self.is_boundary)
                 else:
                     if has_temp_dependent_diffusion or has_nonlinear_radiation:
                         # Old level evaluated at u^n (operator and nonlinear boundary

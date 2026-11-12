@@ -2,6 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, diags
 from scipy.sparse.linalg import factorized, spsolve
 
+from .fv_assembly import identity_rows
 from .geometry import cross2d, polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
 
@@ -10,6 +11,10 @@ class NonUniformHeatSolver:
     """
     Finite Volume heat equation solver on an unstructured triangular mesh.
     Vertex-centered unknowns with median dual control volumes.
+
+    ``time_scheme='backward_euler'`` (default) is first order in time;
+    ``time_scheme='bdf2'`` is the variable-step second-order BDF (first step
+    backward Euler), the default of the verification drivers.
     """
 
     def __init__(
@@ -24,7 +29,11 @@ class NonUniformHeatSolver:
         phase_change_model=None,
         phase_change_options=None,
         reuse_linear_lhs=True,
+        time_scheme="backward_euler",
     ):
+        self.time_scheme = str(time_scheme).lower().strip()
+        if self.time_scheme not in {"backward_euler", "bdf2"}:
+            raise ValueError("time_scheme must be 'backward_euler' or 'bdf2'.")
         self.points = np.asarray(points, dtype=float)
         self.tris = np.asarray(tris, dtype=int)
         self.N = self.points.shape[0]
@@ -302,12 +311,17 @@ class NonUniformHeatSolver:
         else:
             mask = np.zeros(self.N, dtype=bool)
             mask[np.asarray(fixed, dtype=int)] = True
-        A_mod = A.tolil()
-        for i in np.where(mask)[0]:
-            rhs[i] = self.bc_func(*self.points[i], t)
-            A_mod.rows[i] = [i]
-            A_mod.data[i] = [1.0]
-        return A_mod.tocsr(), rhs
+        idx = np.flatnonzero(mask)
+        rhs[idx] = self._dirichlet_values(idx, t)
+        return identity_rows(A, mask), rhs
+
+    def _dirichlet_values(self, idx, t):
+        """Dirichlet data at the vertices ``idx`` (vectorized; point-by-point for scalar-only callbacks)."""
+        x, y = self.points[idx, 0], self.points[idx, 1]
+        try:
+            return np.broadcast_to(np.asarray(self.bc_func(x, y, t), dtype=float), x.shape)
+        except Exception:  # noqa: BLE001 - callbacks written for scalar points only
+            return np.array([float(self.bc_func(*self.points[i], t)) for i in idx])
 
     def _apply_dirichlet_matrix_only(self, A_csr, fixed=None):
         if fixed is None:
@@ -315,11 +329,7 @@ class NonUniformHeatSolver:
         else:
             mask = np.zeros(self.N, dtype=bool)
             mask[np.asarray(fixed, dtype=int)] = True
-        A_mod = A_csr.tolil()
-        for i in np.where(mask)[0]:
-            A_mod.rows[i] = [i]
-            A_mod.data[i] = [1.0]
-        return A_mod.tocsr()
+        return identity_rows(A_csr, mask)
 
     @staticmethod
     def _dt_schedule(t0, t_end, dt):
@@ -332,15 +342,18 @@ class NonUniformHeatSolver:
             t = t_next
         return schedule
 
-    def step(self, u, t, dt_step):
+    def step(self, u, t, dt_step, history=None, mass_coeff=1.0):
+        """One implicit step.  ``history``/``mass_coeff``: BDF2 history ``a1 u^n - a2 u^{n-1}`` and ``a0``."""
+        hist = u if history is None else history
         source_vals = np.broadcast_to(
             np.asarray(self.source_func(self.points[:, 0], self.points[:, 1], t + dt_step), dtype=float),
             (self.N,),
         )
         if self.phase_change_model is None:
             mass_over_dt = diags(self.cv_area / dt_step, format="csr")
-            rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
-            lhs = (mass_over_dt + self.A).tocsr()
+            rhs = (mass_over_dt @ hist).copy() + self.cv_area * source_vals
+            lead = mass_over_dt if mass_coeff == 1.0 else mass_coeff * mass_over_dt
+            lhs = (lead + self.A).tocsr()
             return self._solve_with_boundary(lhs, rhs, t + dt_step, u)
 
         max_iters = int(self.phase_change_options["max_iters"])
@@ -350,8 +363,9 @@ class NonUniformHeatSolver:
         for _ in range(max_iters):
             cp_eff = self._effective_heat_capacity(u_iter)
             mass_over_dt = diags((self.cv_area * cp_eff) / dt_step, format="csr")
-            rhs = (mass_over_dt @ u).copy() + self.cv_area * source_vals
-            lhs = (mass_over_dt + self.A).tocsr()
+            rhs = (mass_over_dt @ hist).copy() + self.cv_area * source_vals
+            lead = mass_over_dt if mass_coeff == 1.0 else mass_coeff * mass_over_dt
+            lhs = (lead + self.A).tocsr()
             if self.bc_type == "dirichlet":
                 lhs, rhs = self.apply_dirichlet(lhs, rhs, t + dt_step)
             else:
@@ -381,20 +395,36 @@ class NonUniformHeatSolver:
             and self.phase_change_model is None
             and self.bc_type in ("dirichlet", "neumann", "flux")  # constant LHS
         )
+        # (a0, a1, a2): u_t ~ (a0 u^{n+1} - a1 u^n + a2 u^{n-1}) / dt_n; BDF2 after a backward-Euler start.
+        step_coeffs = []
+        for n, d in enumerate(dts):
+            if self.time_scheme == "bdf2" and n > 0:
+                w = d / dts[n - 1]
+                step_coeffs.append(((1.0 + 2.0 * w) / (1.0 + w), 1.0 + w, w * w / (1.0 + w)))
+            else:
+                step_coeffs.append((1.0, 1.0, 0.0))
+        lin_keys = [(round(float(d), 12), round(c[0], 12)) for d, c in zip(dts, step_coeffs)]
         lhs_by_dt = {}
         factor_by_dt = {}
         if use_cache:
-            for key in sorted({round(float(d), 12) for d in dts}):
-                mass_over_dt = diags(self.cv_area / key, format="csr")
-                lhs = (mass_over_dt + self.A).tocsr()
+            for key in dict.fromkeys(lin_keys):
+                a0 = step_coeffs[lin_keys.index(key)][0]
+                mass_over_dt = diags(self.cv_area / key[0], format="csr")
+                lead = mass_over_dt if a0 == 1.0 else a0 * mass_over_dt
+                lhs = (lead + self.A).tocsr()
                 lhs_by_dt[key] = self._apply_dirichlet_matrix_only(lhs) if self.bc_type == "dirichlet" else lhs
                 factor_by_dt[key] = factorized(lhs_by_dt[key])
+        boundary_idx = np.flatnonzero(self.is_boundary)
 
+        u_prev = None
         for k in range(nsteps):
             t_next = min(self.t + self.dt, t_end)
             dt_step = dts[k]
+            a0, a1, a2 = step_coeffs[k]
+            hist = self.u if a2 == 0.0 else a1 * self.u - a2 * u_prev
+            u_prev = self.u
             if use_cache:
-                dt_key = round(float(dt_step), 12)
+                dt_key = lin_keys[k]
                 source_vals = np.broadcast_to(
                     np.asarray(
                         self.source_func(self.points[:, 0], self.points[:, 1], t_next),
@@ -403,15 +433,14 @@ class NonUniformHeatSolver:
                     (self.N,),
                 )
                 mass_over_dt = diags(self.cv_area / dt_step, format="csr")
-                rhs = (mass_over_dt @ self.u).copy() + self.cv_area * source_vals
+                rhs = (mass_over_dt @ hist).copy() + self.cv_area * source_vals
                 if self.bc_type == "dirichlet":
-                    for i in np.where(self.is_boundary)[0]:
-                        rhs[i] = self.bc_func(*self.points[i], t_next)
+                    rhs[boundary_idx] = self._dirichlet_values(boundary_idx, t_next)
                 else:
                     rhs = rhs + self.boundary_closure(t_next)[1]
                 self.u = factor_by_dt[dt_key](rhs)
             else:
-                self.u = self.step(self.u, self.t, dt_step)
+                self.u = self.step(self.u, self.t, dt_step, history=None if a2 == 0.0 else hist, mass_coeff=a0)
             self.t = t_next
             if callback is not None:
                 callback(k + 1, self.t, self.u)

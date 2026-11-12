@@ -16,6 +16,11 @@ from .polygonal import PolygonalHeatSolver
 from .triangular import NonUniformHeatSolver
 from .curvilinear import CurvilinearHeatSolver
 
+# Verification drivers default to second-order time stepping: BDF2 is second order like
+# Crank-Nicolson but damps stiff modes, so it does not ring on rough initial / boundary data
+# (several verification cases).  Pass time_scheme="backward_euler" for the first-order scheme.
+DEFAULT_TIME_SCHEME = "bdf2"
+
 
 def _driver_mesh(mesh, use_library, generator, **params):
     """Mesh for a driver: an explicit mesh (Mesh2D / file / library name) or a library configuration.
@@ -46,7 +51,7 @@ def run_curvilinear_test(
     bbox=(-1.0, 1.0, -1.0, 1.0),
     bc_type=None,
     bc_func=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     phase_change_model=None,
     phase_change_options=None,
     nonlinear_options=None,
@@ -130,7 +135,7 @@ def run_polygonal_mesh_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -217,7 +222,7 @@ def run_polygonal_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -270,7 +275,7 @@ def run_mixed_polygonal_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -320,7 +325,7 @@ def run_square_polygonal_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -370,7 +375,7 @@ def run_nonorthogonal_polygonal_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -421,7 +426,7 @@ def run_nonorthogonal_tiled_polygonal_test(
     bc_func=None,
     linear_solver="direct",
     linear_solver_options=None,
-    time_scheme="backward_euler",
+    time_scheme=DEFAULT_TIME_SCHEME,
     flux_scheme="tpfa",
     flux_discretization="tpfa",
     phase_change_model=None,
@@ -474,6 +479,7 @@ def run_test(
     phase_change_options=None,
     mesh=None,
     use_library=True,
+    time_scheme=DEFAULT_TIME_SCHEME,
 ):
     if mesh_type != "delaunay":
         raise ValueError("run_test supports only 'delaunay'. Use polygonal test drivers for polygonal meshes.")
@@ -504,6 +510,7 @@ def run_test(
         phase_change_model=phase_change_model,
         phase_change_options=phase_change_options,
         reuse_linear_lhs=True,
+        time_scheme=time_scheme,
     )
     u0 = exact_solution(points[:, 0], points[:, 1], t_init)
     t_final, u_num = solver.solve(u0=u0, t0=t_init, t_end=t_end)
