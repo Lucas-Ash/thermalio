@@ -7,13 +7,15 @@ This guide answers three questions with measurements from this repository:
 3. How much do acceleration techniques and parallelism matter, and in what order?
 
 The first edition of this guide measured the solver as it was and ranked its
-improvements by payoff. The first three are now implemented. This edition reports
+improvements by payoff. The first four are now implemented. This edition reports
 before-and-after numbers:
 
 1. Vectorized assembly with operator caching.
 2. BDF2 as the default time scheme of the verification drivers.
 3. Factorization reuse with Robin and radiative boundaries, and a vectorized
    first-time setup (mesh generators, gradient stencils).
+4. Preconditioned Krylov solvers (Jacobi, algebraic multigrid) and
+   `linear_solver="auto"`, which picks the solver by size and stiffness.
 
 All timings come from one 4-core x86-64 cloud VM with no GPU, running Python 3.13,
 NumPy 2.5, SciPy 1.18 and pyamg 5.4.
@@ -73,8 +75,16 @@ Scripts and figures:
     drops to 2.5x, because process start-up and data transfer become a large share.
     Task parallelism pays for tasks that are long compared with that overhead.
   - Threaded kernels give 2.0–3.8x on 4 cores (range over sessions).
+- **The right linear solver depends on the regime** (section 3b).
+  `linear_solver="auto"` picks it from a cost model calibrated on Thermalio's own
+  systems. At one million cells, 20 steps:
+  - mass-dominated (Δt ∝ h²): Jacobi-CG takes 3.8 s against 56 s for the sparse LU;
+  - stiff: multigrid-CG takes 27 s against 33 s.
+
+  Below about 50k unknowns, or for stiff problems up to about 1M, the LU factorized
+  once remains the best choice, and `auto` keeps it.
 - **Thermalio is 2D, so problems stay small.** h = 1/1000 is one million cells, and
-  that takes 0.3 s per time step on one core. GPUs and distributed memory (MPI)
+  that takes 0.2–0.3 s per time step on one core with Jacobi-CG. GPUs and distributed memory (MPI)
   matter for 3D codes and for 10^7+ unknowns.
 
 ## 1. Thermalio vs FiPy vs scikit-fem
@@ -90,15 +100,15 @@ Finest mesh (n = 64), wall time including setup:
 
 | problem | Thermalio FV | FiPy FV | scikit-fem P1 | scikit-fem P2 |
 |---|---|---|---|---|
-| isotropic Dirichlet | 3.3e-4 in **0.16 s** (was 1.5 s) | 8.3e-5 in 3.9 s | 2.0e-3 in 2.5 s | 1.5e-5 in 27 s |
-| anisotropic tensor (ratio 5, 30°) | 3.1e-5 in **0.20 s** (was 1.6 s) | 5.3e-4 in 3.7 s | 1.9e-3 in 2.7 s | 1.5e-5 in 26 s |
-| Pennes perfusion + Robin | 2.5e-5 in **0.20 s** (was 2.3 s) | — | 1.0e-4 in 2.6 s | 5.5e-6 in 28 s |
+| isotropic Dirichlet | 3.3e-4 in **0.20 s** (was 1.5 s) | 8.3e-5 in 3.5 s | 2.0e-3 in 2.4 s | 1.5e-5 in 27 s |
+| anisotropic tensor (ratio 5, 30°) | 3.1e-5 in **0.21 s** (was 1.6 s) | 5.3e-4 in 3.8 s | 1.9e-3 in 2.6 s | 1.5e-5 in 28 s |
+| Pennes perfusion + Robin | 2.5e-5 in **0.27 s** (was 2.3 s) | — | 1.0e-4 in 3.3 s | 5.5e-6 in 28 s |
 
 All codes ran in the same session. The "was" values are from the first edition,
 which ran in a slower session.
 
 The scikit-fem P2 column has about 4x as many unknowns as the others. Thermalio's
-quadratic flux on the skewed anisotropic mesh reaches 1.45e-5 in 3.0 s.
+quadratic flux on the skewed anisotropic mesh reaches 1.45e-5 in 3.2 s.
 
 The Pennes + Robin run sped up only once item 3 landed (section 2b): its Robin
 closure made every step refactorize the matrix.
@@ -114,11 +124,11 @@ How to read `external_code_timing.png`:
   - Our scikit-fem adapter re-assembles the load by quadrature and refactorizes the
     matrix every step.
 - **Time to a target error of 1e-3 (panel c).**
-  - Isotropic: Thermalio 0.05 s, scikit-fem P2 0.64 s, FiPy 1.6 s. scikit-fem P1 does
-    not get there by n = 64.
-  - Anisotropic: Thermalio 0.013 s, FiPy 2.0 s. FiPy's anisotropic flux converges at
+  - Isotropic: Thermalio 0.055 s, scikit-fem P2 0.65 s, FiPy 1.9 s. scikit-fem P1
+    does not get there by n = 64.
+  - Anisotropic: Thermalio 0.010 s, FiPy 2.3 s. FiPy's anisotropic flux converges at
     order 0.9.
-  - Pennes + Robin: Thermalio 0.04 s, scikit-fem P2 0.22 s, P1 0.32 s.
+  - Pennes + Robin: Thermalio 0.045 s, scikit-fem P2 0.24 s, P1 0.37 s.
 - **Work–precision (panels d–f).**
   - Thermalio has the lowest cost per digit on the isotropic and anisotropic
     problems, and on the Pennes problem down to about 1e-4.
@@ -271,6 +281,57 @@ At N ≈ 1M:
 
   Direct solvers are right up to a few hundred thousand unknowns; AMG beyond that.
 
+### 3b. In Thermalio: preconditioned solvers and `linear_solver="auto"` (item 4)
+
+`PolygonalHeatSolver` accepts:
+- `linear_solver` = `"direct"`, `"cg"`, `"bicgstab"`, `"gmres"` or `"auto"`;
+- `linear_solver_options={"preconditioner": "jacobi" | "amg"}` (`heat_solver/linear_solvers.py`).
+
+How the iterative path works:
+- **Preconditioner reuse.** A preconditioner is built once and reused across steps,
+  nonlinear iterations and `solve()` calls. The Krylov method always solves the
+  current matrix to `rtol` (default 1e-12), so reusing a slightly stale
+  preconditioner only costs iterations. It is rebuilt if the iteration count
+  doubles.
+- **Dirichlet elimination.** The identity rows that impose Dirichlet data make the
+  matrix nonsymmetric. Their columns are moved to the right-hand side, which gives
+  the same solution and keeps CG applicable.
+- **Accuracy.** Iterative solutions agree with the direct solver to ≤ 1e-9 for every
+  boundary type. The default stays `"direct"`, so existing results are unchanged
+  (QA 75/75 bit-identical).
+
+**How `auto` decides.**
+- Below 20k unknowns it uses the direct solver.
+- Otherwise it estimates the cost of three strategies and takes the cheapest:
+  - direct, factorized once (or once per solve when the matrix changes every
+    iteration), with factorization cost ∝ N^1.5, as nested dissection predicts in 2D;
+  - Jacobi-CG, with iterations ≈ 2.5 κ^0.66;
+  - AMG-CG, with setup plus 1.5 + 1.5 log₁₀ κ iterations.
+- κ is a Gershgorin bound on the condition number of the Jacobi-scaled matrix,
+  1 + 2 θ Δt a_ii / m_i. It is cheap to compute and separates the two regimes.
+- The direct solver is ruled out above 1.5M unknowns (memory: about 6 GB at 1M).
+- The constants were fitted to timings from 9k to 1M cells. The chosen plan and the
+  cost estimates are reported in `solver.last_solve_stats`.
+
+`solver_choice.png`, 20 steps including setup:
+
+| cells | regime | direct | CG + Jacobi | CG + AMG | `auto` picks |
+|---|---|---|---|---|---|
+| 65k | mass-dominated | 0.60 s | **0.30 s** | 0.89 s | Jacobi (0.36 s) |
+| 65k | stiff | **0.80 s** | 4.5 s | 2.0 s | direct (0.55 s) |
+| 262k | mass-dominated | 5.3 s | **1.0 s** | 2.4 s | Jacobi (0.92 s) |
+| 262k | stiff | **4.0 s** | 21 s | 7.7 s | direct (4.3 s) |
+| 1M | mass-dominated | 56 s | **3.8 s** | 13 s | Jacobi (5.5 s) |
+| 1M | stiff | 33 s | — | **27 s** | AMG (27 s) |
+
+- In every regime `auto` picks the fastest strategy or one within the run-to-run
+  noise.
+- The gains are largest exactly where a user would hit the wall with the old default:
+  10–15x at a million cells with accuracy-balanced steps.
+- Other solvers are not covered yet. The Robin/radiative factor cache and the
+  phase-change and temperature-dependent fast paths still use direct solves, and the
+  curvilinear, triangular and transport solvers are direct-only.
+
 ## 4. Higher order is acceleration
 
 `accuracy_as_acceleration.png`, panel (a): time error on a 48² mesh against a
@@ -373,13 +434,12 @@ A 2D Thermalio problem rarely gets there.
      and radiative 24x at 65k cells; Pennes + Robin went from 2.3 s to 0.20 s.
    - Setup is 4.9x faster on a fresh 262k-cell mesh.
    - Results are bit-identical, except radiative, which agrees to ≤ 2e-12.
-4. **Pick the linear solver by regime.** This is now the largest lever: LU back-solves
-   are about 80% of a repeated solve.
-   - Factorize once below about 250k unknowns.
-   - CG + Jacobi for Δt ∝ h².
-   - CG + AMG (pyamg) for large steps, steady or nonlinear problems, and 10^6+
-     unknowns.
-   - `PolygonalHeatSolver` offers `cg` and `bicgstab`, but no AMG preconditioner yet.
+4. ~~**Pick the linear solver by regime.**~~ **Done** (section 3b):
+   - `linear_solver="auto"`, with Jacobi and AMG preconditioners;
+   - 10–15x at one million cells for accuracy-balanced steps, 1.2x for stiff ones.
+
+   Not covered yet: the other solver families, and the phase-change and
+   temperature-dependent fast paths.
 5. **Run independent solves in a process pool**, with tasks long compared with the
    pool overhead (batch solves per task). Sweeps, uncertainty quantification and
    inverse problems got 3.2–3.5x on 4 cores with 0.2–0.3 s tasks.

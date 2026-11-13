@@ -37,6 +37,14 @@ with support for:
   curvilinear and transport solvers all use it (`tests/test_factor_cache.py`).
   The gradient stencils are built batched by neighbour count, bit-identical to
   the per-cell `_build_gradient_reconstruction_loop`.
+  Linear solvers (`heat_solver/linear_solvers.py`): `linear_solver` in
+  `direct` (default), `cg`, `bicgstab`, `gmres`, `auto`, with
+  `linear_solver_options={"preconditioner": "jacobi"|"amg"}` (AMG needs pyamg,
+  `requirements-external.txt`; its tests skip without it and run in the
+  external-validation CI job). Dirichlet identity rows are eliminated for the
+  Krylov solves; preconditioners are reused across steps and calls. `auto`
+  uses a calibrated cost model (`COST`); recalibrate it with
+  `performance_study.py` if solver internals change (`tests/test_linear_solvers.py`).
 
 - `heat_solver/triangular.py`
   Vertex-centered P1 solver on Delaunay meshes.
