@@ -275,8 +275,8 @@ def plot_boundary_closures(rows):
         ax.loglog(cells, [r["reuse"] for r in rr], "s-", color=col,
                   label=f"{bc}: reuse factorization" + (" (frozen Jacobian)" if bc == "radiative" else ""))
         r = rr[-1]
-        ax.annotate(f"{r['refactorize'] / r['reuse']:.0f}x", (r["cells"], r["reuse"]), textcoords="offset points",
-                    xytext=(6, -4), fontsize=8, color=col)
+        ax.annotate(f"{r['refactorize'] / r['reuse']:.0f}x faster", (r["cells"], r["reuse"]),
+                    textcoords="offset points", xytext=(-62, 8 if bc == "radiative" else -26), fontsize=8, color=col)
     ax.set_xlabel("cells"); ax.set_ylabel("wall time, 100 steps [s]")
     ax.set_title("Robin / radiative boundaries: factorization reuse")
     ax.legend(fontsize=7)

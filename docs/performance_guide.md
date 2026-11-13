@@ -6,12 +6,14 @@ This guide answers three questions with measurements from this repository:
 2. Where does Thermalio's run time actually go?
 3. How much do acceleration techniques and parallelism matter, and in what order?
 
-The first edition of this guide measured the solver as it was and ranked five
-improvements by payoff. The first two are now implemented. This edition reports
+The first edition of this guide measured the solver as it was and ranked its
+improvements by payoff. The first three are now implemented. This edition reports
 before-and-after numbers:
 
 1. Vectorized assembly with operator caching.
 2. BDF2 as the default time scheme of the verification drivers.
+3. Factorization reuse with Robin and radiative boundaries, and a vectorized
+   first-time setup (mesh generators, gradient stencils).
 
 All timings come from one 4-core x86-64 cloud VM with no GPU, running Python 3.13,
 NumPy 2.5, SciPy 1.18 and pyamg 5.4.
@@ -19,15 +21,17 @@ NumPy 2.5, SciPy 1.18 and pyamg 5.4.
   otherwise.
 - Absolute times will differ on other machines. The ratios and scaling exponents are
   the part that transfers.
-- Codes not under study vary by about ±30% between runs. FiPy's isotropic run, for
-  example, took 6.5 s in one run and 4.9 s in another.
+- Timings vary by about ±30% between sessions on this VM. FiPy's isotropic run took
+  6.5 s, 4.9 s and 3.9 s in three sessions, and Thermalio's legacy assembly loop 15.2 s
+  and 10.8 s. Ratios measured within one session are the reliable numbers, and this
+  guide quotes those wherever it compares before with after.
 
 Scripts and figures:
 
 | script | figures (`test_plots/benchmark/...`) |
 |---|---|
 | `external_code_comparison.py` | `external_codes/external_code_comparison.png`, `external_codes/external_code_timing.png` |
-| `performance_study.py` | `performance/where_time_goes.png`, `linear_solvers.png`, `parallelism.png`, `accuracy_as_acceleration.png` |
+| `performance_study.py` | `performance/where_time_goes.png`, `boundary_closures.png`, `linear_solvers.png`, `parallelism.png`, `accuracy_as_acceleration.png` |
 
 ## The short answer
 
@@ -36,11 +40,20 @@ Scripts and figures:
     assembled from per-face arrays: 10–45x faster on a mesh's first assembly and
     about 50x once the face arrays are cached.
   - The operator and its LU factorization are reused across `solve()` calls.
-  - A 100-step run on 262k cells takes 13.7 s instead of 43.6 s with cached mesh
-    geometry. A repeated solve takes 9.0 s, which is the linear-algebra floor. At 4k
-    cells the gain is 7–10x.
-  - Results agree with the old code to round-off: 150 scenarios checked, at most
-    3.8e-15 relative difference, 58 bit-identical.
+  - Robin and radiative boundaries reuse their factorization instead of
+    refactorizing every step: 13x and 24x faster on 65k cells. Pennes + Robin in the
+    cross-code comparison went from 2.3 s to 0.20 s.
+  - First-time setup on a never-seen mesh (generator plus solver construction):
+    18.4 s → 3.8 s at 262k cells.
+  - A 100-step Dirichlet run on a never-seen 262k-cell mesh now takes 14.9 s, mesh
+    generation included. The same run with the legacy code takes about 40 s in this
+    session (2.7x). A repeated solve takes 8.9 s, which is the linear-algebra floor (LU
+    back-solves). At 4k cells, runs are 4–11x faster.
+  - Results are unchanged:
+    - Dirichlet, Neumann, Robin and flux are bit-identical to the previous commit,
+      or agree to round-off (≤ 3.8e-15) after the assembly change.
+    - Radiative agrees with full Newton to ≤ 2e-12.
+    - QA passes 75/75, bit-identical.
 - **Second-order time stepping is the cheapest accuracy there is.** At the same Δt,
   the verification drivers' new BDF2 default is:
   - 1,700x more accurate on the radiative case (square mesh);
@@ -55,9 +68,11 @@ Scripts and figures:
 - **Parallelism now has room to pay.** Before, only 21% of a run was parallelizable
   linear algebra, so Amdahl's law capped any number of cores at 1.26x. Now 96% is,
   so 4 cores could give about 3.6x and the ceiling is 28x.
-  - Independent solves (sweeps, uncertainty quantification, inverse problems) run
-    3.2–3.5x faster on 4 cores with no code changes.
-  - Threaded kernels give 3.2–3.8x on 4 cores.
+  - Independent solves (sweeps, uncertainty quantification, inverse problems) ran
+    3.2–3.5x faster on 4 cores. The same 16 solves now take 40 ms each, and that
+    drops to 2.5x, because process start-up and data transfer become a large share.
+    Task parallelism pays for tasks that are long compared with that overhead.
+  - Threaded kernels give 2.0–3.8x on 4 cores (range over sessions).
 - **Thermalio is 2D, so problems stay small.** h = 1/1000 is one million cells, and
   that takes 0.3 s per time step on one core. GPUs and distributed memory (MPI)
   matter for 3D codes and for 10^7+ unknowns.
@@ -75,32 +90,35 @@ Finest mesh (n = 64), wall time including setup:
 
 | problem | Thermalio FV | FiPy FV | scikit-fem P1 | scikit-fem P2 |
 |---|---|---|---|---|
-| isotropic Dirichlet | 3.3e-4 in **0.39 s** (was 1.5 s) | 8.3e-5 in 4.9 s | 2.0e-3 in 3.1 s | 1.5e-5 in 32 s |
-| anisotropic tensor (ratio 5, 30°) | 3.1e-5 in **0.22 s** (was 1.6 s) | 5.3e-4 in 5.2 s | 1.9e-3 in 3.5 s | 1.5e-5 in 31 s |
-| Pennes perfusion + Robin | 2.5e-5 in 2.1 s (was 2.3 s) | — | 1.0e-4 in 3.5 s | 5.5e-6 in 33 s |
+| isotropic Dirichlet | 3.3e-4 in **0.16 s** (was 1.5 s) | 8.3e-5 in 3.9 s | 2.0e-3 in 2.5 s | 1.5e-5 in 27 s |
+| anisotropic tensor (ratio 5, 30°) | 3.1e-5 in **0.20 s** (was 1.6 s) | 5.3e-4 in 3.7 s | 1.9e-3 in 2.7 s | 1.5e-5 in 26 s |
+| Pennes perfusion + Robin | 2.5e-5 in **0.20 s** (was 2.3 s) | — | 1.0e-4 in 2.6 s | 5.5e-6 in 28 s |
+
+All codes ran in the same session. The "was" values are from the first edition,
+which ran in a slower session.
 
 The scikit-fem P2 column has about 4x as many unknowns as the others. Thermalio's
-quadratic flux on the skewed anisotropic mesh reaches 1.45e-5 in 3.8 s.
+quadratic flux on the skewed anisotropic mesh reaches 1.45e-5 in 3.0 s.
 
-The Pennes + Robin run barely sped up. That model (`transport.py`) reassembles its
-Robin boundary closure every step, which is the next serial cost to remove
-(section 6).
+The Pennes + Robin run sped up only once item 3 landed (section 2b): its Robin
+closure made every step refactorize the matrix.
 
 How to read `external_code_timing.png`:
 
 - **Per-DOF cost (panel b).** Per time step per unknown:
-  - Thermalio: 0.4–1.1 µs (was 2–3 µs);
-  - scikit-fem: 4–10 µs;
-  - FiPy: 6–160 µs.
+  - Thermalio: 0.2–0.7 µs (was 2–3 µs);
+  - scikit-fem: 3–8 µs;
+  - FiPy: 5–120 µs.
   - FiPy rebuilds its matrix in Python every step, a fixed overhead of about 15 ms
     per step.
   - Our scikit-fem adapter re-assembles the load by quadrature and refactorizes the
     matrix every step.
 - **Time to a target error of 1e-3 (panel c).**
-  - Isotropic: Thermalio 0.12 s, scikit-fem P2 0.83 s, FiPy 2.1 s. scikit-fem P1 does
+  - Isotropic: Thermalio 0.05 s, scikit-fem P2 0.64 s, FiPy 1.6 s. scikit-fem P1 does
     not get there by n = 64.
-  - Anisotropic: Thermalio 0.012 s, FiPy 2.7 s. FiPy's anisotropic flux converges at
+  - Anisotropic: Thermalio 0.013 s, FiPy 2.0 s. FiPy's anisotropic flux converges at
     order 0.9.
+  - Pennes + Robin: Thermalio 0.04 s, scikit-fem P2 0.22 s, P1 0.32 s.
 - **Work–precision (panels d–f).**
   - Thermalio has the lowest cost per digit on the isotropic and anisotropic
     problems, and on the Pennes problem down to about 1e-4.
@@ -118,16 +136,21 @@ library can do. The scikit-fem adapter, for example, could reuse its factorizati
 `where_time_goes.png` splits a 100-step Thermalio solve (`PolygonalHeatSolver`,
 Dirichlet, square mesh) into wall-clock phases. At 262,144 cells:
 
-| phase | before | now |
+| phase | before (same session) | now |
 |---|---|---|
-| mesh geometry, first build | 13.5 s | 13.5 s (0.73 s cached, e.g. from the mesh library) |
-| operator assembly | 15.2 s (per-face loop) | 1.6 s first time on a mesh, about 0.3 s after |
-| LHS + Dirichlet rows | 0.77 s (LIL loop) | 0.04 s |
-| sparse LU factorization | 3.3 s | 3.4 s (reused by later `solve()` calls) |
-| 100 right-hand sides | 1.0 s | 0.7 s |
-| 100 LU back-solves | 8.0 s | 7.6 s |
-| **total, first `solve()` with cached geometry** | **43.6 s** (first-build geometry) | **13.7 s** |
-| repeated `solve()` | 43.6 s (everything rebuilt) | **9.0 s** |
+| mesh generator + first solver construction | 18.4 s | 3.8 s (0.6 s with geometry cached) |
+| operator assembly | 10.8 s (per-face loop) | 0.83 s first time on a mesh, about 0.3 s after |
+| LHS + Dirichlet rows | 0.65 s (LIL loop) | 0.03 s |
+| sparse LU factorization | 2.6 s | 2.6 s (reused by later `solve()` calls) |
+| 100 right-hand sides | | 0.86 s |
+| 100 LU back-solves | | 7.2 s |
+| **100-step run on a never-seen mesh, generator included** | **about 40.5 s** (sum of the legacy phases) | **14.9 s** (2.7x) |
+| 100-step run with cached geometry | about 22.7 s | 11.8 s (1.9x) |
+| repeated `solve()` | everything rebuilt | **8.9 s** |
+
+The first edition measured 43.6 s (without the generator) in a slower session. LU
+back-solves did not change and now dominate, which is why the end-to-end gain at this
+size is smaller than at 4k cells.
 
 What changed, and why it was safe:
 
@@ -151,12 +174,58 @@ What changed, and why it was safe:
 - **Caching across `solve()` calls.** The operator and each `(Δt, scheme)`
   factorization are kept while `solver.A` is the operator `solve()` assembled.
   Replacing `solver.A` invalidates them.
-- **Not yet changed: the mesh-geometry first build.** At 13.5 s it is now the
-  largest cost on a never-seen mesh. Loading meshes from the mesh library avoids it.
+- **First-time setup** (item 3), both bit-identical:
+  - The mesh generators computed cell centroids one cell at a time. They now share
+    the vectorized routine the mesh library already used.
+  - The least-squares gradient stencils were built cell by cell, with a tiny SVD and
+    solve for each cell. Cells are now batched by neighbour count. NumPy's stacked
+    `matmul`, `matrix_rank` and `solve` call the same BLAS/LAPACK routines for each
+    cell, so the stencils are bit-identical to the loop (kept as
+    `_build_gradient_reconstruction_loop`).
 
 Smaller meshes gain more, because fixed overheads weighed more there. At 4,096 cells
-a run went from 0.56 s to 0.07 s (7.4x), and a repeated solve takes 0.05 s (10x). The
-unit-test suite went from 210 s to 125 s.
+a run on a never-seen mesh takes 0.15 s, against 0.56 s in the first edition, and a
+repeated solve takes 0.05 s. The unit-test suite went from 210 s to 87 s over items
+1–3.
+
+### 2b. Boundary conditions that look time-dependent
+
+With Robin or radiative boundaries, the matrix is `base + Δt B`, where `B` is the
+boundary closure. The solvers treated it as changing every step and refactorized it
+every step, and for radiation every Newton iteration. Profiling showed this was the
+whole cost: rebuilding `B` was cheap, and the factorization was not.
+
+`boundary_closures.png`, 100 steps, same session:
+
+| cells | Robin: refactorize → reuse | radiative: full Newton → frozen Jacobian |
+|---|---|---|
+| 4,096 | 0.77 s → 0.11 s (7x) | 1.75 s → 0.18 s (10x) |
+| 16,384 | 4.9 s → 0.40 s (12x) | 8.5 s → 0.48 s (18x) |
+| 65,536 | 28.9 s → 2.2 s (13x) | 59.3 s → 2.4 s (24x) |
+
+- **Robin** (`heat_solver/factor_cache.py`). `B` only changes when β changes, and in
+  practice β is constant. `FactorCache` keeps the factorization and reuses it while
+  the operator and the values of `B` are unchanged.
+  - SciPy's `spsolve` on a CSR matrix factorizes the transpose and solves
+    transposed. `spsolve_factor` does exactly that, so a reused factorization gives
+    the same bits as a fresh `spsolve`.
+  - The cache key uses the exact Δt. The step schedule produces Δt values that differ
+    in the last bit, and a rounded key would reuse a slightly different matrix.
+  - Results are bit-identical in 120 polygonal, 40 transport and 72 curvilinear runs.
+  - Time-dependent β still refactorizes, as before.
+- **Radiative.** `B` depends on the temperature, so it does change. Newton's method
+  refactorizes at every iteration. Frozen-Jacobian Newton reuses one factorization:
+  - across iterations and steps, refreshing it only when an update shrinks by less
+    than half;
+  - converging to the same fixed point, here to ≤ 2e-12;
+  - taking 2 iterations per step and no new factorization after the first step.
+
+  `nonlinear_options={"radiative_jacobian": "newton"}` restores full Newton.
+- **Curvilinear** boundary rows used to be built by converting the whole matrix to
+  LIL every step. They are now spliced into the CSR matrix with array operations, and
+  are bit-identical to the old rows.
+
+All three solver families (polygonal, transport, curvilinear) use this.
 
 **Lesson.** Profile before optimizing. The win came from removing Python loops from
 per-call work, without a new algorithm and without changing results.
@@ -252,16 +321,18 @@ Panel (b), space: at about 4,000 unknowns, scikit-fem P1 is at 2e-3 and P2 at ab
 
 - **(a) Task parallelism.** 16 independent Thermalio solves are farmed out with
   `concurrent.futures.ProcessPoolExecutor`.
-  - Speedup: 1.9x on 2 workers and 3.2–3.5x on 4 (range over runs).
+  - Speedup: 1.9x on 2 workers and 3.2–3.5x on 4 while each solve took 0.15–0.35 s.
   - 8 workers on 4 cores gain nothing more.
-  - Each solve is now about 2.3x faster than before; the ensemble went from 5.5 s to
-    2.4 s serially.
+  - After items 1–3 each solve takes about 40 ms. The 16-solve ensemble takes 0.66 s
+    serially, and 4 workers give only 2.5x: process start-up and data transfer are now
+    a large share. That is Amdahl's law at the task level. Batch several solves per
+    task, or keep a pool alive across sweeps.
   - This is the easiest parallelism there is, and it fits parameter sweeps,
     uncertainty quantification, convergence studies and inverse-problem gradient
     batches.
 - **(b) Data parallelism inside kernels**, 4 threads:
-  - vector triad: 3.6x, memory bandwidth 9 → 31 GB/s;
-  - sparse mat-vec with 4M unknowns: 3.2x;
+  - vector triad: 3.4–3.6x, memory bandwidth 9 → 31 GB/s;
+  - sparse mat-vec with 4M unknowns: 2.0–3.2x (range over sessions);
   - dense matrix multiply: 3.1–3.8x.
 
   On this VM, memory bandwidth has not saturated at 4 cores. On a typical
@@ -296,21 +367,22 @@ A 2D Thermalio problem rarely gets there.
    (BDF2).
    - 3–1,700x more accurate at the same step count.
    - Equivalently, about 100x fewer steps for a 1e-5 time error.
-3. **Remove the remaining per-step assembly.**
-   - Robin and radiative closures and the transport models (`transport.py`)
-     reassemble boundary terms every step. That is why Pennes + Robin went only from
-     2.3 s to 2.1 s.
-   - Separately, vectorize the per-cell mesh-geometry builder, or load meshes from
-     the mesh library. It must stay bit-identical, because the QA baselines depend
-     on it.
-4. **Pick the linear solver by regime.**
+3. ~~**Remove the remaining per-step cost with Robin / radiative boundaries, and
+   speed up first-time setup.**~~ **Done** (section 2b).
+   - The cost turned out to be refactorization, not assembly. Robin is 13x faster
+     and radiative 24x at 65k cells; Pennes + Robin went from 2.3 s to 0.20 s.
+   - Setup is 4.9x faster on a fresh 262k-cell mesh.
+   - Results are bit-identical, except radiative, which agrees to ≤ 2e-12.
+4. **Pick the linear solver by regime.** This is now the largest lever: LU back-solves
+   are about 80% of a repeated solve.
    - Factorize once below about 250k unknowns.
    - CG + Jacobi for Δt ∝ h².
    - CG + AMG (pyamg) for large steps, steady or nonlinear problems, and 10^6+
      unknowns.
    - `PolygonalHeatSolver` offers `cg` and `bicgstab`, but no AMG preconditioner yet.
-5. **Run independent solves in a process pool.** Sweeps, uncertainty quantification
-   and inverse problems get 3.2–3.5x on 4 cores now.
+5. **Run independent solves in a process pool**, with tasks long compared with the
+   pool overhead (batch solves per task). Sweeps, uncertainty quantification and
+   inverse problems got 3.2–3.5x on 4 cores with 0.2–0.3 s tasks.
 6. **Then add threads.** With f ≈ 0.96, 4 cores give about 3.6x, provided the solves
    use parallel-friendly kernels (item 4) rather than sparse triangular solves.
 
@@ -324,6 +396,9 @@ MPLCONFIGDIR=/tmp/matplotlib python performance_study.py                   # ~4 
 MPLCONFIGDIR=/tmp/matplotlib python performance_study.py --replot          # redraw only
 ```
 
-The "before" curves come from `performance/summary_before_vectorization.json`,
-measured at commit 45dd494. Timings are single runs, except that kernel timings take
+The "before" curves in `where_time_goes.png` come from
+`performance/summary_before_vectorization.json`, measured at commit 45dd494 in a
+slower session. `boundary_closures.png` measures both modes in one session:
+refactorizing is forced by disabling the factor cache, and full Newton by
+`radiative_jacobian="newton"`. Timings are single runs, except that kernel timings take
 the best of 3–5. Treat differences under about 20% as noise.
