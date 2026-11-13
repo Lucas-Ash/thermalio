@@ -14,6 +14,8 @@ numbers come from this machine; nothing is assumed except where a panel says
 1b. ``boundary_closures.png``  Robin / radiative boundaries: reusing the
    factorization (frozen Jacobian for radiation) against refactorizing every
    step, as the solvers did before.
+3b. ``solver_choice.png``     Thermalio's own end-to-end solves with direct,
+   Jacobi-CG, AMG-CG and ``linear_solver="auto"`` (65k-1M cells).
 2. ``linear_solvers.png``       Algorithmic acceleration of the linear solve:
    refactorize every step vs factorize once vs CG (Jacobi) vs CG + algebraic
    multigrid (pyamg), in the accuracy-balanced transient regime
@@ -409,6 +411,71 @@ def plot_linear_solvers(rows, nsteps=200):
     plt.close(fig)
 
 
+def solver_choice_costs(sizes=(256, 512, 1024), rhos=(2.0, 512.0), nsteps=20, max_estimate=90.0):
+    """End-to-end Thermalio solves with each linear-solver strategy and with ``linear_solver="auto"``.
+
+    ``rho = dt * 4 alpha / h^2`` sets the regime: 2 is mass-dominated
+    (accuracy-balanced backward Euler), 512 stiff.  Strategies whose estimated
+    cost exceeds ``max_estimate`` seconds are skipped.
+    """
+    from heat_solver.linear_solvers import amg_available, estimated_costs
+
+    out = []
+    for n in sizes:
+        m = generate("square", nx=n, ny=n, bbox=BBOX)
+        h = (BBOX[1] - BBOX[0]) / n
+        PolygonalHeatSolver(*m, ALPHA, 1e-3)  # first-time geometry outside the timings
+        for rho in rhos:
+            dt = rho * h * h / (4 * ALPHA)
+            row = {"n": n, "cells": n * n, "rho": rho, "kappa_bound": 1 + 2 * rho}
+            est = estimated_costs(n * n, 1 + 2 * rho, nsteps)
+            for label, ls, pc in (("direct", "direct", None), ("jacobi", "cg", "jacobi"), ("amg", "cg", "amg"),
+                                  ("auto", "auto", None)):
+                if (label == "amg" and not amg_available()) or est.get(label, 0.0) > max_estimate:
+                    row[label] = None
+                    continue
+                s = PolygonalHeatSolver(*m, ALPHA, dt, bc_type="dirichlet", bc_func=exact, source_func=source,
+                                        linear_solver=ls, linear_solver_options={"preconditioner": pc})
+                c = s.cell_centers
+                t0 = time.perf_counter()
+                s.solve(exact(c[:, 0], c[:, 1], 0.0), 0.0, nsteps * dt)
+                row[label] = time.perf_counter() - t0
+                if label == "auto":
+                    st = s.last_solve_stats
+                    row["auto_choice"] = st["linear_solver"] + ("" if st["preconditioner"] is None
+                                                                 else "+" + st["preconditioner"])
+            out.append(row)
+            print(f"[3b] N={n * n} rho={rho}: " + ", ".join(
+                f"{k}={row[k]:.2f}s" for k in ("direct", "jacobi", "amg", "auto") if row.get(k) is not None),
+                "auto ->", row.get("auto_choice"))
+    return out
+
+
+def plot_solver_choice(rows):
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4.4), sharey=True)
+    styles = {"direct": ("direct (factorize once)", "o-", "tab:purple"),
+              "jacobi": ("CG + Jacobi", "s-", "tab:orange"),
+              "amg": ("CG + AMG", "D-", "tab:green")}
+    for a, rho, title in ((ax[0], 2.0, "(a) mass-dominated: dt = h^2 / (2 alpha)"),
+                          (ax[1], 512.0, "(b) stiff: dt = 128 h^2 / alpha")):
+        rr = [r for r in rows if r["rho"] == rho]
+        for key, (lab, mk, col) in styles.items():
+            pts = [(r["cells"], r[key]) for r in rr if r.get(key) is not None]
+            if pts:
+                a.loglog(*zip(*pts), mk, color=col, label=lab)
+        pts = [(r["cells"], r["auto"], r.get("auto_choice", "")) for r in rr if r.get("auto") is not None]
+        if pts:
+            a.loglog([p[0] for p in pts], [p[1] for p in pts], "*", ms=14, mfc="none", mec="k", label='linear_solver="auto"')
+            for x, y, ch in pts:
+                a.annotate(ch, (x, y), textcoords="offset points", xytext=(8, -10), fontsize=7)
+        a.set_xlabel("cells"); a.set_title(title, fontsize=9); a.legend(fontsize=7)
+    ax[0].set_ylabel("wall time, 20 steps incl. setup [s]")
+    fig.suptitle("Thermalio's own solves: which linear solver wins, and what auto picks")
+    fig.tight_layout()
+    fig.savefig(OUT / "solver_choice.png", dpi=160)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # 3. Parallelism
 # ---------------------------------------------------------------------------
@@ -615,6 +682,8 @@ def main():
     plot_boundary_closures(closures)
     solvers = [solver_costs(n, regime) for regime in ("transient", "stiff") for n in (64, 128, 256, 512, 1024)]
     plot_linear_solvers(solvers)
+    choice = solver_choice_costs()
+    plot_solver_choice(choice)
     ens = ensemble_scaling()
     kern = threaded_kernels()
     plot_parallelism(ens, kern, breakdown[-2])
@@ -623,7 +692,7 @@ def main():
     ext = json.loads(ext_path.read_text()) if ext_path.exists() else None
     plot_accuracy(timeord, ext)
     summary = {"environment": info, "where_time_goes": breakdown, "boundary_closures": closures,
-               "linear_solvers": solvers,
+               "linear_solvers": solvers, "solver_choice": choice,
                "ensemble": ens, "threaded_kernels": kern, "time_order": timeord}
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     print("done", time.perf_counter() - t_start)
@@ -637,6 +706,8 @@ def replot():
     if "boundary_closures" in summary:
         plot_boundary_closures(summary["boundary_closures"])
     plot_linear_solvers(summary["linear_solvers"])
+    if "solver_choice" in summary:
+        plot_solver_choice(summary["solver_choice"])
     plot_parallelism(summary["ensemble"], summary["threaded_kernels"],
                      next(r for r in rows if r["cells"] == 65536))
     ext_path = Path("test_plots/benchmark/external_codes/summary.json")
