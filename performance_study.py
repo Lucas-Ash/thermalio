@@ -11,6 +11,9 @@ numbers come from this machine; nothing is assumed except where a panel says
    assembly loop (still available as ``_assemble_tpfa_loop``) against the
    vectorized assembly; and the end-to-end run before vectorization (previous
    measurements, ``summary_before_vectorization.json``) against now.
+1b. ``boundary_closures.png``  Robin / radiative boundaries: reusing the
+   factorization (frozen Jacobian for radiation) against refactorizing every
+   step, as the solvers did before.
 2. ``linear_solvers.png``       Algorithmic acceleration of the linear solve:
    refactorize every step vs factorize once vs CG (Jacobi) vs CG + algebraic
    multigrid (pyamg), in the accuracy-balanced transient regime
@@ -229,6 +232,56 @@ def plot_where_time_goes(rows):
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.27)
     fig.savefig(OUT / "where_time_goes.png", dpi=160)
+    plt.close(fig)
+
+
+def boundary_closure_costs(sizes=(64, 128, 256), nsteps=100, dt=2.5e-4):
+    """100-step Robin / radiative solves: factorization reuse vs refactorizing every step."""
+    from heat_solver.bc_test_problems import heat_problem
+
+    out = []
+    for n in sizes:
+        for bc in ("robin", "radiative"):
+            p = heat_problem(bc)
+            m = generate("square", nx=n, ny=n, bbox=p["bbox"])
+            row = {"n": n, "cells": n * n, "bc": bc}
+            for mode in ("refactorize", "reuse"):
+                kw = {}
+                if bc == "radiative" and mode == "refactorize":
+                    kw["nonlinear_options"] = {"radiative_jacobian": "newton"}
+                s = PolygonalHeatSolver(*m, p["alpha"], dt, bc_type=bc, bc_func=p["bc_func"],
+                                        source_func=p["source"], **kw)
+                if bc == "robin" and mode == "refactorize":
+                    s._factor_cache.lookup = lambda *a, **k: None  # the old behaviour: no reuse
+                c = s.cell_centers
+                u0 = p["exact"](c[:, 0], c[:, 1], 0.0)
+                s.solve(u0, 0.0, dt)  # assembly and first factorization outside the timing
+                t0 = time.perf_counter()
+                s.solve(u0, 0.0, nsteps * dt)
+                row[mode] = time.perf_counter() - t0
+                row[mode + "_stats"] = dict(s.last_solve_stats)
+            out.append(row)
+            print(f"[1b] n={n} {bc}: refactorize {row['refactorize']:.2f}s reuse {row['reuse']:.2f}s")
+    return out
+
+
+def plot_boundary_closures(rows):
+    fig, ax = plt.subplots(figsize=(6.4, 4.4))
+    for bc, col in (("robin", "tab:blue"), ("radiative", "tab:red")):
+        rr = [r for r in rows if r["bc"] == bc]
+        cells = [r["cells"] for r in rr]
+        ax.loglog(cells, [r["refactorize"] for r in rr], "o--", color=col,
+                  label=f"{bc}: refactorize every step" + (" (full Newton)" if bc == "radiative" else ""))
+        ax.loglog(cells, [r["reuse"] for r in rr], "s-", color=col,
+                  label=f"{bc}: reuse factorization" + (" (frozen Jacobian)" if bc == "radiative" else ""))
+        r = rr[-1]
+        ax.annotate(f"{r['refactorize'] / r['reuse']:.0f}x", (r["cells"], r["reuse"]), textcoords="offset points",
+                    xytext=(6, -4), fontsize=8, color=col)
+    ax.set_xlabel("cells"); ax.set_ylabel("wall time, 100 steps [s]")
+    ax.set_title("Robin / radiative boundaries: factorization reuse")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(OUT / "boundary_closures.png", dpi=160)
     plt.close(fig)
 
 
@@ -558,6 +611,8 @@ def main():
     print("[2] interior system vs Thermalio matrix, max abs diff", info["interior_system_check"])
     breakdown = [where_time_goes(n) for n in (32, 64, 128, 256, 512)]
     plot_where_time_goes(breakdown)
+    closures = boundary_closure_costs()
+    plot_boundary_closures(closures)
     solvers = [solver_costs(n, regime) for regime in ("transient", "stiff") for n in (64, 128, 256, 512, 1024)]
     plot_linear_solvers(solvers)
     ens = ensemble_scaling()
@@ -567,7 +622,8 @@ def main():
     ext_path = Path("test_plots/benchmark/external_codes/summary.json")
     ext = json.loads(ext_path.read_text()) if ext_path.exists() else None
     plot_accuracy(timeord, ext)
-    summary = {"environment": info, "where_time_goes": breakdown, "linear_solvers": solvers,
+    summary = {"environment": info, "where_time_goes": breakdown, "boundary_closures": closures,
+               "linear_solvers": solvers,
                "ensemble": ens, "threaded_kernels": kern, "time_order": timeord}
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     print("done", time.perf_counter() - t_start)
@@ -578,6 +634,8 @@ def replot():
     summary = json.loads((OUT / "summary.json").read_text())
     rows = summary["where_time_goes"]
     plot_where_time_goes(rows)
+    if "boundary_closures" in summary:
+        plot_boundary_closures(summary["boundary_closures"])
     plot_linear_solvers(summary["linear_solvers"])
     plot_parallelism(summary["ensemble"], summary["threaded_kernels"],
                      next(r for r in rows if r["cells"] == 65536))
