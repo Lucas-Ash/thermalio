@@ -100,15 +100,28 @@ Finest mesh (n = 64), wall time including setup:
 
 | problem | Thermalio FV | FiPy FV | scikit-fem P1 | scikit-fem P2 |
 |---|---|---|---|---|
-| isotropic Dirichlet | 3.3e-4 in **0.20 s** (was 1.5 s) | 8.3e-5 in 3.5 s | 2.0e-3 in 2.4 s | 1.5e-5 in 27 s |
-| anisotropic tensor (ratio 5, 30°) | 3.1e-5 in **0.21 s** (was 1.6 s) | 5.3e-4 in 3.8 s | 1.9e-3 in 2.6 s | 1.5e-5 in 28 s |
-| Pennes perfusion + Robin | 2.5e-5 in **0.27 s** (was 2.3 s) | — | 1.0e-4 in 3.3 s | 5.5e-6 in 28 s |
+| isotropic Dirichlet | **8.3e-5** in **0.13 s** | 8.3e-5 in 3.5 s | 2.0e-3 in 2.5 s | 1.5e-5 in 27 s |
+| anisotropic tensor (ratio 5, 30°) | **1.5e-5** in **0.13 s** | 5.3e-4 in 3.9 s | 1.9e-3 in 2.8 s | 1.5e-5 in 26 s |
+| Pennes perfusion + Robin | 2.5e-5 in **0.28 s** | — | 1.0e-4 in 3.0 s | 5.5e-6 in 27 s |
+
+Thermalio here is its recommended configuration: the two-point flux with
+non-orthogonal correction, which is the solver default.
+
+- **Correction to earlier editions.** Earlier editions ran the legacy `reconstructed`
+  flux and reported isotropic 3.3e-4 and anisotropic 3.1e-5. They attributed the 4x
+  gap to FiPy to Thermalio holding Dirichlet data on a band of boundary cells. That
+  was wrong: the flux choice caused it. With the default flux, band and face
+  Dirichlet are equally accurate (8.33e-5 and 8.34e-5), the same as FiPy.
+- **Face Dirichlet.** `dirichlet_mode="face"` imposes the data on boundary faces as
+  FiPy does. It reproduces FiPy's solution to 3e-14 (panel d of
+  `external_code_comparison.png`), at the same cost as the band (0.14 s).
 
 All codes ran in the same session. The "was" values are from the first edition,
 which ran in a slower session.
 
-The scikit-fem P2 column has about 4x as many unknowns as the others. Thermalio's
-quadratic flux on the skewed anisotropic mesh reaches 1.45e-5 in 3.2 s.
+The scikit-fem P2 column has about 4x as many unknowns as the others. On the skewed
+anisotropic mesh, the default flux reaches 1.5e-5 in 0.23 s and the quadratic flux
+1.45e-5 in 3.0 s.
 
 The Pennes + Robin run sped up only once item 3 landed (section 2b): its Robin
 closure made every step refactorize the matrix.
@@ -116,25 +129,27 @@ closure made every step refactorize the matrix.
 How to read `external_code_timing.png`:
 
 - **Per-DOF cost (panel b).** Per time step per unknown:
-  - Thermalio: 0.2–0.7 µs (was 2–3 µs);
-  - scikit-fem: 3–8 µs;
-  - FiPy: 5–120 µs.
+  - Thermalio: 0.15–0.75 µs (was 2–3 µs before items 1–3);
+  - scikit-fem: 3–9 µs;
+  - FiPy: 4–130 µs.
   - FiPy rebuilds its matrix in Python every step, a fixed overhead of about 15 ms
     per step.
   - Our scikit-fem adapter re-assembles the load by quadrature and refactorizes the
     matrix every step.
 - **Time to a target error of 1e-3 (panel c).**
-  - Isotropic: Thermalio 0.055 s, scikit-fem P2 0.65 s, FiPy 1.9 s. scikit-fem P1
+  - Isotropic: Thermalio 0.02 s, scikit-fem P2 0.63 s, FiPy 1.5 s. scikit-fem P1
     does not get there by n = 64.
-  - Anisotropic: Thermalio 0.010 s, FiPy 2.3 s. FiPy's anisotropic flux converges at
+  - Isotropic, to 1e-4: Thermalio 0.11 s, FiPy 3.2 s, P2 3.7 s.
+  - Anisotropic: Thermalio 0.008 s, FiPy 2.1 s. To 1e-4: Thermalio 0.017 s, P2 4.3 s;
+    FiPy does not get there. FiPy's anisotropic flux converges at
     order 0.9.
-  - Pennes + Robin: Thermalio 0.045 s, scikit-fem P2 0.24 s, P1 0.37 s.
+  - Pennes + Robin: Thermalio 0.045 s, scikit-fem P2 0.23 s, P1 0.32 s.
 - **Work–precision (panels d–f).**
-  - Thermalio has the lowest cost per digit on the isotropic and anisotropic
-    problems, and on the Pennes problem down to about 1e-4.
-  - On the isotropic Dirichlet problem, FiPy is still 4x more accurate on the same
-    mesh. FiPy imposes Dirichlet data on boundary faces; Thermalio fixes a band of
-    cells, which shifts the boundary by h/2 (gap-analysis item 4).
+  - Thermalio has the lowest cost per digit on all three problems down to about
+    1e-5, at 25–250x lower cost than the other codes.
+  - On the isotropic problem it is as accurate as FiPy on the same mesh. On the
+    anisotropic problem it is 35x more accurate than FiPy, and as accurate as
+    scikit-fem P2 with a quarter of the unknowns.
   - scikit-fem P2 wins below about 1e-5. That is the higher-order effect of
     section 4.
 
