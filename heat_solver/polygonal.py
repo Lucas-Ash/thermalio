@@ -169,6 +169,7 @@ class PolygonalHeatSolver:
         reuse_linear_lhs=True,
         monotone=False,
         cell_average_data=None,
+        dirichlet_mode="band",
     ):
         from .mesh_io import Mesh2D
 
@@ -184,6 +185,13 @@ class PolygonalHeatSolver:
         from .boundary_conditions import normalize_bc_type
 
         self.bc_type = normalize_bc_type(self.bc_type)
+        self.dirichlet_mode = str(dirichlet_mode).lower().strip()
+        if self.dirichlet_mode not in ("band", "face"):
+            raise ValueError("dirichlet_mode must be 'band' or 'face'.")
+        # "band": boundary cells are held at the data (u_c = g at the centroid, legacy).
+        # "face": every cell is an unknown and g is imposed on the boundary faces through
+        # the face flux alpha_n (g - u_c) / d, as FiPy does (the Robin closure with beta -> inf).
+        self._band_dirichlet = self.bc_type == "dirichlet" and self.dirichlet_mode == "band"
         self.nonorthogonal_correction = bool(nonorthogonal_correction)
         self.monotone = bool(monotone)
         self.linear_solver = str(linear_solver).lower().strip()
@@ -246,13 +254,18 @@ class PolygonalHeatSolver:
         if cell_average_data is None:
             cell_average_data = self.flux_discretization == "quadratic"
         self.cell_average_data = bool(cell_average_data)
+        if self.cell_average_data and self.bc_type == "dirichlet" and not self._band_dirichlet:
+            raise ValueError(
+                "dirichlet_mode='face' is not available with cell-averaged unknowns "
+                "(flux_discretization='quadratic' or cell_average_data=True): the face closure treats the "
+                "cell value as a point value, which is first-order accurate there. Use dirichlet_mode='band'.")
         self._cell_quadrature = None
         if self.cell_average_data:
             from .quadratic_flux import CellAveragedFunction, CellQuadrature
 
             self._cell_quadrature = CellQuadrature(self.vertices, self.polygons)
             self.source_func = CellAveragedFunction(self.source_func, self._cell_quadrature, self.cell_centers)
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:  # band data are cell values; face data stay point values
                 self.bc_func = CellAveragedFunction(self.bc_func, self._cell_quadrature, self.cell_centers)
         self._bc_accepts_normals = self._bc_func_accepts_normals()
         self._alpha_accepts_temperature = self._alpha_func_accepts_temperature()
@@ -270,7 +283,7 @@ class PolygonalHeatSolver:
                 and self.flux_discretization == "tpfa"
                 and self.nonorthogonal_correction
             )
-            or (self.flux_scheme == "mpfa" and self.bc_type != "dirichlet")
+            or (self.flux_scheme == "mpfa" and not self._band_dirichlet)
             or (self.flux_discretization == "quadratic" and self.bc_type in ("robin", "radiative"))
         )
         self.gradient_coeffs = None
@@ -504,7 +517,8 @@ class PolygonalHeatSolver:
         Alpha_faces = self._process_alpha(midpoints[:, 0], midpoints[:, 1], temperature=boundary_temperature)
         alpha_n = np.einsum("ij,ij->i", normals, np.einsum("ijk,ik->ij", Alpha_faces, normals))
         data = self._evaluate_bc(midpoints[:, 0], midpoints[:, 1], t, normals=normals)
-        if tangential and self.bc_type in ("robin", "radiative") and self.gradient_coeffs is not None:
+        closure_types = ("robin", "radiative", "dirichlet")  # dirichlet only reaches here in face mode
+        if tangential and self.bc_type in closure_types and self.gradient_coeffs is not None:
             T = self._boundary_tangential_operator()
         else:
             T = coo_matrix((np.ones(n_f), (np.arange(n_f), cells)), shape=(n_f, self.M)).tocsr()
@@ -512,6 +526,13 @@ class PolygonalHeatSolver:
             g = np.broadcast_to(np.asarray(data, dtype=float), (n_f,))
             q_in = alpha_n * g if self.bc_type == "neumann" else g
             return T, np.zeros(n_f), q_in, np.ones(n_f), distances * q_in / alpha_n
+        if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
+                raise ValueError("band Dirichlet data are imposed on cells, not through a face closure.")
+            # Face value fixed: q_in = alpha_n (g - v) / d  (Robin with beta -> infinity).
+            g = np.broadcast_to(np.asarray(data, dtype=float), (n_f,))
+            w = alpha_n / distances
+            return T, w, w * g, np.zeros(n_f), g.copy()
         if self.bc_type == "robin":
             beta, value = self._parse_robin_data(data, n_f)
             denom = alpha_n + beta * distances
@@ -542,7 +563,7 @@ class PolygonalHeatSolver:
         return T, a, q + a * v, dfdv, u_f - dfdv * v
 
     def _assemble_boundary_system(self, t, temperature=None, tangential=True):
-        """Boundary closure ``(B, b)``: ``(A + B) u = ... + b`` for non-Dirichlet types.
+        """Boundary closure ``(B, b)``: ``(A + B) u = ... + b`` for natural types and face Dirichlet.
 
         Built from :meth:`_boundary_face_relations`: ``B = E^T diag(|f| a) T`` and
         ``b = E^T (|f| c)`` with ``E`` the face-to-cell incidence.  ``B`` is
@@ -779,7 +800,7 @@ class PolygonalHeatSolver:
         # MPFA condensed FEM is only used with Dirichlet: Neumann/Robin need a flux closure
         # consistent with unprescribed boundary values; use the same TPFA two-point stencil as
         # ``flux_scheme='tpfa'`` for the diffusion block in that case.
-        if self.flux_scheme == "mpfa" and self.bc_type == "dirichlet":
+        if self.flux_scheme == "mpfa" and self._band_dirichlet:
             from .mpfa import assemble_mpfa_diffusion
 
             self.M_diag = mass
@@ -1041,13 +1062,15 @@ class PolygonalHeatSolver:
             return False
         if self.bc_type == "robin":
             return False
+        if self.bc_type == "dirichlet" and not self._band_dirichlet:
+            return False  # face Dirichlet: the closure B enters the matrix (factor cache reuses it)
         return True
 
     def _apply_dirichlet_identity_rows(self, K_csr):
         return identity_rows(K_csr, self.is_boundary)
 
     def _dirichlet_mask(self):
-        return self.is_boundary if self.bc_type == "dirichlet" else None
+        return self.is_boundary if self._band_dirichlet else None
 
     def _linear_plan(self, dts):
         """``(method, preconditioner, reason)`` for this solve; sets up the iterative solver if needed."""
@@ -1126,7 +1149,7 @@ class PolygonalHeatSolver:
         theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
         mass = self.M_diag if mass_coeff == 1.0 else mass_coeff * self.M_diag
         K = mass + (theta * dt_eff) * self.A
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             return self._apply_dirichlet_identity_rows(K)
         return K.tocsr()
 
@@ -1150,7 +1173,7 @@ class PolygonalHeatSolver:
             self.phase_change_model is not None
             and not has_temp_dependent_diffusion
             and not has_nonlinear_radiation
-            and self.bc_type == "dirichlet"
+            and self._band_dirichlet
             and self.time_scheme == "backward_euler"
         )
         _pc_lhs = None
@@ -1237,7 +1260,7 @@ class PolygonalHeatSolver:
                 dt_key = lin_keys[step_idx]
                 if self.time_scheme != "crank_nicolson":
                     rhs = self.M_diag @ hist + dt_eff * (self.cell_areas * source_next)
-                    if self.bc_type == "dirichlet":
+                    if self._band_dirichlet:
                         bidx = self._boundary_idx
                         rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
                         if use_linear_cache:
@@ -1264,7 +1287,7 @@ class PolygonalHeatSolver:
                         (self.M,),
                     )
                     src_avg = self.cell_areas * (source_next + source_prev)
-                    if self.bc_type == "dirichlet":
+                    if self._band_dirichlet:
                         rhs = (self.M_diag - 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * src_avg
                         bidx = self._boundary_idx
                         rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
@@ -1311,7 +1334,7 @@ class PolygonalHeatSolver:
                 has_temp_dependent_diffusion
                 and self._vec_assembly is not None
                 and self.phase_change_model is None
-                and self.bc_type == "dirichlet"
+                and self._band_dirichlet
                 and self.time_scheme == "backward_euler"
             )
             if _use_fast:
@@ -1466,7 +1489,7 @@ class PolygonalHeatSolver:
                 if self.time_scheme != "crank_nicolson":
                     rhs = mass_matrix @ hist + dt_eff * (self.cell_areas * source_next)
                     lead = mass_matrix if a0 == 1.0 else a0 * mass_matrix
-                    if self.bc_type == "dirichlet":
+                    if self._band_dirichlet:
                         bidx = self._boundary_idx
                         rhs[bidx] = self._dirichlet_values(cx, cy, t_next)[bidx]
                         lhs = identity_rows(lead + dt_eff * self.A, self.is_boundary)
@@ -1474,7 +1497,7 @@ class PolygonalHeatSolver:
                         boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next, temperature=u_iter)
                         lhs = lead + dt_eff * (self.A + boundary_matrix)
                         rhs = rhs + dt_eff * boundary_rhs
-                elif self.bc_type == "dirichlet":
+                elif self._band_dirichlet:
                     A_prev = self.A if A_old is None else A_old
                     rhs = (mass_matrix - 0.5 * dt_eff * A_prev) @ u + 0.5 * dt_eff * src_avg
                     bidx = self._boundary_idx

@@ -2,7 +2,8 @@
 
 Solves the same manufactured problems with
 
-* Thermalio (polygonal cell-centred FV; square and skewed meshes),
+* Thermalio (polygonal cell-centred FV: two-point flux with non-orthogonal correction, Dirichlet
+  data on a cell band or, as FiPy does, on boundary faces; square and skewed meshes),
 * FiPy 4.0.3 (NIST structured finite volumes),
 * scikit-fem 12.0.2 (P1 and P2 continuous Galerkin),
 
@@ -113,7 +114,10 @@ def _rel_l2_cells(u, ue, areas):
     return float(np.sqrt(np.sum(areas * (u - ue) ** 2) / np.sum(areas * ue**2)))
 
 
-def run_thermalio(case, n, mesh="square", flux="reconstructed"):
+def run_thermalio(case, n, mesh="square", flux="tpfa", dirichlet_mode="band"):
+    """Thermalio's recommended configuration: two-point flux with non-orthogonal correction
+    (``flux="quadratic"`` on skewed meshes); ``dirichlet_mode="face"`` imposes the data on
+    boundary faces as FiPy does."""
     if mesh == "square":
         v, p, c = generate_square_polygonal_mesh(nx=n, ny=n, bbox=case["bbox"])
     else:
@@ -130,6 +134,7 @@ def run_thermalio(case, n, mesh="square", flux="reconstructed"):
         solver = PolygonalHeatSolver(
             v, p, case["kappa"], case["dt"], bc_type="dirichlet", bc_func=case["dirichlet"],
             source_func=case["source"], flux_discretization=flux, nonorthogonal_correction=True,
+            dirichlet_mode=dirichlet_mode,
         )
     x, y = solver.cell_centers[:, 0], solver.cell_centers[:, 1]
     if flux == "quadratic":  # unknowns are cell averages: consistent initial data and error metric
@@ -183,6 +188,10 @@ def study_case(case, include_fipy=True, include_skewed=False):
         th = run_thermalio(case, n)
         row = {"case": case["name"], "n": n, "h": h, "thermalio": th["err"], "thermalio_time": th["time"],
                "thermalio_dofs": th["dofs"]}
+        face = None
+        if "dirichlet" in case:
+            face = run_thermalio(case, n, dirichlet_mode="face")
+            row.update({"thermalio_face": face["err"], "thermalio_face_time": face["time"]})
         if include_skewed:
             sk = run_thermalio(case, n, mesh="skewed")
             row.update({"thermalio_skewed": sk["err"], "thermalio_skewed_time": sk["time"]})
@@ -193,6 +202,8 @@ def study_case(case, include_fipy=True, include_skewed=False):
             row.update({"fipy": fp_["err"], "fipy_time": fp_["time"],
                         "diff_thermalio_fipy": _rel_l2_cells(th["u"], fp_["u"], np.ones(len(fp_["u"])))
                         if np.allclose(th["centers"], fp_["centers"]) else float("nan")})
+            if face is not None and np.allclose(face["centers"], fp_["centers"]):
+                row["diff_thermalio_face_fipy"] = _rel_l2_cells(face["u"], fp_["u"], np.ones(len(fp_["u"])))
         for order in (1, 2):
             fe = run_skfem(case, n, order)
             row.update({f"skfem_p{order}": fe["err"], f"skfem_p{order}_time": fe["time"],
@@ -202,7 +213,7 @@ def study_case(case, include_fipy=True, include_skewed=False):
                 np.sqrt(np.mean((th["u"] - at_centers) ** 2) / np.mean(at_centers**2)))
         rows.append(row)
         print(case["name"], n, {k: (f"{v:.2e}" if isinstance(v, float) else v) for k, v in row.items()
-                                if k in ("thermalio", "fipy", "skfem_p1", "skfem_p2")})
+                                if k in ("thermalio", "thermalio_face", "fipy", "skfem_p1", "skfem_p2")})
     return rows
 
 
@@ -264,7 +275,8 @@ def neumann_stefan(nx=160, t_end=0.5):
 
 TIMING_STYLES = {
     "thermalio": ("Thermalio FV", "o-", "tab:blue"),
-    "thermalio_skewed": ("Thermalio FV skewed (reconstructed)", "o--", "tab:cyan"),
+    "thermalio_face": ("Thermalio FV, face Dirichlet", "x--", "tab:brown"),
+    "thermalio_skewed": ("Thermalio FV skewed (TPFA + correction)", "o--", "tab:cyan"),
     "thermalio_skewed_quadratic": ("Thermalio FV skewed (quadratic)", "D-", "tab:purple"),
     "fipy": ("FiPy FV", "s-", "tab:orange"),
     "skfem_p1": ("scikit-fem P1", "^-", "tab:green"),
@@ -381,7 +393,8 @@ def main():
 
     styles = {
         "thermalio": ("Thermalio FV (square)", "o-", "tab:blue"),
-        "thermalio_skewed": ("Thermalio FV reconstructed (skewed mesh)", "o--", "tab:cyan"),
+        "thermalio_face": ("Thermalio FV, face Dirichlet (as FiPy)", "x--", "tab:brown"),
+        "thermalio_skewed": ("Thermalio FV TPFA + correction (skewed mesh)", "o--", "tab:cyan"),
         "thermalio_skewed_quadratic": ("Thermalio FV quadratic (skewed mesh)", "D-", "tab:purple"),
         "fipy": ("FiPy FV", "s-", "tab:orange"),
         "skfem_p1": ("scikit-fem P1", "^-", "tab:green"),
@@ -412,6 +425,9 @@ def main():
         if "diff_thermalio_fipy" in rows[0]:
             a.loglog(hs, [r["diff_thermalio_fipy"] for r in rows], mk + "-", color="tab:orange",
                      label=f"Thermalio vs FiPy, {key}")
+        if "diff_thermalio_face_fipy" in rows[0]:
+            a.loglog(hs, [max(r["diff_thermalio_face_fipy"], 1e-16) for r in rows], mk + ":", color="tab:brown",
+                     label=f"Thermalio face Dirichlet vs FiPy, {key}")
         a.loglog(hs, [r["diff_thermalio_skfem_p2"] for r in rows], mk + "--", color="tab:red",
                  label=f"Thermalio vs skfem P2, {key}")
     a.set_xlabel("$h$"); a.set_ylabel("relative cross-code difference")
