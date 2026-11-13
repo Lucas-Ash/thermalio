@@ -65,8 +65,10 @@ jobs:
 
       - name: Install pinned dependencies including external codes
         run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libglu1-mesa  # gmsh (a PorePy dependency) loads libGLU
           python -m pip install --upgrade pip
           python -m pip install -r requirements-external.txt
 
       - name: Run cross-code tests (must not skip)
-        run: python -m pytest tests/test_external_codes.py tests/test_linear_solvers.py tests/test_face_dirichlet.py -q -ra -p no:cacheprovider
+        run: python -m pytest tests/test_external_codes.py tests/test_external_codes_more.py tests/test_linear_solvers.py tests/test_face_dirichlet.py -q -ra -p no:cacheprovider

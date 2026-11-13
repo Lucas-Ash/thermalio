@@ -41,3 +41,4 @@ direction_*_report.log
 
 # mesh library temp files
 mesh_library/*.tmp
+test_plots/benchmark/external_codes_extended/results_partial.json

@@ -1,11 +1,17 @@
 # Independent external codes used only for cross-code validation
 # (heat_solver/external_codes.py, external_code_comparison.py,
-# tests/test_external_codes.py).  Optional: the core package never imports
+# external_code_comparison_extended.py, tests/test_external_codes*.py).  Optional: the core package never imports
 # them, and their tests skip when they are absent.  Pinned to the versions the
 # comparison was produced with; install on top of requirements-dev.txt.
 -r requirements-dev.txt
 fipy==4.0.3
 scikit-fem==12.0.2
+# external_code_comparison_extended.py: compiled high-order FE, TPFA/MPFA finite
+# volumes, Numba finite differences.  PorePy is installed from GitHub at the
+# commit the comparison was produced with (its gmsh dependency needs libGLU).
+ngsolve==6.2.2608
+porepy @ git+https://github.com/pmgbergen/porepy.git@1735d8d37d3782cc8f798b40ffa84660dbe20816
+py-pde==0.60.0
 # Used only by performance_study.py (algebraic multigrid, BLAS thread control).
 pyamg==5.4.1
 threadpoolctl==3.8.0

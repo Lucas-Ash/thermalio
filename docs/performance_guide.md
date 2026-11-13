@@ -33,6 +33,7 @@ Scripts and figures:
 | script | figures (`test_plots/benchmark/...`) |
 |---|---|
 | `external_code_comparison.py` | `external_codes/external_code_comparison.png`, `external_codes/external_code_timing.png` |
+| `external_code_comparison_extended.py` | `external_codes_extended/cross_code_accuracy.png`, `cross_code_cost.png` (seven codes; guide: `docs/cross_code_comparison.md`) |
 | `performance_study.py` | `performance/where_time_goes.png`, `boundary_closures.png`, `linear_solvers.png`, `parallelism.png`, `accuracy_as_acceleration.png` |
 
 ## The short answer

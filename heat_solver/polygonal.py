@@ -1301,6 +1301,11 @@ class PolygonalHeatSolver:
                             boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
                         rhs = rhs + dt_eff * boundary_rhs
                         fkey = ("implicit", float(dt_eff), a0, self.time_scheme)
+                        if face_closure is not None:
+                            # Constant closure: steps whose dt differs only by round-off (dt from
+                            # differences of accumulated times) share one factorization, as the band
+                            # path does through its rounded cache key.
+                            fkey = ("implicit", dt_key, self.time_scheme)
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
                         elif direct and fkey in face_factors:
@@ -1343,7 +1348,7 @@ class PolygonalHeatSolver:
                         k_next = self.A + b_mat_next
                         rhs = (self.M_diag - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
-                        fkey = ("crank_nicolson", float(dt_eff))
+                        fkey = ("crank_nicolson", dt_key if face_closure is not None else float(dt_eff))
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
                         elif direct and fkey in face_factors:

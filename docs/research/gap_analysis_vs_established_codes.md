@@ -1,8 +1,11 @@
 # Gap analysis: what keeps Thermalio from matching established codes
 
-- **Last updated:** 2026-11-11
+- **Last updated:** 2026-11-13
 - **Compared against:** FiPy 4.0.3 (NIST finite volumes) and scikit-fem 12.0.2
   (finite elements), measured in this repo (`external_code_comparison.py`);
+  since 2026-11-13 also NGSolve 6.2 (compiled, multithreaded FE), PorePy 1.13
+  (TPFA/MPFA finite volumes) and py-pde 0.60 (Numba finite differences)
+  (`external_code_comparison_extended.py`, `docs/cross_code_comparison.md`);
   FEniCS / deal.II (not pip-installable here) by documented capability only.
 
 ## Where Thermalio is already at or above par

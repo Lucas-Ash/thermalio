@@ -159,6 +159,11 @@ with support for:
   `dmp_source_study.py`, `direction_c_flux_audit_study.py`,
   `external_code_comparison.py`; report:
   `direction_ABC_bounds_flux_crosscode_report.tex`.
+  `external_code_comparison_extended.py` adds NGSolve, PorePy (TPFA/MPFA on
+  Thermalio's own skewed meshes) and py-pde (`docs/cross_code_comparison.md`;
+  `tests/test_external_codes_more.py`). PorePy is pinned to a git commit and its
+  gmsh dependency needs the system library `libglu1-mesa`. NGSolve / py-pde take
+  their data as `external_codes.SymbolicProblem` (SymPy).
 
 - `heat_solver/inverse.py`, `heat_solver/pinn_jax.py`
   Direction D inverse problems (least squares, Pennes adjoint, UQ, field inversion,

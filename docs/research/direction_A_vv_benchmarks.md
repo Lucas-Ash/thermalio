@@ -2,7 +2,7 @@
 
 - **Status:** landed (first increment + follow-ups; external-code validation landed 2026-11, report `direction_ABC_bounds_flux_crosscode_report.tex`)
 - **Owner:** —
-- **Last updated:** 2026-11-11
+- **Last updated:** 2026-11-13
 
 ## Motivation & V&V question
 The emerging-model community (non-Fourier/Cattaneo, fractional subdiffusion,
@@ -46,6 +46,18 @@ accuracy, is it in the asymptotic range, and do independent schemes agree?*
   10x lower error in this protocol, order 2.00 with Crank--Nicolson); enthalpy solver tracks the
   Neumann front to 0.13 dx.  `tests/test_external_codes.py` runs in a
   separate CI job.
+- **Extended cross-code validation (2026-11-13):** adapters for NGSolve 6.2
+  (P1-P3, 1 and 4 threads), PorePy 1.13 (TPFA / MPFA-O on Thermalio's own
+  skewed meshes) and py-pde 0.60 (Numba FD); `external_code_comparison_extended.py`
+  -> `test_plots/benchmark/external_codes_extended/`, guide
+  `docs/cross_code_comparison.md`, tests `tests/test_external_codes_more.py`.
+  Findings: Thermalio's face-Dirichlet five-point scheme is reproduced to
+  1e-14 by FiPy, PorePy and py-pde, and its Robin elimination by py-pde (4e-13).
+  On the rotated tensor it is the most accurate FV code (12-35x below PorePy
+  MPFA-O and FiPy, also on identical skewed meshes) and matches P2 elements with
+  a quarter of the unknowns.  Per-step cost is within 1.5x of PorePy's bare
+  TPFA loop; NGSolve gains 3x from 4 threads.  The comparison exposed (and
+  fixed) refactorizations in face-mode Dirichlet when dt differed by round-off.
 - **Parked (deliberately not done):** genuinely transcendental-in-time Caputo (needs Mittag-Leffler /
   series); auto-registering MMS cases into `CASE_SETTINGS`/`iter_test_jobs`
   (touches the regression-snapshotted job set — needs a baseline reseed, and the
