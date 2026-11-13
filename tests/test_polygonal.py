@@ -179,7 +179,7 @@ def test_polygonal_invalid_linear_solver_raises():
     vertices = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
     polygons = [[0, 1, 2, 3]]
     with pytest.raises(ValueError, match="linear_solver"):
-        PolygonalHeatSolver(vertices, polygons, 1.0, 0.1, linear_solver="gmres")
+        PolygonalHeatSolver(vertices, polygons, 1.0, 0.1, linear_solver="sor")
 
 
 def test_sparse_linear_solver_helper_matches_direct():

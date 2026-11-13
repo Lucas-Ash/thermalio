@@ -5,6 +5,7 @@ from scipy.sparse import coo_matrix, diags, lil_matrix
 from scipy.sparse.linalg import bicgstab, cg, factorized, spsolve
 
 from .factor_cache import FactorCache, frozen_newton
+from .linear_solvers import KRYLOV_METHODS, IterativeSolver, choose_linear_solver
 from .fv_assembly import assemble_reconstructed, assemble_tpfa, flatten_stencils, identity_rows, interior_faces
 from .geometry import polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
@@ -186,12 +187,19 @@ class PolygonalHeatSolver:
         self.nonorthogonal_correction = bool(nonorthogonal_correction)
         self.monotone = bool(monotone)
         self.linear_solver = str(linear_solver).lower().strip()
-        if self.linear_solver not in {"direct", "bicgstab", "cg"}:
+        if self.linear_solver not in {"direct", "auto", *KRYLOV_METHODS}:
             raise ValueError(
-                "linear_solver must be one of: 'direct', 'bicgstab', 'cg' "
-                "(use 'bicgstab' for general meshes; 'cg' only if the assembled system is symmetric positive definite)."
+                "linear_solver must be one of: 'direct', 'auto', 'cg', 'bicgstab', 'gmres' "
+                "(use 'bicgstab' or 'gmres' for general meshes; 'cg' only if the assembled system is symmetric "
+                "positive definite; 'auto' chooses by problem size and stiffness)."
             )
         self.linear_solver_options = dict(linear_solver_options) if linear_solver_options else {}
+        pc = self.linear_solver_options.get("preconditioner")
+        self.linear_solver_options["preconditioner"] = None if pc in (None, "none") else str(pc).lower()
+        if self.linear_solver_options["preconditioner"] not in (None, "jacobi", "amg"):
+            raise ValueError("linear_solver_options['preconditioner'] must be None, 'jacobi' or 'amg'.")
+        self._iterative = None  # IterativeSolver reused across solve() calls (keeps preconditioners)
+        self._auto_plans = {}
         self.time_scheme = str(time_scheme).lower().strip()
         if self.time_scheme not in {"backward_euler", "crank_nicolson", "bdf2"}:
             raise ValueError("time_scheme must be 'backward_euler', 'crank_nicolson' or 'bdf2'.")
@@ -1038,6 +1046,35 @@ class PolygonalHeatSolver:
     def _apply_dirichlet_identity_rows(self, K_csr):
         return identity_rows(K_csr, self.is_boundary)
 
+    def _dirichlet_mask(self):
+        return self.is_boundary if self.bc_type == "dirichlet" else None
+
+    def _linear_plan(self, dts):
+        """``(method, preconditioner, reason)`` for this solve; sets up the iterative solver if needed."""
+        opts = self.linear_solver_options
+        if self.linear_solver == "direct":
+            return "direct", None, "linear_solver='direct'"
+        if self.linear_solver == "auto":
+            theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
+            nonlinear = self.phase_change_model is not None or bool(self.temperature_dependent_diffusivity)
+            # radiative boundaries: ~2 solves per step, one factorization (frozen Jacobian)
+            per_step = 3 if nonlinear else (2 if self.bc_type == "radiative" else 1)
+            n_solves = max(1, len(dts)) * per_step
+            key = (round(float(dts[0]), 12) if dts else 0.0, self.time_scheme, int(np.log2(n_solves)))
+            if key not in self._auto_plans:
+                if self.A is None:
+                    self._assemble_system()
+                probe = self.M_diag + (theta * (dts[0] if dts else self.dt)) * self.A
+                self._auto_plans[key] = choose_linear_solver(probe, opts, n_solves=n_solves,
+                                                             matrix_changes=nonlinear)
+            method, pc, reason = self._auto_plans[key]
+        else:
+            method, pc, reason = self.linear_solver, opts.get("preconditioner"), "user choice"
+        if method != "direct" and (self._iterative is None or (self._iterative.method, self._iterative.preconditioner)
+                                   != (method, pc)):
+            self._iterative = IterativeSolver(method, pc, opts)
+        return method, pc, reason
+
     def _boundary_factor(self, key, B, build, stats):
         """Factorization of ``build()`` (a matrix containing the boundary closure ``B``), reused while unchanged."""
         if self._factor_cache.lookup(key, (self.A, self.M_diag), B) is not None:
@@ -1150,6 +1187,8 @@ class PolygonalHeatSolver:
         )
         step_coeffs = self._step_coefficients(dts)
         lin_keys = [(round(float(d), 12), round(c[0], 12)) for d, c in zip(dts, step_coeffs)]
+        plan = self._linear_plan(dts)
+        direct = plan[0] == "direct"
         lhs_by_dt = None
         factor_by_dt = None
         if use_linear_cache:
@@ -1163,21 +1202,22 @@ class PolygonalHeatSolver:
                 self._linear_cache = {}
                 self._linear_cache_A = self.A
             lhs_by_dt = {}
-            factor_by_dt = {} if self.linear_solver == "direct" else None
+            factor_by_dt = {} if direct else None
             for key in uniq_dt:
-                cache_key = (key, self.time_scheme, self.linear_solver)
+                cache_key = (key, self.time_scheme, direct)
                 if cache_key not in self._linear_cache:
                     a0 = step_coeffs[lin_keys.index(key)][0]
                     lhs_new = self._build_linear_lhs_csr(key[0], mass_coeff=a0)
-                    self._linear_cache[cache_key] = (
-                        lhs_new, factorized(lhs_new) if self.linear_solver == "direct" else None)
+                    self._linear_cache[cache_key] = (lhs_new, factorized(lhs_new) if direct else None)
                 lhs_by_dt[key], factor = self._linear_cache[cache_key]
                 if factor_by_dt is not None:
                     factor_by_dt[key] = factor
 
         u_prev = None
-        stats = {"factorizations_reused": 0, "boundary_factorizations": 0, "radiative_iterations": 0}
+        stats = {"factorizations_reused": 0, "boundary_factorizations": 0, "radiative_iterations": 0,
+                 "linear_solver": plan[0], "preconditioner": plan[1], "linear_solver_reason": plan[2]}
         self.last_solve_stats = stats
+        it_before = dict(self._iterative.stats) if self._iterative is not None else None
         for step_idx in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = dts[step_idx]
@@ -1209,7 +1249,7 @@ class PolygonalHeatSolver:
                         rhs = rhs + dt_eff * boundary_rhs
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
-                        elif self.linear_solver == "direct":
+                        elif direct:
                             # Robin: reuse the factorization while the closure is unchanged.
                             lhs = None
                             step_factor = self._boundary_factor(
@@ -1241,7 +1281,7 @@ class PolygonalHeatSolver:
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
-                        elif self.linear_solver == "direct":
+                        elif direct:
                             lhs = None
                             step_factor = self._boundary_factor(
                                 ("crank_nicolson", float(dt_eff)), b_mat_next,
@@ -1249,19 +1289,15 @@ class PolygonalHeatSolver:
                         else:
                             lhs = self.M_diag + 0.5 * dt_eff * k_next
 
-                x0 = u if self.linear_solver != "direct" else None
-                if step_factor is not None:
-                    direct_factor = step_factor
+                if direct:
+                    if step_factor is not None:
+                        direct_factor = step_factor
+                    else:
+                        direct_factor = factor_by_dt[dt_key] if factor_by_dt is not None else None
+                    u = _solve_sparse_linear_system(lhs, rhs, "direct", None, direct_factor=direct_factor)
                 else:
-                    direct_factor = factor_by_dt[dt_key] if factor_by_dt is not None else None
-                u = _solve_sparse_linear_system(
-                    lhs,
-                    rhs,
-                    self.linear_solver,
-                    self.linear_solver_options,
-                    x0=x0,
-                    direct_factor=direct_factor,
-                )
+                    u = self._iterative.solve(lhs, rhs, x0=u, key=("linear", dt_key, self.time_scheme),
+                                              dirichlet_mask=self._dirichlet_mask())
                 t = t_next
                 continue
 
@@ -1406,7 +1442,7 @@ class PolygonalHeatSolver:
                 src_avg = self.cell_areas * (source_next + source_prev)
 
             if (has_nonlinear_radiation and not has_temp_dependent_diffusion and self.phase_change_model is None
-                    and self.linear_solver == "direct" and relaxation == 1.0
+                    and direct and relaxation == 1.0
                     and self.nonlinear_options.get("radiative_jacobian", "frozen") == "frozen"):
                 u = self._radiative_step(u, hist, t, t_next, dt_eff, a0, source_next, src_avg,
                                          lin_keys[step_idx], max_iters, tol, stats)
@@ -1464,14 +1500,11 @@ class PolygonalHeatSolver:
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
                         lhs = mass_matrix + 0.5 * dt_eff * k_next
 
-                x0 = u_iter if self.linear_solver != "direct" else None
-                u_next = _solve_sparse_linear_system(
-                    lhs,
-                    rhs,
-                    self.linear_solver,
-                    self.linear_solver_options,
-                    x0=x0,
-                )
+                if direct:
+                    u_next = _solve_sparse_linear_system(lhs, rhs, "direct", None)
+                else:
+                    u_next = self._iterative.solve(lhs, rhs, x0=u_iter, key=("nonlinear", lin_keys[step_idx][0]),
+                                                   dirichlet_mask=self._dirichlet_mask())
                 if relaxation != 1.0:
                     u_next = relaxation * u_next + (1.0 - relaxation) * u_iter
                 err = np.max(np.abs(u_next - u_iter))
@@ -1487,4 +1520,8 @@ class PolygonalHeatSolver:
 
             u = u_iter
             t = t_next
+        if it_before is not None or self._iterative is not None:
+            before = it_before or {k: 0 for k in self._iterative.stats}
+            for k, v in self._iterative.stats.items():
+                stats["krylov_" + k] = v - before.get(k, 0)
         return t, u

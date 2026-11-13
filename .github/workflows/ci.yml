@@ -69,4 +69,4 @@ jobs:
           python -m pip install -r requirements-external.txt
 
       - name: Run cross-code tests (must not skip)
-        run: python -m pytest tests/test_external_codes.py -q -ra -p no:cacheprovider
+        run: python -m pytest tests/test_external_codes.py tests/test_linear_solvers.py -q -ra -p no:cacheprovider
