@@ -1098,6 +1098,23 @@ class PolygonalHeatSolver:
             self._iterative = IterativeSolver(method, pc, opts)
         return method, pc, reason
 
+    def _face_dirichlet_closure(self):
+        """Time-independent part of the face-Dirichlet closure: ``B`` and the face weights."""
+        B, _ = self._assemble_boundary_system(0.0)
+        _, w, _, _, _ = self._boundary_face_relations(0.0)
+        faces = self.boundary_faces
+        return {"B": B, "w": w, "cells": faces["cells"], "lengths": faces["lengths"],
+                "midpoints": faces["midpoints"], "normals": faces["normals"]}
+
+    def _face_dirichlet_rhs(self, t, fc):
+        """Right-hand side of the face-Dirichlet closure at time ``t`` (same arithmetic as
+        ``_assemble_boundary_system``, so results are unchanged)."""
+        mid = fc["midpoints"]
+        data = self._evaluate_bc(mid[:, 0], mid[:, 1], t, normals=fc["normals"])
+        g = np.broadcast_to(np.asarray(data, dtype=float), (fc["cells"].size,))
+        c = fc["w"] * g
+        return np.bincount(fc["cells"], weights=fc["lengths"] * c, minlength=self.M)
+
     def _boundary_factor(self, key, B, build, stats):
         """Factorization of ``build()`` (a matrix containing the boundary closure ``B``), reused while unchanged."""
         if self._factor_cache.lookup(key, (self.A, self.M_diag), B) is not None:
@@ -1241,6 +1258,12 @@ class PolygonalHeatSolver:
                  "linear_solver": plan[0], "preconditioner": plan[1], "linear_solver_reason": plan[2]}
         self.last_solve_stats = stats
         it_before = dict(self._iterative.stats) if self._iterative is not None else None
+        # Face Dirichlet: the closure matrix does not depend on time (only its right-hand side
+        # does), so build it once per solve and reuse its factorizations without re-checking.
+        face_closure = None
+        if self.bc_type == "dirichlet" and not self._band_dirichlet and not has_temp_dependent_diffusion:
+            face_closure = self._face_dirichlet_closure()
+        face_factors = {}
         for step_idx in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = dts[step_idx]
@@ -1268,17 +1291,27 @@ class PolygonalHeatSolver:
                         else:
                             lhs = identity_rows(self._mass(a0) + dt_eff * self.A, self.is_boundary)
                     else:
-                        boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
+                        if face_closure is not None:
+                            boundary_matrix = face_closure["B"]
+                            boundary_rhs = self._face_dirichlet_rhs(t_next, face_closure)
+                        else:
+                            boundary_matrix, boundary_rhs = self._assemble_boundary_system(t_next)
                         rhs = rhs + dt_eff * boundary_rhs
+                        fkey = ("implicit", float(dt_eff), a0, self.time_scheme)
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
+                        elif direct and fkey in face_factors:
+                            lhs, step_factor = None, face_factors[fkey]
+                            stats["factorizations_reused"] += 1
                         elif direct:
                             # Robin: reuse the factorization while the closure is unchanged.
                             lhs = None
                             step_factor = self._boundary_factor(
                                 # exact dt / a0 (not the rounded cache key): reuse only an identical matrix
-                                ("implicit", float(dt_eff), a0, self.time_scheme), boundary_matrix,
+                                fkey, boundary_matrix,
                                 lambda B=boundary_matrix, c=a0, k=dt_eff: self._mass(c) + k * (self.A + B), stats)
+                            if face_closure is not None:
+                                face_factors[fkey] = step_factor
                         else:
                             lhs = self._mass(a0) + dt_eff * (self.A + boundary_matrix)
                 else:
@@ -1296,19 +1329,30 @@ class PolygonalHeatSolver:
                         else:
                             lhs = identity_rows(self.M_diag + 0.5 * dt_eff * self.A, self.is_boundary)
                     else:
-                        b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
-                        b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
+                        if face_closure is not None:
+                            b_mat_prev = b_mat_next = face_closure["B"]
+                            b_rhs_prev = self._face_dirichlet_rhs(t, face_closure)
+                            b_rhs_next = self._face_dirichlet_rhs(t_next, face_closure)
+                        else:
+                            b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t)
+                            b_mat_next, b_rhs_next = self._assemble_boundary_system(t_next)
                         k_prev = self.A + b_mat_prev
                         k_next = self.A + b_mat_next
                         rhs = (self.M_diag - 0.5 * dt_eff * k_prev) @ u + 0.5 * dt_eff * src_avg
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
+                        fkey = ("crank_nicolson", float(dt_eff))
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
+                        elif direct and fkey in face_factors:
+                            lhs, step_factor = None, face_factors[fkey]
+                            stats["factorizations_reused"] += 1
                         elif direct:
                             lhs = None
                             step_factor = self._boundary_factor(
-                                ("crank_nicolson", float(dt_eff)), b_mat_next,
+                                fkey, b_mat_next,
                                 lambda K=k_next, k=dt_eff: self.M_diag + 0.5 * k * K, stats)
+                            if face_closure is not None:
+                                face_factors[fkey] = step_factor
                         else:
                             lhs = self.M_diag + 0.5 * dt_eff * k_next
 

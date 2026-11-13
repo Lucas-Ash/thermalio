@@ -4,77 +4,89 @@
       "case": "isotropic Dirichlet",
       "n": 8,
       "h": 0.25,
-      "thermalio": 0.021169876336671924,
-      "thermalio_time": 0.00874995599997419,
+      "thermalio": 0.004443826355219307,
+      "thermalio_time": 0.009196617000270635,
       "thermalio_dofs": 64,
+      "thermalio_face": 0.004867537124559637,
+      "thermalio_face_time": 0.041862116000174865,
       "fipy": 0.004867537124548203,
-      "fipy_time": 1.4574980760000926,
-      "diff_thermalio_fipy": 0.016736153487983033,
+      "fipy_time": 1.7261714599999323,
+      "diff_thermalio_fipy": 0.0018213474827470935,
+      "diff_thermalio_face_fipy": 1.5063722631087727e-14,
       "skfem_p1": 0.12243798390551006,
-      "skfem_p1_time": 0.11245076899990636,
+      "skfem_p1_time": 0.17245602100001634,
       "skfem_p1_dofs": 81,
-      "diff_thermalio_skfem_p1": 0.26779445802616414,
+      "diff_thermalio_skfem_p1": 0.25440268335998173,
       "skfem_p2": 0.006630507842422794,
-      "skfem_p2_time": 0.20343827300007433,
+      "skfem_p2_time": 0.2453943580003397,
       "skfem_p2_dofs": 289,
-      "diff_thermalio_skfem_p2": 0.022315571359958004
+      "diff_thermalio_skfem_p2": 0.005644790048231538
     },
     {
       "case": "isotropic Dirichlet",
       "n": 16,
       "h": 0.125,
-      "thermalio": 0.005585914331540756,
-      "thermalio_time": 0.014156393999883221,
+      "thermalio": 0.001216138163893922,
+      "thermalio_time": 0.012924055999974371,
       "thermalio_dofs": 256,
+      "thermalio_face": 0.0012380487704882117,
+      "thermalio_face_time": 0.06090704500002175,
       "fipy": 0.001238048770479392,
-      "fipy_time": 1.854995635000023,
-      "diff_thermalio_fipy": 0.004405523084023915,
+      "fipy_time": 1.57473446899985,
+      "diff_thermalio_fipy": 0.0001718166080703486,
+      "diff_thermalio_face_fipy": 1.7265784438541816e-14,
       "skfem_p1": 0.03191008646765356,
-      "skfem_p1_time": 0.2205287959998259,
+      "skfem_p1_time": 0.1884691870000097,
       "skfem_p1_dofs": 289,
-      "diff_thermalio_skfem_p1": 0.06292746643320192,
+      "diff_thermalio_skfem_p1": 0.0596905785318804,
       "skfem_p2": 0.0008861568399565254,
-      "skfem_p2_time": 0.6983530990000872,
+      "skfem_p2_time": 0.6684215250002126,
       "skfem_p2_dofs": 1089,
-      "diff_thermalio_skfem_p2": 0.005653529681623794
+      "diff_thermalio_skfem_p2": 0.00128714753549824
     },
     {
       "case": "isotropic Dirichlet",
       "n": 32,
       "h": 0.0625,
-      "thermalio": 0.0013635323417436661,
-      "thermalio_time": 0.03879925500018544,
+      "thermalio": 0.0003134993462592524,
+      "thermalio_time": 0.033132939000097394,
       "thermalio_dofs": 1024,
+      "thermalio_face": 0.0003151299630917158,
+      "thermalio_face_time": 0.07289483199974711,
       "fipy": 0.000315129963114041,
-      "fipy_time": 2.071797562999791,
-      "diff_thermalio_fipy": 0.001064460200086085,
+      "fipy_time": 1.8931942619997244,
+      "diff_thermalio_fipy": 1.6428771764713327e-05,
+      "diff_thermalio_face_fipy": 2.428315884498872e-14,
       "skfem_p1": 0.008055903880487065,
-      "skfem_p1_time": 0.6243402099999003,
+      "skfem_p1_time": 0.6049343710001267,
       "skfem_p1_dofs": 1089,
-      "diff_thermalio_skfem_p1": 0.01540244323974447,
+      "diff_thermalio_skfem_p1": 0.014651691350076795,
       "skfem_p2": 0.00011305552572549717,
-      "skfem_p2_time": 3.159282792999875,
+      "skfem_p2_time": 3.9679505009999048,
       "skfem_p2_dofs": 4225,
-      "diff_thermalio_skfem_p2": 0.001362158696098974
+      "diff_thermalio_skfem_p2": 0.0003120997788929897
     },
     {
       "case": "isotropic Dirichlet",
       "n": 64,
       "h": 0.03125,
-      "thermalio": 0.00032972112508396846,
-      "thermalio_time": 0.1960923859999184,
+      "thermalio": 8.325674771307827e-05,
+      "thermalio_time": 0.24554410100017776,
       "thermalio_dofs": 4096,
+      "thermalio_face": 8.342177346001427e-05,
+      "thermalio_face_time": 0.23783649500001047,
       "fipy": 8.342177343009655e-05,
-      "fipy_time": 3.4860405400002037,
-      "diff_thermalio_fipy": 0.00024842839826489,
+      "fipy_time": 4.118771084999935,
+      "diff_thermalio_fipy": 1.7806065976250087e-06,
+      "diff_thermalio_face_fipy": 3.0360808076377376e-14,
       "skfem_p1": 0.0020151643127332324,
-      "skfem_p1_time": 2.3490818809998473,
+      "skfem_p1_time": 2.7476356890001625,
       "skfem_p1_dofs": 4225,
-      "diff_thermalio_skfem_p1": 0.0038246377163330732,
+      "diff_thermalio_skfem_p1": 0.0036457307077210704,
       "skfem_p2": 1.5287674868865325e-05,
-      "skfem_p2_time": 26.550423562000105,
+      "skfem_p2_time": 24.84002819699981,
       "skfem_p2_dofs": 16641,
-      "diff_thermalio_skfem_p2": 0.00032402526940682706
+      "diff_thermalio_skfem_p2": 7.744989739038109e-05
     }
   ],
   "anisotropic": [
@@ -82,93 +94,105 @@
       "case": "anisotropic (ratio 5, 30 deg)",
       "n": 8,
       "h": 0.25,
-      "thermalio": 0.0013905792451256703,
-      "thermalio_time": 0.009164137999960076,
+      "thermalio": 0.0004756615527235327,
+      "thermalio_time": 0.007758495999951265,
       "thermalio_dofs": 64,
-      "thermalio_skewed": 0.001371588628357696,
-      "thermalio_skewed_time": 0.009599136000133512,
+      "thermalio_face": 0.0009338920537948061,
+      "thermalio_face_time": 0.04124609299969961,
+      "thermalio_skewed": 0.000485502354721247,
+      "thermalio_skewed_time": 0.008675912999933644,
       "thermalio_skewed_quadratic": 0.0004425705894218197,
-      "thermalio_skewed_quadratic_time": 0.06478070299999672,
+      "thermalio_skewed_quadratic_time": 0.06081550699991567,
       "fipy": 0.0023273932629751634,
-      "fipy_time": 1.4133703009999863,
-      "diff_thermalio_fipy": 0.0025053734678699446,
+      "fipy_time": 1.2218819079998866,
+      "diff_thermalio_fipy": 0.002271466960248787,
+      "diff_thermalio_face_fipy": 0.0014854816665858905,
       "skfem_p1": 0.11706308843199333,
-      "skfem_p1_time": 0.14326725299997634,
+      "skfem_p1_time": 0.09933337400025266,
       "skfem_p1_dofs": 81,
-      "diff_thermalio_skfem_p1": 0.24573160183490497,
+      "diff_thermalio_skfem_p1": 0.24493528472803325,
       "skfem_p2": 0.00714688946635274,
-      "skfem_p2_time": 0.23452165200001218,
+      "skfem_p2_time": 0.2343397970003025,
       "skfem_p2_dofs": 289,
-      "diff_thermalio_skfem_p2": 0.001255223762460488
+      "diff_thermalio_skfem_p2": 0.000329637850955196
     },
     {
       "case": "anisotropic (ratio 5, 30 deg)",
       "n": 16,
       "h": 0.125,
-      "thermalio": 0.00038686022304485623,
-      "thermalio_time": 0.013406439000164028,
+      "thermalio": 0.00015653572824172465,
+      "thermalio_time": 0.01223346999995556,
       "thermalio_dofs": 256,
-      "thermalio_skewed": 0.0005416813066202132,
-      "thermalio_skewed_time": 0.01690738499996769,
+      "thermalio_face": 0.0002243690992620268,
+      "thermalio_face_time": 0.0476562950002517,
+      "thermalio_skewed": 0.00015033654555883844,
+      "thermalio_skewed_time": 0.014814916999966954,
       "thermalio_skewed_quadratic": 0.0001377336200755783,
-      "thermalio_skewed_quadratic_time": 0.18826509500013344,
+      "thermalio_skewed_quadratic_time": 0.1755201720002333,
       "fipy": 0.0015453730715622252,
-      "fipy_time": 1.6031788990001132,
-      "diff_thermalio_fipy": 0.001570563236186811,
+      "fipy_time": 1.3478797470002064,
+      "diff_thermalio_fipy": 0.0015438789164799428,
+      "diff_thermalio_face_fipy": 0.0013888175592807017,
       "skfem_p1": 0.030489277309244802,
-      "skfem_p1_time": 0.22305432300004213,
+      "skfem_p1_time": 0.19704020600011063,
       "skfem_p1_dofs": 289,
-      "diff_thermalio_skfem_p1": 0.05758418320080587,
+      "diff_thermalio_skfem_p1": 0.05738847002079428,
       "skfem_p2": 0.0009014741358909779,
-      "skfem_p2_time": 0.7192609720000291,
+      "skfem_p2_time": 0.657650064000336,
       "skfem_p2_dofs": 1089,
-      "diff_thermalio_skfem_p2": 0.0003513945511019102
+      "diff_thermalio_skfem_p2": 0.0001200706176117943
     },
     {
       "case": "anisotropic (ratio 5, 30 deg)",
       "n": 32,
       "h": 0.0625,
-      "thermalio": 0.00010400953655169167,
-      "thermalio_time": 0.03810510100015563,
+      "thermalio": 4.647779403750777e-05,
+      "thermalio_time": 0.02970822199995382,
       "thermalio_dofs": 1024,
-      "thermalio_skewed": 0.0002585968425092255,
-      "thermalio_skewed_time": 0.04989507599998433,
+      "thermalio_face": 5.441926976675507e-05,
+      "thermalio_face_time": 0.07686937100015712,
+      "thermalio_skewed": 4.4037524111786555e-05,
+      "thermalio_skewed_time": 0.04357829999980822,
       "thermalio_skewed_quadratic": 4.147368626107001e-05,
-      "thermalio_skewed_quadratic_time": 0.7880987759999698,
+      "thermalio_skewed_quadratic_time": 0.6818464489997496,
       "fipy": 0.0009931246224792105,
-      "fipy_time": 2.3472667570001704,
-      "diff_thermalio_fipy": 0.0009971944785644015,
+      "fipy_time": 1.75940830799982,
+      "diff_thermalio_fipy": 0.0009941681229302193,
+      "diff_thermalio_face_fipy": 0.000967518631947572,
       "skfem_p1": 0.0076976719966041565,
-      "skfem_p1_time": 0.7096773069999927,
+      "skfem_p1_time": 0.6183508710000751,
       "skfem_p1_dofs": 1089,
-      "diff_thermalio_skfem_p1": 0.014138548116652357,
+      "diff_thermalio_skfem_p1": 0.014092910149422993,
       "skfem_p2": 0.00011338236723523227,
-      "skfem_p2_time": 3.68119350500001,
+      "skfem_p2_time": 3.2865494549996583,
       "skfem_p2_dofs": 4225,
-      "diff_thermalio_skfem_p2": 9.558218229827585e-05
+      "diff_thermalio_skfem_p2": 3.98590554075024e-05
     },
     {
       "case": "anisotropic (ratio 5, 30 deg)",
       "n": 64,
       "h": 0.03125,
-      "thermalio": 3.0879503232252365e-05,
-      "thermalio_time": 0.21287725399997726,
+      "thermalio": 1.5247545194874514e-05,
+      "thermalio_time": 0.13159540400010883,
       "thermalio_dofs": 4096,
-      "thermalio_skewed": 0.00014069077251248463,
-      "thermalio_skewed_time": 0.2701664180001444,
+      "thermalio_face": 1.58927713626174e-05,
+      "thermalio_face_time": 0.22590952099972128,
+      "thermalio_skewed": 1.5238731729856464e-05,
+      "thermalio_skewed_time": 0.22226876800004902,
       "thermalio_skewed_quadratic": 1.4522750022181856e-05,
-      "thermalio_skewed_quadratic_time": 3.181812420000142,
+      "thermalio_skewed_quadratic_time": 2.6111443390000204,
       "fipy": 0.0005249714147235048,
-      "fipy_time": 3.8371168209998814,
-      "diff_thermalio_fipy": 0.0005255854741111117,
+      "fipy_time": 3.6068557160001546,
+      "diff_thermalio_fipy": 0.0005250733947195536,
+      "diff_thermalio_face_fipy": 0.0005212315721108422,
       "skfem_p1": 0.0019253737407249258,
-      "skfem_p1_time": 2.568107654999949,
+      "skfem_p1_time": 2.8459417779999967,
       "skfem_p1_dofs": 4225,
-      "diff_thermalio_skfem_p1": 0.003518774072860198,
+      "diff_thermalio_skfem_p1": 0.003507829650423433,
       "skfem_p2": 1.5419902028837962e-05,
-      "skfem_p2_time": 27.939326420000043,
+      "skfem_p2_time": 24.54389920299991,
       "skfem_p2_dofs": 16641,
-      "diff_thermalio_skfem_p2": 2.5437178044707996e-05
+      "diff_thermalio_skfem_p2": 1.1183288559796967e-05
     }
   ],
   "pennes_robin": [
@@ -177,14 +201,14 @@
       "n": 8,
       "h": 0.125,
       "thermalio": 0.0011540326273582879,
-      "thermalio_time": 0.04407611400006317,
+      "thermalio_time": 0.04108193199999732,
       "thermalio_dofs": 64,
       "skfem_p1": 0.006539445376339342,
-      "skfem_p1_time": 0.09930995100012296,
+      "skfem_p1_time": 0.08750916600001801,
       "skfem_p1_dofs": 81,
       "diff_thermalio_skfem_p1": 0.01331922675786929,
       "skfem_p2": 0.0002084349515900388,
-      "skfem_p2_time": 0.24022432800006754,
+      "skfem_p2_time": 0.21580647900009353,
       "skfem_p2_dofs": 289,
       "diff_thermalio_skfem_p2": 0.001171337392918196
     },
@@ -193,14 +217,14 @@
       "n": 16,
       "h": 0.0625,
       "thermalio": 0.00035916478238762575,
-      "thermalio_time": 0.049468406999949366,
+      "thermalio_time": 0.0458946730000207,
       "thermalio_dofs": 256,
       "skfem_p1": 0.0016595885823263788,
-      "skfem_p1_time": 0.2544222839999293,
+      "skfem_p1_time": 0.19671375899997656,
       "skfem_p1_dofs": 289,
       "diff_thermalio_skfem_p1": 0.003396248112123083,
       "skfem_p2": 2.7456152104600717e-05,
-      "skfem_p2_time": 1.031184254999971,
+      "skfem_p2_time": 0.7264321779998681,
       "skfem_p2_dofs": 1089,
       "diff_thermalio_skfem_p2": 0.00035939084294413725
     },
@@ -209,14 +233,14 @@
       "n": 32,
       "h": 0.03125,
       "thermalio": 9.565218173017652e-05,
-      "thermalio_time": 0.08475278799983244,
+      "thermalio_time": 0.07221272999959183,
       "thermalio_dofs": 1024,
       "skfem_p1": 0.00041573718633151674,
-      "skfem_p1_time": 0.7274388650000674,
+      "skfem_p1_time": 0.6831892620002691,
       "skfem_p1_dofs": 1089,
       "diff_thermalio_skfem_p1": 0.0008535517145429455,
       "skfem_p2": 6.4010443750783666e-06,
-      "skfem_p2_time": 3.85540747999994,
+      "skfem_p2_time": 3.3484976509998887,
       "skfem_p2_dofs": 4225,
       "diff_thermalio_skfem_p2": 9.474408459385021e-05
     },
@@ -225,14 +249,14 @@
       "n": 64,
       "h": 0.015625,
       "thermalio": 2.5369549596605795e-05,
-      "thermalio_time": 0.26848732700000255,
+      "thermalio_time": 0.217688317000011,
       "thermalio_dofs": 4096,
       "skfem_p1": 0.00010337584500613141,
-      "skfem_p1_time": 3.284651937000035,
+      "skfem_p1_time": 2.4929271420000987,
       "skfem_p1_dofs": 4225,
       "diff_thermalio_skfem_p1": 0.0002136682549838137,
       "skfem_p2": 5.45252145204171e-06,
-      "skfem_p2_time": 28.00664714100003,
+      "skfem_p2_time": 26.223624658000062,
       "skfem_p2_dofs": 16641,
       "diff_thermalio_skfem_p2": 2.3979564344622088e-05
     }
@@ -240,9 +264,14 @@
   "orders": {
     "isotropic": {
       "thermalio": [
-        1.9221474889154684,
-        2.034444527803607,
-        2.048030692166138
+        1.8694953029619015,
+        1.9557728011336197,
+        1.9128233263761494
+      ],
+      "thermalio_face": [
+        1.9751238345835345,
+        1.974049307912963,
+        1.9174510469105044
       ],
       "fipy": [
         1.975123834590423,
@@ -262,14 +291,19 @@
     },
     "anisotropic": {
       "thermalio": [
-        1.8458016584191637,
-        1.8950965845589693,
-        1.7519943651506809
+        1.6034434380116114,
+        1.751878479066181,
+        1.6079646039705076
+      ],
+      "thermalio_face": [
+        2.057381804480594,
+        2.043684494836496,
+        1.7757468756212034
       ],
       "thermalio_skewed": [
-        1.3403316387735755,
-        1.0667396445551849,
-        0.8781769502001142
+        1.6912825338305009,
+        1.771390494256053,
+        1.5309905226312737
       ],
       "thermalio_skewed_quadratic": [
         1.6840268245180188,
@@ -406,21 +440,31 @@
     "isotropic": {
       "thermalio": {
         "1e-03": {
-          "time": 0.05527363914599721,
+          "time": 0.014805262918783419,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": null,
-          "status": "not reached"
+          "time": 0.18616994650536178,
+          "status": "interpolated"
+        }
+      },
+      "thermalio_face": {
+        "1e-03": {
+          "time": 0.06263898177865791,
+          "status": "interpolated"
+        },
+        "1e-04": {
+          "time": 0.2024117144037708,
+          "status": "interpolated"
         }
       },
       "fipy": {
         "1e-03": {
-          "time": 1.8872716424844902,
+          "time": 1.6206534439704667,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 3.2472246209090607,
+          "time": 3.7044961215295653,
           "status": "interpolated"
         }
       },
@@ -436,11 +480,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 0.6484964061408962,
+          "time": 0.6293840861940159,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 3.5998636416294665,
+          "time": 4.440378604738243,
           "status": "interpolated"
         }
       }
@@ -448,37 +492,47 @@
     "anisotropic": {
       "thermalio": {
         "1e-03": {
-          "time": 0.010108141900556315,
-          "status": "interpolated"
+          "time": 0.007758495999951268,
+          "status": "coarsest"
         },
         "1e-04": {
-          "time": 0.04028745557734826,
+          "time": 0.016972509575786342,
+          "status": "interpolated"
+        }
+      },
+      "thermalio_face": {
+        "1e-03": {
+          "time": 0.041246092999699606,
+          "status": "coarsest"
+        },
+        "1e-04": {
+          "time": 0.06259938322205674,
           "status": "interpolated"
         }
       },
       "thermalio_skewed": {
         "1e-03": {
-          "time": 0.011637079047056952,
-          "status": "interpolated"
+          "time": 0.008675912999933642,
+          "status": "coarsest"
         },
         "1e-04": {
-          "time": null,
-          "status": "not reached"
+          "time": 0.02119774729965103,
+          "status": "interpolated"
         }
       },
       "thermalio_skewed_quadratic": {
         "1e-03": {
-          "time": 0.0647807029999967,
+          "time": 0.06081550699991567,
           "status": "coarsest"
         },
         "1e-04": {
-          "time": 0.2758215486686001,
+          "time": 0.2520748636468432,
           "status": "interpolated"
         }
       },
       "fipy": {
         "1e-03": {
-          "time": 2.3333446153125434,
+          "time": 1.7521090056817297,
           "status": "interpolated"
         },
         "1e-04": {
@@ -498,11 +552,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 0.6799913576101977,
+          "time": 0.6245156086936142,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 4.182159553715979,
+          "time": 3.730009645117062,
           "status": "interpolated"
         }
       }
@@ -510,17 +564,17 @@
     "pennes_robin": {
       "thermalio": {
         "1e-03": {
-          "time": 0.04470492965839325,
+          "time": 0.04164433042638981,
           "status": "interpolated"
         },
         "1e-04": {
-          "time": 0.08323347143618659,
+          "time": 0.07112135698266213,
           "status": "interpolated"
         }
       },
       "skfem_p1": {
         "1e-03": {
-          "time": 0.37369319220902897,
+          "time": 0.31024475412283775,
           "status": "interpolated"
         },
         "1e-04": {
@@ -530,11 +584,11 @@
       },
       "skfem_p2": {
         "1e-03": {
-          "time": 0.24022432800006757,
+          "time": 0.21580647900009353,
           "status": "coarsest"
         },
         "1e-04": {
-          "time": 0.4072586836426004,
+          "time": 0.33501161400299045,
           "status": "interpolated"
         }
       }
