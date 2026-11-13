@@ -36,6 +36,27 @@ Before this round the triangular solver and the AFC solver were Dirichlet-only,
 the transport models lacked radiation, the curvilinear and polygonal solvers
 lacked `flux`, and `drivers.run_test` rejected non-Dirichlet Delaunay cases.
 
+## Dirichlet on faces or on a band of cells
+
+`PolygonalHeatSolver(..., dirichlet_mode=...)`:
+
+- **`"band"`** (default). The boundary cells are held at the data at their centroids
+  (`u_c = g(x_c)`), with identity rows in the matrix.
+- **`"face"`**. Every cell is an unknown, and the data are imposed on the boundary
+  faces through the face flux `α_n (g_f − v) / d`. Here `d` is the centroid-to-face
+  distance and `v` the cell value, extrapolated tangentially on skewed cells. This is
+  what FiPy does. It is the Robin closure below with β → ∞, so it shares that
+  machinery: factorization reuse, iterative solvers and all time schemes.
+  - On Cartesian meshes it reproduces FiPy to 4e-14 (`tests/test_face_dirichlet.py`).
+  - It is second order on square, skewed, hexagonal and tiled meshes.
+
+Both modes are second order and, on the cross-code problems, about equally accurate:
+8.33e-5 (band) against 8.34e-5 (face) on the isotropic problem at n = 64. Face mode
+differs in two ways:
+- the boundary cells carry real errors, as in FiPy;
+- the boundary heat flow is the closure flux itself, with no band reaction to
+  reconstruct.
+
 ## Discretization
 
 Every non-Dirichlet condition prescribes the inward heat flux
@@ -146,6 +167,8 @@ Physical checks in `tests/test_boundary_conditions.py`:
 - **Adjoints.** `heat_solver/adjoint.py` still covers Dirichlet, Robin and flux
   for the linear adjoint, and Dirichlet and flux for the fractional / enthalpy
   adjoints. Radiative adjoints are not implemented.
-- **Dirichlet on cell-centred solvers.** This is still imposed on the boundary-cell
-  band (gap analysis item 4); the face-based closures above are used only for the
-  other four types.
+- **Dirichlet on cell-centred solvers.** These impose it on the boundary-cell band by
+  default. `PolygonalHeatSolver` also offers `dirichlet_mode="face"` (section below).
+  It is not available with cell-averaged unknowns (`flux_discretization="quadratic"`),
+  where it would be first order. The transport, enthalpy and AFC solvers use the band
+  only.

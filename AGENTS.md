@@ -247,6 +247,11 @@ MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tes
 
 `bc_func(x, y, t) -> value`
 
+`PolygonalHeatSolver(dirichlet_mode="band")` (default) holds the boundary cells at
+the data; `dirichlet_mode="face"` imposes it on the boundary faces as FiPy does
+(every cell an unknown; not with the quadratic flux). Drivers forward
+`dirichlet_mode`. Tests: `tests/test_face_dirichlet.py`.
+
 ### Neumann
 
 All solvers interpret Neumann data as the outward normal derivative:
