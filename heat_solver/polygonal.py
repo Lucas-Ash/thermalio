@@ -4,6 +4,7 @@ import numpy as np
 from scipy.sparse import coo_matrix, diags, lil_matrix
 from scipy.sparse.linalg import bicgstab, cg, factorized, spsolve
 
+from .factor_cache import FactorCache, frozen_newton
 from .fv_assembly import assemble_reconstructed, assemble_tpfa, flatten_stencils, identity_rows, interior_faces
 from .geometry import polygon_area_and_centroid
 from .phase_change import ApparentHeatCapacityModel
@@ -278,6 +279,10 @@ class PolygonalHeatSolver:
         self._constant_A = None  # operator from the last temperature-independent assembly (reused by solve())
         self._linear_cache = {}  # (dt, time-scheme coefficients) -> (lhs, factor), valid for _linear_cache_A
         self._linear_cache_A = None
+        # Factorizations of matrices with a boundary closure (Robin / radiative), reused
+        # while the operator and the closure are unchanged (heat_solver/factor_cache.py).
+        self._factor_cache = FactorCache()
+        self.last_solve_stats = {}
         self._boundary_idx = np.where(self.is_boundary)[0]
         if (
             self.temperature_dependent_diffusivity
@@ -550,6 +555,45 @@ class PolygonalHeatSolver:
         return (E @ T).tocsr(), rhs
 
     def _build_gradient_reconstruction(self):
+        """Weighted least-squares gradient stencils, one dict ``{cell: coeff}`` per cell.
+
+        Cells are batched by neighbour count; the stacked ``matmul``,
+        ``matrix_rank`` and ``solve`` call the same BLAS / LAPACK routines per
+        cell as the per-cell loop (``_build_gradient_reconstruction_loop``), so
+        the coefficients are bit-identical (``tests/test_fv_assembly.py``).
+        """
+        centers = self.cell_centers
+        nb_lists = self.neighbors
+        counts = np.fromiter(map(len, nb_lists), dtype=np.intp, count=self.M)
+        coeffs = [None] * self.M
+        for k in np.unique(counts):
+            cells = np.flatnonzero(counts == k)
+            if k < 2:
+                for i in cells:
+                    coeffs[i] = {int(i): np.zeros(2)}
+                continue
+            nbs = np.array([nb_lists[i] for i in cells], dtype=np.intp)
+            offsets = centers[nbs] - centers[cells][:, None, :]
+            distances = np.linalg.norm(offsets, axis=2)
+            weights = 1.0 / np.maximum(distances**2, 1e-12)
+            weighted = offsets * weights[:, :, None]
+            normal = np.matmul(offsets.transpose(0, 2, 1), weighted)
+            ok = np.linalg.matrix_rank(normal) >= 2
+            recon = np.empty((cells.size, 2, k))
+            if np.any(ok):
+                recon[ok] = np.linalg.solve(normal[ok], weighted[ok].transpose(0, 2, 1))
+            own = -np.sum(recon, axis=2)
+            for j, i in enumerate(cells):
+                if not ok[j]:
+                    coeffs[i] = {int(i): np.zeros(2)}
+                    continue
+                cell_coeffs = dict(zip(nb_lists[i], recon[j].T))
+                cell_coeffs[int(i)] = own[j]
+                coeffs[i] = cell_coeffs
+        return coeffs
+
+    def _build_gradient_reconstruction_loop(self):
+        """Legacy per-cell loop (reference for ``_build_gradient_reconstruction``)."""
         coeffs = []
         for i in range(self.M):
             nbs = self.neighbors[i]
@@ -994,6 +1038,43 @@ class PolygonalHeatSolver:
     def _apply_dirichlet_identity_rows(self, K_csr):
         return identity_rows(K_csr, self.is_boundary)
 
+    def _boundary_factor(self, key, B, build, stats):
+        """Factorization of ``build()`` (a matrix containing the boundary closure ``B``), reused while unchanged."""
+        if self._factor_cache.lookup(key, (self.A, self.M_diag), B) is not None:
+            stats["factorizations_reused"] += 1
+        else:
+            stats["boundary_factorizations"] += 1
+        return self._factor_cache.factor(key, (self.A, self.M_diag), B, build)
+
+    def _radiative_step(self, u, hist, t, t_next, dt, a0, source_next, src_avg, lin_key, max_iters, tol, stats):
+        """One implicit step with radiative boundaries by frozen-Jacobian Newton.
+
+        Solves the same nonlinear system as the generic Picard/Newton loop
+        (``B(v) v - b(v)`` is the exact radiative boundary term), but reuses one
+        factorization across iterations and steps; see :func:`frozen_newton`.
+        ``nonlinear_options["radiative_jacobian"] = "newton"`` restores full Newton.
+        """
+        M, A = self.M_diag, self.A
+        if self.time_scheme == "crank_nicolson":
+            theta, lead = 0.5, M
+            b_mat_prev, b_rhs_prev = self._assemble_boundary_system(t, temperature=u)
+            rhs = (M - 0.5 * dt * (A + b_mat_prev)) @ u + 0.5 * dt * src_avg + 0.5 * dt * b_rhs_prev
+        else:
+            theta, lead = 1.0, self._mass(a0)
+            rhs = M @ hist + dt * (self.cell_areas * source_next)
+        coef = theta * dt
+        u_new, iters, n_factor = frozen_newton(
+            u0=u,
+            boundary=lambda v: self._assemble_boundary_system(t_next, temperature=v),
+            apply_base=lambda v: lead @ v + coef * (A @ v),
+            rhs=rhs, coef=coef,
+            build_jacobian=lambda B: lead + coef * (A + B),
+            cache=self._factor_cache, key=("radiative", lin_key, self.time_scheme), deps=(A, M),
+            tol=tol, max_iters=max_iters)
+        stats["radiative_iterations"] += iters
+        stats["boundary_factorizations"] += n_factor
+        return u_new
+
     def _mass(self, coeff):
         return self.M_diag if coeff == 1.0 else coeff * self.M_diag
 
@@ -1095,9 +1176,12 @@ class PolygonalHeatSolver:
                     factor_by_dt[key] = factor
 
         u_prev = None
+        stats = {"factorizations_reused": 0, "boundary_factorizations": 0, "radiative_iterations": 0}
+        self.last_solve_stats = stats
         for step_idx in range(nsteps):
             t_next = min(t + self.dt, t_end)
             dt_eff = dts[step_idx]
+            step_factor = None
             cx = self.cell_centers[:, 0]
             cy = self.cell_centers[:, 1]
             source_next = np.broadcast_to(
@@ -1125,6 +1209,13 @@ class PolygonalHeatSolver:
                         rhs = rhs + dt_eff * boundary_rhs
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
+                        elif self.linear_solver == "direct":
+                            # Robin: reuse the factorization while the closure is unchanged.
+                            lhs = None
+                            step_factor = self._boundary_factor(
+                                # exact dt / a0 (not the rounded cache key): reuse only an identical matrix
+                                ("implicit", float(dt_eff), a0, self.time_scheme), boundary_matrix,
+                                lambda B=boundary_matrix, c=a0, k=dt_eff: self._mass(c) + k * (self.A + B), stats)
                         else:
                             lhs = self._mass(a0) + dt_eff * (self.A + boundary_matrix)
                 else:
@@ -1150,11 +1241,19 @@ class PolygonalHeatSolver:
                         rhs = rhs + 0.5 * dt_eff * (b_rhs_prev + b_rhs_next)
                         if use_linear_cache:
                             lhs = lhs_by_dt[dt_key]
+                        elif self.linear_solver == "direct":
+                            lhs = None
+                            step_factor = self._boundary_factor(
+                                ("crank_nicolson", float(dt_eff)), b_mat_next,
+                                lambda K=k_next, k=dt_eff: self.M_diag + 0.5 * k * K, stats)
                         else:
                             lhs = self.M_diag + 0.5 * dt_eff * k_next
 
                 x0 = u if self.linear_solver != "direct" else None
-                direct_factor = factor_by_dt[dt_key] if factor_by_dt is not None else None
+                if step_factor is not None:
+                    direct_factor = step_factor
+                else:
+                    direct_factor = factor_by_dt[dt_key] if factor_by_dt is not None else None
                 u = _solve_sparse_linear_system(
                     lhs,
                     rhs,
@@ -1305,6 +1404,14 @@ class PolygonalHeatSolver:
                     (self.M,),
                 )
                 src_avg = self.cell_areas * (source_next + source_prev)
+
+            if (has_nonlinear_radiation and not has_temp_dependent_diffusion and self.phase_change_model is None
+                    and self.linear_solver == "direct" and relaxation == 1.0
+                    and self.nonlinear_options.get("radiative_jacobian", "frozen") == "frozen"):
+                u = self._radiative_step(u, hist, t, t_next, dt_eff, a0, source_next, src_avg,
+                                         lin_keys[step_idx], max_iters, tol, stats)
+                t = t_next
+                continue
 
             # Crank--Nicolson needs the *old-level* operator A(u^n) on the explicit
             # half; using the new-level iterate for both halves (as before) makes the

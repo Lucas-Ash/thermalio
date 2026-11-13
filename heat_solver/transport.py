@@ -71,6 +71,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, diags, lil_matrix
 from scipy.sparse.linalg import factorized, spsolve
 
+from .factor_cache import FactorCache, frozen_newton
 from .phase_change import ApparentHeatCapacityModel
 from .polygonal import PolygonalHeatSolver, _AndersonAccelerator
 
@@ -157,6 +158,9 @@ class _TransportBase:
         # change the LHS between steps; Dirichlet rows are replaced and
         # Neumann/flux data only feed the right-hand side.
         self._bc_lhs_constant = self.bc_type not in ("robin", "radiative")
+        # ...but Robin data with time-independent beta leave it unchanged, and the radiative
+        # Jacobian changes slowly: reuse factorizations (heat_solver/factor_cache.py).
+        self._factor_cache = FactorCache()
 
     @staticmethod
     def _uniform_schedule(t0, t_end, dt):
@@ -289,26 +293,31 @@ class _TransportBase:
         """Solve ``(lhs_base + coef B) u = rhs_base + coef b`` for non-Dirichlet boundaries.
 
         Linear boundary types need one solve (``factor`` reuses a factorization
-        when the LHS is constant).  Radiative boundaries are nonlinear: the
-        closure is re-linearized about the latest iterate until the update is
-        below ``tol`` (Newton on the boundary nonlinearity).
+        when the LHS is constant).  For Robin data the factorization of
+        ``lhs_base + coef B`` is reused while ``B`` is unchanged (same values,
+        so the result equals a fresh solve bit for bit).  Radiative boundaries
+        are nonlinear: frozen-Jacobian Newton on the boundary nonlinearity until
+        the update is below ``tol`` (:func:`heat_solver.factor_cache.frozen_newton`).
         """
         if self.bc_type != "radiative":
             B, b = self._boundary_system(t)
             rhs = rhs_base + coef * b
             if factor is not None:
                 return factor(rhs)
-            lhs = lhs_base if B is None else (lhs_base + coef * B)
-            return spsolve(lhs.tocsr(), rhs)
-        u = np.asarray(u_guess, dtype=float).copy()
-        for _ in range(max_iters):
-            B, b = self._boundary_system(t, temperature=u)
-            u_new = spsolve((lhs_base + coef * B).tocsr(), rhs_base + coef * b)
-            err = float(np.max(np.abs(u_new - u)))
-            u = u_new
-            if err <= tol * max(1.0, float(np.max(np.abs(u)))):
-                return u
-        raise RuntimeError("radiative boundary iteration did not converge; reduce dt.")
+            if B is None:
+                return spsolve(lhs_base.tocsr(), rhs)
+            solve = self._factor_cache.factor(("robin", float(coef)), (lhs_base,), B,
+                                              lambda: (lhs_base + coef * B).tocsr())
+            return solve(rhs)
+        u, _, _ = frozen_newton(
+            u0=u_guess,
+            boundary=lambda v: self._boundary_system(t, temperature=v),
+            apply_base=lambda v: lhs_base @ v,
+            rhs=rhs_base, coef=coef,
+            build_jacobian=lambda B: (lhs_base + coef * B).tocsr(),
+            cache=self._factor_cache, key=("radiative", round(float(coef), 12)), deps=(lhs_base,),
+            tol=tol, max_iters=max_iters)
+        return u
 
 
 class HyperbolicHeatSolver(_TransportBase):

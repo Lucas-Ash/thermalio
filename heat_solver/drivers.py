@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .cases import build_error_report, get_analytical_case
-from .geometry import polygon_area_and_centroid
+from .mesh_io import polygon_areas_and_centroids
 from .meshes import (
     generate_hexagonal_polygonal_mesh,
     generate_mixed_polygonal_mesh,
@@ -150,7 +150,7 @@ def run_polygonal_mesh_test(
         bbox = (float(verts[:, 0].min()), float(verts[:, 0].max()), float(verts[:, 1].min()), float(verts[:, 1].max()))
     vertices = np.asarray(vertices, dtype=float)
     polygons = [list(poly) for poly in polygons]
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     exact_solution = case_info["solution"]
     source_func = case_info.get("source", lambda x, y, t: 0.0)
 

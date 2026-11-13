@@ -70,7 +70,16 @@ consistent.
 
 **Radiation in time steppers.** Each implicit step iterates the Newton-linearized
 boundary system to convergence:
-- Picard/Newton loops re-assemble it.
+- The polygonal, curvilinear and transport solvers use a frozen Jacobian: the
+  residual is re-evaluated with the closure linearized about each iterate, while
+  one factorization is reused across iterations and steps and refreshed only when
+  an update shrinks by less than half (`heat_solver/factor_cache.py`). This gives
+  the same fixed point as full Newton, to `nonlinear_options["tol"]`.
+  `nonlinear_options={"radiative_jacobian": "newton"}` restores full Newton.
+- Phase-change and temperature-dependent-conductivity runs keep the full
+  Picard/Newton loop, which re-assembles the closure each iteration.
+- Robin closures with time-independent `beta` reuse one factorization for the
+  whole run, with results bit-identical to refactorizing every step.
 - Crank–Nicolson evaluates the explicit half with the old-level closure.
 - In the enthalpy Newton solver, the radiative term is part of the residual, and
   its exact derivative is in the Jacobian.

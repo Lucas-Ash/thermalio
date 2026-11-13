@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 from scipy.spatial import Delaunay
 
-from .geometry import polygon_area_and_centroid
+from .mesh_io import polygon_areas_and_centroids
 
 
 def generate_hexagonal_polygonal_mesh(nx=10, ny=10, spacing=0.2, jitter=0.0, bbox=(-1.5, 1.5, -1.5, 1.5), seed=1):
@@ -56,7 +56,7 @@ def generate_hexagonal_polygonal_mesh(nx=10, ny=10, spacing=0.2, jitter=0.0, bbo
         interior = ~boundary_vertices
         vertices[interior, 0] += rng.uniform(-amplitude, amplitude, size=interior.sum())
         vertices[interior, 1] += rng.uniform(-amplitude, amplitude, size=interior.sum())
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers
 
 
@@ -78,7 +78,7 @@ def generate_square_polygonal_mesh(nx=20, ny=20, bbox=(-1.0, 1.0, -1.0, 1.0)):
                 point_id(i + 1, j + 1),
                 point_id(i, j + 1),
             ])
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers
 
 
@@ -107,7 +107,7 @@ def generate_nonorthogonal_polygonal_mesh(nx=20, ny=20, bbox=(-1.0, 1.0, -1.0, 1
                 point_id(i + 1, j + 1),
                 point_id(i, j + 1),
             ])
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers
 
 
@@ -120,7 +120,7 @@ def generate_nonorthogonal_tiled_polygonal_mesh(nx_tiles=4, ny_tiles=4, bbox=(-1
     vertices, polygons, _ = generate_mixed_polygonal_mesh(nx_tiles=nx_tiles, ny_tiles=ny_tiles, bbox=base_bbox)
     vertices = np.asarray(vertices, dtype=float).copy()
     vertices[:, 0] += skew * (vertices[:, 1] - y_mid)
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers
 
 
@@ -186,7 +186,7 @@ def generate_mixed_polygonal_mesh(nx_tiles=4, ny_tiles=4, bbox=(-1.0, 1.0, -1.0,
                     local_triangles.append((bl, tr, tl))
             for group in local_triangle_groups:
                 polygons.append(polygon_from_triangles(local_triangles, group))
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers
 
 
@@ -248,5 +248,5 @@ def generate_perturbed_quad_mesh(nx=20, ny=20, bbox=(-1.0, 1.0, -1.0, 1.0), ampl
              & (vertices[:, 1] > ymin + tol) & (vertices[:, 1] < ymax - tol))
     h = np.array([(xmax - xmin) / nx, (ymax - ymin) / ny])
     vertices[inner] += amplitude * h * np.random.default_rng(seed).uniform(-1, 1, (inner.sum(), 2))
-    centers = np.array([polygon_area_and_centroid(vertices[poly])[1] for poly in polygons])
+    centers = polygon_areas_and_centroids(vertices, polygons)[1]
     return vertices, polygons, centers

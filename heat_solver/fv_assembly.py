@@ -223,3 +223,38 @@ def identity_rows(K, mask):
     indices[indptr[rows_m]] = rows_m
     data[indptr[rows_m]] = 1.0
     return csr_matrix((data, indices, indptr), shape=K.shape)
+
+
+def replace_rows(K, rows, ptr, cols, vals):
+    """Copy of CSR ``K`` with ``rows`` replaced by given entries.
+
+    Row ``rows[k]`` becomes ``cols[ptr[k]:ptr[k+1]]`` / ``vals[ptr[k]:ptr[k+1]]``
+    (columns sorted).  Same values and pattern as assigning ``lil.rows`` /
+    ``lil.data`` on a LIL copy, without converting the whole matrix to LIL.
+    """
+    K = K.tocsr()
+    if not K.has_sorted_indices:
+        K = K.sorted_indices()
+    n = K.shape[0]
+    rows = np.asarray(rows, dtype=np.intp)
+    ptr = np.asarray(ptr, dtype=np.intp)
+    seg = np.diff(ptr)
+    mask = np.zeros(n, dtype=bool)
+    mask[rows] = True
+    counts = np.diff(K.indptr)
+    new_counts = counts.copy()
+    new_counts[rows] = seg
+    indptr = np.concatenate([[0], np.cumsum(new_counts)]).astype(K.indptr.dtype)
+    indices = np.empty(indptr[-1], dtype=K.indices.dtype)
+    data = np.empty(indptr[-1], dtype=float)
+    row_of = np.repeat(np.arange(n), counts)
+    keep = ~mask[row_of]
+    offset = np.arange(K.nnz) - K.indptr[row_of]
+    dest = indptr[row_of[keep]] + offset[keep]
+    indices[dest] = K.indices[keep]
+    data[dest] = K.data[keep]
+    seg_rows = np.repeat(rows, seg)
+    dest = indptr[seg_rows] + (np.arange(ptr[-1]) - np.repeat(ptr[:-1], seg))
+    indices[dest] = cols
+    data[dest] = vals
+    return csr_matrix((data, indices, indptr), shape=K.shape)

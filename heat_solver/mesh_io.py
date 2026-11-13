@@ -116,10 +116,17 @@ class MeshGeometry:
         return d
 
 
-def compute_geometry(vertices, polygons):
-    """Vectorized computation of :class:`MeshGeometry`."""
+def polygon_areas_and_centroids(vertices, polygons):
+    """Cell areas and centroids, vectorized and bit-identical to per-cell
+    :func:`heat_solver.geometry.polygon_area_and_centroid` (used by the mesh
+    generators and by :func:`compute_geometry`)."""
     verts = np.asarray(vertices, dtype=float)
     offsets, flat = _pack_polygons(polygons)
+    _, _, _, centers, areas = _areas_centroids(verts, offsets, flat)
+    return areas, centers
+
+
+def _areas_centroids(verts, offsets, flat):
     n_cells = len(offsets) - 1
     counts = np.diff(offsets)
     # next vertex within each polygon
@@ -150,6 +157,14 @@ def compute_geometry(vertices, polygons):
         centers = np.column_stack([cx_num, cy_num]) / (6.0 * signed)[:, None]
     centers[degenerate] = np.column_stack([mx, my])[degenerate]
     areas = np.where(degenerate, 0.0, np.abs(signed))
+    return counts, nxt, n_cells, centers, areas
+
+
+def compute_geometry(vertices, polygons):
+    """Vectorized computation of :class:`MeshGeometry`."""
+    verts = np.asarray(vertices, dtype=float)
+    offsets, flat = _pack_polygons(polygons)
+    counts, nxt, n_cells, centers, areas = _areas_centroids(verts, offsets, flat)
 
     # Edges in first-occurrence order (matches the legacy dict construction).
     owner = np.repeat(np.arange(n_cells), counts)

@@ -1,9 +1,11 @@
 import inspect
 
 import numpy as np
-from scipy.sparse import diags, lil_matrix
+from scipy.sparse import csr_matrix, diags, lil_matrix
 from scipy.sparse.linalg import factorized, spsolve
 
+from .factor_cache import FactorCache, frozen_newton
+from .fv_assembly import identity_rows, replace_rows
 from .phase_change import ApparentHeatCapacityModel
 
 
@@ -71,6 +73,10 @@ class CurvilinearHeatSolver:
         self._boundary_data = self._build_boundary_data()
         self._boundary_idx = self._boundary_data["boundary_idx"]
         self.reuse_linear_lhs = bool(reuse_linear_lhs)
+        self._is_boundary_flat = np.zeros(self.N, dtype=bool)
+        self._is_boundary_flat[self._boundary_idx] = True
+        self._flux_rows = None if self.bc_type == "dirichlet" else self._build_flux_row_structure()
+        self._factor_cache = FactorCache()
 
     @staticmethod
     def _dt_schedule(t0, t_end, dt):
@@ -425,6 +431,80 @@ class CurvilinearHeatSolver:
             "y_nodes": self.Y.flatten()[boundary_idx],
         }
 
+    def _build_flux_row_structure(self):
+        """Boundary-row contributions in the order ``_apply_flux_boundary_rows`` adds them.
+
+        Each boundary row is the sum over the components it owns of the
+        geometric normal-derivative coefficients (``alpha_n * d``, fixed) and,
+        for Robin / radiative data, a diagonal term from each component.  The
+        contributions are listed in the legacy accumulation order and summed
+        with ``np.bincount`` (sequential), so the rows match the dict-based
+        assembly bit for bit.
+        """
+        comps = self._boundary_data["components"]
+        rows, cols, static, extra = [], [], [], []
+        for k, comp in enumerate(comps):
+            row = int(comp["owner"])
+            for col, d in comp["deriv_coeffs"].items():
+                rows.append(row); cols.append(int(col)); static.append(float(comp["alpha_n"] * d)); extra.append(-1)
+            if self.bc_type in ("robin", "radiative"):
+                rows.append(row); cols.append(row); static.append(0.0); extra.append(k)
+        rows = np.asarray(rows, dtype=np.int64)
+        cols = np.asarray(cols, dtype=np.int64)
+        keys, slot = np.unique(rows * self.N + cols, return_inverse=True)
+        key_rows = (keys // self.N).astype(np.intp)
+        out_rows, first = np.unique(key_rows, return_index=True)
+        ptr = np.concatenate([first, [keys.size]]).astype(np.intp)
+        owners = np.asarray([c["owner"] for c in comps], dtype=np.intp)
+        return {
+            "slot": slot, "static": np.asarray(static), "extra": np.asarray(extra, dtype=np.intp),
+            "n_slots": keys.size, "rows": out_rows, "ptr": ptr, "cols": (keys % self.N).astype(np.intp),
+            "owners": owners, "owner_slot": np.searchsorted(out_rows, owners),
+            "x": np.asarray([c["x"] for c in comps], dtype=float),
+            "y": np.asarray([c["y"] for c in comps], dtype=float),
+            "normals": np.asarray([c["normal"] for c in comps], dtype=float),
+            "alpha_n": np.asarray([c["alpha_n"] for c in comps], dtype=float),
+        }
+
+    def _flux_boundary_rows(self, t, temperature=None, split_radiative=False):
+        """Vectorized boundary rows: ``(rows, ptr, cols, vals, rhs_vals)`` (see ``_apply_flux_boundary_rows``).
+
+        With ``split_radiative=True`` the temperature-dependent diagonal of a
+        radiative row is left out and returned separately as ``(coeff, const)``
+        per row, for the frozen-Jacobian iteration.
+        """
+        fr = self._flux_rows
+        x, y, normals, alpha_n = fr["x"], fr["y"], fr["normals"], fr["alpha_n"]
+        n_comp = alpha_n.size
+        extra_vals = None
+        if self.bc_type == "neumann":
+            dudn = np.broadcast_to(np.asarray(self._evaluate_bc(x, y, t, normals=normals), dtype=float), (n_comp,))
+            bc_rhs = alpha_n * dudn
+        elif self.bc_type == "flux":
+            bc_rhs = np.broadcast_to(np.asarray(self._evaluate_bc(x, y, t, normals=normals), dtype=float), (n_comp,))
+        elif self.bc_type == "robin":
+            beta, value = self._parse_robin_data(self._evaluate_bc(x, y, t, normals=normals), n_comp)
+            bc_rhs, extra_vals = value, np.asarray(beta, dtype=float)
+        else:
+            if temperature is None:
+                raise ValueError("Radiative boundary conditions require the current temperature iterate.")
+            emissivity, t_inf, sigma = self._parse_radiative_data(self._evaluate_bc(x, y, t, normals=normals), n_comp)
+            t_boundary = np.maximum(np.asarray(temperature, dtype=float)[fr["owners"]], 0.0)
+            coeff = 4.0 * emissivity * sigma * t_boundary**3
+            bc_rhs = 3.0 * emissivity * sigma * t_boundary**4 + emissivity * sigma * np.maximum(t_inf, 0.0) ** 4
+            extra_vals = np.zeros(n_comp) if split_radiative else coeff
+        weights = fr["static"].copy()
+        if extra_vals is not None:
+            has = fr["extra"] >= 0
+            weights[has] = np.asarray(extra_vals, dtype=float)[fr["extra"][has]]
+        vals = np.bincount(fr["slot"], weights=weights, minlength=fr["n_slots"])
+        rhs_vals = np.bincount(fr["owner_slot"], weights=np.asarray(bc_rhs, dtype=float), minlength=fr["rows"].size)
+        out = (fr["rows"], fr["ptr"], fr["cols"], vals, rhs_vals)
+        if split_radiative:
+            per_row = lambda w: np.bincount(fr["owner_slot"], weights=w, minlength=fr["rows"].size)
+            return out, (per_row(coeff), rhs_vals)
+        return out
+
     def _apply_dirichlet_rows(self, lhs, rhs, t):
         bc_vals = np.broadcast_to(
             np.asarray(self.bc_func(self._boundary_data["x_nodes"], self._boundary_data["y_nodes"], t), dtype=float),
@@ -436,6 +516,7 @@ class CurvilinearHeatSolver:
             rhs[row_idx] = value
 
     def _apply_flux_boundary_rows(self, lhs, rhs, t, temperature=None):
+        """Legacy LIL row replacement (reference for ``_flux_boundary_rows``; not used by ``solve``)."""
         components = self._boundary_data["components"]
         if not components:
             return
@@ -494,6 +575,51 @@ class CurvilinearHeatSolver:
             lhs.rows[row] = cols
             lhs.data[row] = [coeffs[col] for col in cols]
             rhs[row] = row_rhs[row]
+
+    def _with_boundary_rows(self, K, rhs, t, temperature=None):
+        """``K`` (CSR) with its boundary rows replaced by the boundary equations; ``rhs`` updated in place."""
+        if self.bc_type == "dirichlet":
+            bc_vals = np.broadcast_to(
+                np.asarray(self.bc_func(self._boundary_data["x_nodes"], self._boundary_data["y_nodes"], t), dtype=float),
+                self._boundary_idx.shape,
+            )
+            rhs[self._boundary_idx] = bc_vals
+            return identity_rows(K, self._is_boundary_flat)
+        rows, ptr, cols, vals, rhs_vals = self._flux_boundary_rows(t, temperature=temperature)
+        rhs[rows] = rhs_vals
+        return replace_rows(K, rows, ptr, cols, vals)
+
+    def _radiative_step(self, u, rhs, t_next, dt, a0, theta, lin_key):
+        """Implicit step with radiative boundary rows by frozen-Jacobian Newton.
+
+        The boundary rows are ``alpha du/dn + eps sigma u^4 = eps sigma T_inf^4``;
+        the Picard loop linearizes them as ``alpha du/dn + 4 eps sigma T^3 u =
+        3 eps sigma T^4 + eps sigma T_inf^4`` and refactorizes every iteration.
+        Here the derivative rows are fixed (``base``), the diagonal ``B(v)`` and
+        ``b(v)`` carry the linearization, and one factorization is reused
+        (:func:`heat_solver.factor_cache.frozen_newton`).
+        """
+        mass = diags(self._effective_heat_capacity(u), format="csr")
+        lead = mass if a0 == 1.0 else a0 * mass
+        (rows, ptr, cols, vals, _), _ = self._flux_boundary_rows(t_next, temperature=u, split_radiative=True)
+        base = replace_rows(lead - theta * dt * self.A, rows, ptr, cols, vals)
+        rhs_fixed = np.array(rhs, dtype=float)
+        rhs_fixed[rows] = 0.0
+
+        def boundary(v):
+            _, (coeff, const) = self._flux_boundary_rows(t_next, temperature=v, split_radiative=True)
+            diag = np.zeros(self.N)
+            diag[rows] = coeff
+            b = np.zeros(self.N)
+            b[rows] = const
+            return diags(diag, format="csr"), b
+
+        u_new, _, _ = frozen_newton(
+            u0=u, boundary=boundary, apply_base=lambda v: base @ v, rhs=rhs_fixed, coef=1.0,
+            build_jacobian=lambda B: (base + B).tocsr(), cache=self._factor_cache,
+            key=("radiative", lin_key, self.time_scheme), deps=(self.A, self.M_diag),
+            tol=float(self.nonlinear_options["tol"]), max_iters=int(self.nonlinear_options["max_iters"]))
+        return u_new
 
     def _dirichlet_lhs_csr(self, dt_eff, is_boundary_flat, mass_coeff=1.0):
         theta = 0.5 if self.time_scheme == "crank_nicolson" else 1.0
@@ -568,6 +694,10 @@ class CurvilinearHeatSolver:
                 dt_key = lin_keys[k]
                 rhs[self._boundary_idx] = bc_vals
                 u = factor_by_dt[dt_key](rhs)
+            elif (self.bc_type == "radiative" and self.phase_change_model is None
+                  and float(self.nonlinear_options["relaxation"]) == 1.0
+                  and self.nonlinear_options.get("radiative_jacobian", "frozen") == "frozen"):
+                u = self._radiative_step(u, rhs, t_next, dt_eff, a0, theta, lin_keys[k])
             elif requires_nonlinear:
                 max_iters = int(self.nonlinear_options["max_iters"])
                 tol = float(self.nonlinear_options["tol"])
@@ -585,12 +715,8 @@ class CurvilinearHeatSolver:
                         )
                         rhs_iter = (mass_diag + 0.5 * dt_eff * self.A) @ u + 0.5 * dt_eff * (source_prev + source_vals)
                     lead = mass_diag if a0 == 1.0 else a0 * mass_diag
-                    lhs = (lead - theta * dt_eff * self.A).copy().tolil()
-                    if self.bc_type == "dirichlet":
-                        self._apply_dirichlet_rows(lhs, rhs_iter, t_next)
-                    else:
-                        self._apply_flux_boundary_rows(lhs, rhs_iter, t_next, temperature=u_iter)
-                    u_raw = spsolve(lhs.tocsr(), rhs_iter)
+                    lhs = self._with_boundary_rows(lead - theta * dt_eff * self.A, rhs_iter, t_next, u_iter)
+                    u_raw = spsolve(lhs, rhs_iter)
                     if relaxation != 1.0:
                         u_next = relaxation * u_raw + (1.0 - relaxation) * u_iter
                     else:
@@ -608,12 +734,19 @@ class CurvilinearHeatSolver:
                 u = u_iter
             else:
                 lead = self.M_diag if a0 == 1.0 else a0 * self.M_diag
-                lhs = (lead - theta * dt_eff * self.A).copy().tolil()
                 if self.bc_type == "dirichlet":
-                    self._apply_dirichlet_rows(lhs, rhs, t_next)
+                    lhs = self._with_boundary_rows(lead - theta * dt_eff * self.A, rhs, t_next)
+                    u = spsolve(lhs, rhs)
                 else:
-                    self._apply_flux_boundary_rows(lhs, rhs, t_next)
-                u = spsolve(lhs.tocsr(), rhs)
+                    # Linear boundary rows (Neumann / flux / Robin): reuse the factorization while
+                    # the rows are unchanged (time-independent beta); identical to a fresh solve.
+                    rows, ptr, cols, vals, rhs_vals = self._flux_boundary_rows(t_next)
+                    rhs[rows] = rhs_vals
+                    signature = csr_matrix((vals, cols, ptr), shape=(rows.size, self.N))
+                    solve = self._factor_cache.factor(
+                        ("rows", float(dt_eff), a0, self.time_scheme), (self.A, self.M_diag), signature,
+                        lambda L=lead, k=dt_eff: replace_rows(L - theta * k * self.A, rows, ptr, cols, vals))
+                    u = solve(rhs)
             t = t_next
 
         return t, u.reshape((self.ny, self.nx))

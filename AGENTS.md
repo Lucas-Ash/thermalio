@@ -28,6 +28,15 @@ with support for:
   across calls while `solver.A` is the operator it assembled; anything that
   replaces `solver.A` invalidates the cache. Do not reintroduce per-face or
   per-row Python loops (LIL row edits) in hot paths.
+  Matrices that contain a boundary closure (Robin, radiative) go through
+  `heat_solver/factor_cache.py`: `FactorCache` reuses a factorization while the
+  operator and the closure values are unchanged (`spsolve_factor` reproduces
+  `spsolve` bit for bit, so Robin results are unchanged), and radiative
+  boundaries use frozen-Jacobian Newton (`frozen_newton`; full Newton with
+  `nonlinear_options={"radiative_jacobian": "newton"}`). The polygonal,
+  curvilinear and transport solvers all use it (`tests/test_factor_cache.py`).
+  The gradient stencils are built batched by neighbour count, bit-identical to
+  the per-cell `_build_gradient_reconstruction_loop`.
 
 - `heat_solver/triangular.py`
   Vertex-centered P1 solver on Delaunay meshes.
@@ -60,7 +69,9 @@ with support for:
   `"bdf2"` (`tests/test_bdf2.py`).
 
 - `heat_solver/meshes.py`
-  Mesh generators.
+  Mesh generators. Cell centroids come from
+  `mesh_io.polygon_areas_and_centroids` (vectorized, bit-identical to per-cell
+  `polygon_area_and_centroid`); do not add per-cell loops.
   Includes:
   - hexagonal polygonal mesh
   - square polygonal mesh
@@ -261,8 +272,10 @@ If normals are accepted:
 
 `alpha * du/dn = -eps * sigma * (u^4 - T_inf^4)`; the callback returns
 `(eps, T_inf)`, `(eps, T_inf, sigma)` or a dict (`sigma` defaults to the SI
-Stefan-Boltzmann constant). Implicit steppers iterate the Newton-linearized
-boundary closure to convergence.
+Stefan-Boltzmann constant). Implicit steppers iterate the linearized boundary
+closure to convergence with a frozen Jacobian (one factorization reused across
+iterations and steps, refreshed when contraction slows); results agree with
+full Newton to `nonlinear_options["tol"]`.
 
 ### Source term
 
