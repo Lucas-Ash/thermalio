@@ -246,6 +246,13 @@ See `docs/boundary_conditions.md`.
    latent-heat jump `-L * band area` (dt-independent), an interior capacity
    defect that shrinks with dt, and unconverged Picard residuals; the enthalpy
    solver closes to 1e-16.  Report: `direction_ABC_bounds_flux_crosscode_report.tex`.
+   *Update 2026-11:* the Stefan, enthalpy and apparent-capacity solvers accept
+   `dirichlet_mode="face"`. Every cell is then an unknown, and the boundary heat
+   flow is the face closure flux `b − B u`, which the audits use directly. The
+   band latent-heat jump disappears. On a 12×12 cold-wall probe, the hyperbolic
+   Stefan audit residual falls from 67% to 3.8% of the enthalpy change; what remains
+   is the capacity defect and the unconverged Picard steps
+   (`tests/test_face_dirichlet_solvers.py`).
 
 8. **Higher-dimensional design-of-experiments sweeps.**  Step 8 now provides a
    sparse one-at-a-time benchmark matrix over the main Direction C axes.  A

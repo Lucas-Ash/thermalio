@@ -106,6 +106,11 @@ class _TransportBase:
       pulses (laser/contact heating) in the Cattaneo model.
     - ``'robin'``:     ``bc_func(x, y, t[, nx, ny]) -> (beta, value)`` for
       ``alpha * du/dn + beta * u = value``.
+
+    ``dirichlet_mode`` (forwarded to the base solver) chooses how Dirichlet data
+    are imposed: ``'band'`` (default) holds the boundary cells at the data,
+    ``'face'`` imposes them on the boundary faces (every cell an unknown), as
+    FiPy does; see ``docs/boundary_conditions.md``.
     """
 
     _BC_TYPES = ("dirichlet", "neumann", "robin", "flux", "radiative")
@@ -154,10 +159,17 @@ class _TransportBase:
         ):
             raise TypeError("phase_change_model must be an ApparentHeatCapacityModel instance or None.")
         self.phase_change_options = self._base.phase_change_options
-        # Robin data and the (linearized, temperature-dependent) radiative closure
-        # change the LHS between steps; Dirichlet rows are replaced and
-        # Neumann/flux data only feed the right-hand side.
-        self._bc_lhs_constant = self.bc_type not in ("robin", "radiative")
+        # dirichlet_mode="band" (default) holds the boundary cells at the data
+        # with identity rows; "face" imposes it on the boundary faces through the
+        # closure alpha_n (g - v) / d (Robin with beta -> infinity), as FiPy does.
+        self.dirichlet_mode = self._base.dirichlet_mode
+        self._band_dirichlet = self._base._band_dirichlet
+        self._face_dirichlet = self.bc_type == "dirichlet" and not self._band_dirichlet
+        self._face_closure = None
+        # Robin data, the (linearized, temperature-dependent) radiative closure and
+        # the face-Dirichlet closure enter the LHS; band Dirichlet rows are replaced
+        # and Neumann/flux data only feed the right-hand side.
+        self._bc_lhs_constant = self.bc_type not in ("robin", "radiative") and not self._face_dirichlet
         # ...but Robin data with time-independent beta leave it unchanged, and the radiative
         # Jacobian changes slowly: reuse factorizations (heat_solver/factor_cache.py).
         self._factor_cache = FactorCache()
@@ -274,12 +286,18 @@ class _TransportBase:
     def _boundary_system(self, t, temperature=None):
         """Boundary closure ``(B, b)`` so that ``A_total = A + B`` and ``rhs += b``.
 
-        ``B`` is ``None`` when the boundary adds no matrix coupling (Dirichlet
-        rows are replaced instead; Neumann/flux data only contribute to ``b``).
+        ``B`` is ``None`` when the boundary adds no matrix coupling (band
+        Dirichlet rows are replaced instead; Neumann/flux data only contribute to ``b``).
         Radiative closures are Newton-linearized about ``temperature``.
         """
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             return None, np.zeros(self.M)
+        if self._face_dirichlet:
+            # Constant matrix part (built once); only the data g(t) change.
+            if self._face_closure is None:
+                self._face_closure = self._base._face_dirichlet_closure()
+            fc = self._face_closure
+            return fc["B"], self._base._face_dirichlet_rhs(t, fc)
         if self.bc_type in ("neumann", "flux"):
             _, b = self._base._assemble_boundary_system(t)
             return None, b
@@ -290,10 +308,10 @@ class _TransportBase:
         return self._base._assemble_boundary_system(t)  # robin
 
     def _boundary_solve(self, lhs_base, rhs_base, t, coef, u_guess, factor=None, max_iters=60, tol=1e-12):
-        """Solve ``(lhs_base + coef B) u = rhs_base + coef b`` for non-Dirichlet boundaries.
+        """Solve ``(lhs_base + coef B) u = rhs_base + coef b`` for every closure (all but band Dirichlet).
 
         Linear boundary types need one solve (``factor`` reuses a factorization
-        when the LHS is constant).  For Robin data the factorization of
+        when the LHS is constant).  For Robin and face-Dirichlet data the factorization of
         ``lhs_base + coef B`` is reused while ``B`` is unchanged (same values,
         so the result equals a fresh solve bit for bit).  Radiative boundaries
         are nonlinear: frozen-Jacobian Newton on the boundary nonlinearity until
@@ -388,7 +406,7 @@ class HyperbolicHeatSolver(_TransportBase):
         c2 = self.tau / (dt * dt)
         c1 = 1.0 / (2.0 * dt)
         base_lhs = ((c2 + c1) * self.area_diag + self.A).tocsr()
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
         elif self._bc_lhs_constant:
             factor = factorized(base_lhs.tocsc())
@@ -402,7 +420,7 @@ class HyperbolicHeatSolver(_TransportBase):
             rhs = self.cell_areas * q_next + self.cell_areas * (
                 2.0 * c2 * u_n + (c1 - c2) * u_nm1
             )
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u_np1 = factor(rhs)
@@ -447,7 +465,7 @@ class HyperbolicHeatSolver(_TransportBase):
             t_next = t + dt
             q_next = self._source(t_next)
             rhs_base = self.cell_areas * q_next + self.cell_areas * (2.0 * c2 * u_n)
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs_base[bidx] = bc[bidx]
             u_iter = u_n.copy()
@@ -461,7 +479,7 @@ class HyperbolicHeatSolver(_TransportBase):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(self.cell_areas * (c2 + c1 * cp_eff), format="csr") + self.A).tocsr()
                 rhs = rhs_base + self.cell_areas * (c1 * cp_eff - c2) * u_nm1
-                if self.bc_type == "dirichlet":
+                if self._band_dirichlet:
                     lhs = self._apply_dirichlet(lhs)
                     rhs[bidx] = bc[bidx]
                 else:
@@ -547,7 +565,7 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
             # contribution flow * u_f with u_f = u_c + d du/dn: the u_c part is
             # constant (here), the data part enters the RHS in _boundary_system.
             self.C = (self.C + self._convection_boundary_closure()).tocsr()
-        elif self.bc_type in ("robin", "radiative") and self._boundary_flow.size:
+        elif (self.bc_type in ("robin", "radiative") or self._face_dirichlet) and self._boundary_flow.size:
             donor = np.where(self._face_value_mask, 0.0, self._boundary_flow)
             cells = faces["cells"]
             self.C = (self.C + diags(np.bincount(cells, weights=donor, minlength=self.M))).tocsr()
@@ -621,11 +639,15 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
         only inflow faces use it; outflow faces keep the donor-cell value.
         """
         B, b = super()._boundary_system(t, temperature=temperature)
-        if self.bc_type == "dirichlet" or self._boundary_flow.size == 0:
+        if self._band_dirichlet or self._boundary_flow.size == 0:
             return B, b
         from scipy.sparse import coo_matrix
 
         cells = self._base.boundary_faces["cells"]
+        if self._face_dirichlet:  # u_f = g: the convective flux of every face-value face is data
+            flow = np.where(self._face_value_mask, self._boundary_flow, 0.0)
+            g = self._base._face_dirichlet_values(t, self._face_closure)
+            return B, b - np.bincount(cells, weights=flow * g, minlength=self.M)
         T, _, _, lam, mu = self._base._boundary_face_relations(t, temperature=temperature)
         flow = np.where(self._face_value_mask, self._boundary_flow, 0.0)
         b = b - np.bincount(cells, weights=flow * mu, minlength=self.M)
@@ -656,7 +678,7 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
         K = (self.A + self.C).tocsr()
         theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
         base_lhs = (self.area_diag + theta * dt * K).tocsr()
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
         elif self._bc_lhs_constant:
             factor = factorized(base_lhs.tocsc())
@@ -674,7 +696,7 @@ class AdvectionDiffusionHeatSolver(_TransportBase):
                 rhs = (self.area_diag - 0.5 * dt * K) @ u + 0.5 * dt * (
                     self.cell_areas * (q_next + q_prev)
                 )
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u = factor(rhs)
@@ -738,7 +760,7 @@ class FractionalHeatSolver(_TransportBase):
 
         sigma = dt ** (-self.beta) / gamma(2.0 - self.beta)
         base_lhs = (sigma * self.area_diag + self.A).tocsr()
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
         elif self._bc_lhs_constant:
             factor = factorized(base_lhs.tocsc())
@@ -759,7 +781,7 @@ class FractionalHeatSolver(_TransportBase):
                 hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
             g = history[n] - hist_sum  # = u^n - sum_{k>=1} b_k (u^{n+1-k} - u^{n-k})
             rhs = self.cell_areas * q_next + sigma * (self.cell_areas * g)
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u_np1 = factor(rhs)
@@ -792,7 +814,7 @@ class FractionalHeatSolver(_TransportBase):
                 hist_sum += weights[k] * (history[n + 1 - k] - history[n - k])
             g = history[n] - hist_sum
             rhs_base = self.cell_areas * q_next
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs_base[bidx] = bc[bidx]
             u_iter = history[n].copy()
@@ -806,7 +828,7 @@ class FractionalHeatSolver(_TransportBase):
                 cp_eff = self._effective_heat_capacity(u_iter)
                 lhs = (diags(sigma * self.cell_areas * cp_eff, format="csr") + self.A).tocsr()
                 rhs = rhs_base + sigma * self.cell_areas * cp_eff * g
-                if self.bc_type == "dirichlet":
+                if self._band_dirichlet:
                     lhs = self._apply_dirichlet(lhs)
                     rhs[bidx] = bc[bidx]
                 else:
@@ -934,7 +956,7 @@ class ReactionDiffusionHeatSolver(_TransportBase):
         K = (self.A + self.R).tocsr()
         theta = 1.0 if self.time_scheme == "backward_euler" else 0.5
         base_lhs = (self.area_diag + theta * dt * K).tocsr()
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             factor = factorized(self._apply_dirichlet(base_lhs).tocsc())
         elif self._bc_lhs_constant:
             factor = factorized(base_lhs.tocsc())
@@ -952,7 +974,7 @@ class ReactionDiffusionHeatSolver(_TransportBase):
                 rhs = (self.area_diag - 0.5 * dt * K) @ u + 0.5 * dt * (
                     self.cell_areas * (q_next + q_prev)
                 )
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = self._bc_values(t_next)
                 rhs[self._boundary_idx] = bc[self._boundary_idx]
                 u = factor(rhs)

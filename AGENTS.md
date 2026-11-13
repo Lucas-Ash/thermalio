@@ -250,7 +250,12 @@ MPLCONFIGDIR=/tmp/matplotlib /home/user/thermalio/.venv/bin/python -m pytest tes
 `PolygonalHeatSolver(dirichlet_mode="band")` (default) holds the boundary cells at
 the data; `dirichlet_mode="face"` imposes it on the boundary faces as FiPy does
 (every cell an unknown; not with the quadratic flux). Drivers forward
-`dirichlet_mode`. Tests: `tests/test_face_dirichlet.py`.
+`dirichlet_mode`. The transport models (incl. Stefan variants), the enthalpy /
+apparent-capacity solvers and `AFCMonotoneSolver` accept the same option and
+route face data through the base solver's closure (`_face_dirichlet_closure`);
+code that special-cases Dirichlet should test `_band_dirichlet`, not
+`bc_type == "dirichlet"`. Tests: `tests/test_face_dirichlet.py`,
+`tests/test_face_dirichlet_solvers.py`.
 
 ### Neumann
 

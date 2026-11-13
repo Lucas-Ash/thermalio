@@ -42,8 +42,8 @@ prioritized roadmap.
   geometric NTPFA; sharper local source envelopes.  (Sign-changing-source
   limiters and the second-order quadratic flux landed 2026-11.)
 - **C:** second-order (Newmark-averaged) Cattaneo time stepping, adaptivity for
-  the apparent-capacity and fractional solvers, consistent Dirichlet initial
-  data (removes the band latent-heat jump), sharp-interface tracking.
+  the apparent-capacity and fractional solvers, sharp-interface tracking.
+  (The band latent-heat jump can now be avoided with `dirichlet_mode="face"`.)
   (Enthalpy-primary formulation, adaptive stepping and boundary-flux audits
   landed 2026-11.)
 - **D:** field parameters and Robin/radiative boundaries in the nonlinear

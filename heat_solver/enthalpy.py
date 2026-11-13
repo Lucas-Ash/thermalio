@@ -281,7 +281,7 @@ class EnthalpyStefanSolver(_TransportBase):
         self.adaptive = adaptive
         self.raise_on_nonconvergence = bool(raise_on_nonconvergence)
         self._interior = np.ones(self.M, dtype=bool)
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             self._interior[self._boundary_idx] = False
 
     # -- helpers -----------------------------------------------------------
@@ -297,7 +297,7 @@ class EnthalpyStefanSolver(_TransportBase):
         return K, b
 
     def _residual(self, h, gamma, rhs_hist, K, b, dir_h):
-        """Nonlinear residual; Dirichlet rows read ``H_i - H(g_i)``.
+        """Nonlinear residual; band Dirichlet rows read ``H_i - H(g_i)`` (face Dirichlet is in ``K, b``).
 
         For radiative boundaries the closure is re-assembled at the current
         temperature: its tangent form satisfies ``B(T) T - b(T) = -q_rad(T)``
@@ -313,14 +313,14 @@ class EnthalpyStefanSolver(_TransportBase):
         return res, temp
 
     def jacobian(self, h, gamma, K):
-        """Newton Jacobian ``gamma diag(area) + K diag(dT/dH)`` with identity Dirichlet rows."""
+        """Newton Jacobian ``gamma diag(area) + K diag(dT/dH)`` with identity rows on band Dirichlet cells."""
         temp = self.temperature(h)
         if self.bc_type == "radiative":
             # diag(B(T)) = -dq_rad/dT, so (A + B(T)) diag(dT/dH) is the exact Jacobian.
             K, _ = self._operator(self._step_time, temperature=temp)
         dTdH = 1.0 / np.asarray(self.model.effective_heat_capacity(temp), dtype=float)
         J = (diags(gamma * self.cell_areas, format="csr") + K @ diags(dTdH, format="csr")).tocsr()
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             J = self._apply_dirichlet(J)
         return J
 
@@ -425,7 +425,7 @@ class EnthalpyStefanSolver(_TransportBase):
             self._step_time = t_next
             K, b = self._operator(t_next, temperature=self.temperature(h_n))
             dir_h = None
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 dir_h = self.enthalpy(self._bc_values(t_next))
             guess = h_n + (k_try / k_prev) * (h_n - h_nm1) if have_two_levels else h_n.copy()
             if dir_h is not None:
@@ -544,7 +544,7 @@ class ApparentCapacityPicardSolver(_TransportBase):
             opts.update(dict(picard_options))
         self.picard_options = opts
         self._interior = np.ones(self.M, dtype=bool)
-        if self.bc_type == "dirichlet":
+        if self._band_dirichlet:
             self._interior[self._boundary_idx] = False
 
     def solve(self, u0, t0, t_end):
@@ -566,7 +566,7 @@ class ApparentCapacityPicardSolver(_TransportBase):
             q = self._source(t_next)
             B, b = self._boundary_system(t_next, temperature=u)
             K = self.A if B is None else (self.A + B).tocsr()
-            bc = self._bc_values(t_next) if self.bc_type == "dirichlet" else None
+            bc = self._bc_values(t_next) if self._band_dirichlet else None
             u_iter = u.copy()
             accel = _AndersonAccelerator(depth) if depth > 0 else None
             converged = False

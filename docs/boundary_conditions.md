@@ -38,7 +38,10 @@ lacked `flux`, and `drivers.run_test` rejected non-Dirichlet Delaunay cases.
 
 ## Dirichlet on faces or on a band of cells
 
-`PolygonalHeatSolver(..., dirichlet_mode=...)`:
+`dirichlet_mode=...` on every cell-centred solver: `PolygonalHeatSolver`, the transport
+models (`HyperbolicHeatSolver`, `FractionalHeatSolver`, `AdvectionDiffusionHeatSolver`,
+`ReactionDiffusionHeatSolver`, `HyperbolicStefanSolver`, `FractionalStefanSolver`),
+`EnthalpyStefanSolver`, `ApparentCapacityPicardSolver` and `AFCMonotoneSolver`:
 
 - **`"band"`** (default). The boundary cells are held at the data at their centroids
   (`u_c = g(x_c)`), with identity rows in the matrix.
@@ -50,12 +53,63 @@ lacked `flux`, and `drivers.run_test` rejected non-Dirichlet Delaunay cases.
   - On Cartesian meshes it reproduces FiPy to 4e-14 (`tests/test_face_dirichlet.py`).
   - It is second order on square, skewed, hexagonal and tiled meshes.
 
-Both modes are second order and, on the cross-code problems, about equally accurate:
-8.33e-5 (band) against 8.34e-5 (face) on the isotropic problem at n = 64. Face mode
-differs in two ways:
+Both modes are second order. On Cartesian meshes they are about equally accurate:
+8.33e-5 (band) against 8.34e-5 (face) on the isotropic cross-code problem at n = 64,
+and within 1.5% of each other for every solver in the table below. First-order upwind
+advection is the exception: its face-mode error is 14% larger. On skewed meshes (skew 0.3)
+face mode has a larger error constant: 3x on the sine-mode problem, 2x on the Pennes
+problem. The cause is the one-sided least-squares gradient in the boundary cells,
+which the face closure uses for its tangential correction.
+
+Face mode differs in three more ways:
 - the boundary cells carry real errors, as in FiPy;
 - the boundary heat flow is the closure flux itself, with no band reaction to
-  reconstruct.
+  reconstruct;
+- in phase-change runs, boundary cells are not clamped to the data, so none of
+  them jumps through the mushy interval in a single step.
+
+### Face mode in the other solvers
+
+The face closure `(B, b)` is constant in `B` and linear in the data, so every solver
+handles it the way it handles Robin data (`heat_solver/transport.py`,
+`heat_solver/enthalpy.py`, `heat_solver/afc.py`):
+
+- **Transport models.** `B` is built once per solver. The factorization of
+  `lhs + B` is reused across steps (`FactorCache`), and the Picard loops of the
+  Stefan variants add `B` like any closure.
+- **Advection–diffusion.** The convective boundary flux uses `u_f = g` on every
+  face (central) or on inflow faces only (upwind; outflow faces keep the donor
+  cell, so the scheme stays monotone).
+- **Enthalpy and apparent-capacity solvers.** `B` and `b` enter `K` and the
+  residual, and there are no identity rows. The per-step energy balance then
+  covers the whole domain.
+- **AFC.** The closure is used without the tangential correction (`B` diagonal,
+  non-negative), so `A_L + B` stays an M-matrix. The face data join the global
+  bounds, the source envelope and the local bounds of boundary cells. The limited
+  solution then stays within the initial and face data.
+- **Energy audits** (`heat_solver/boundary_flux.py`). Both audits use the closure
+  flux `b − B u` as the boundary heat flow.
+
+Measured with backward Euler on the standard problems (`tests/test_face_dirichlet_solvers.py`,
+relative L² error at n = 32, square mesh):
+
+| solver | band | face | face order (16→32) |
+|---|---|---|---|
+| Cattaneo | 5.83e-6 | 5.83e-6 | 2.03 |
+| Caputo fractional | 1.01e-5 | 1.02e-5 | 2.05 |
+| Advection–diffusion (central) | 1.05e-5 | 1.07e-5 | 1.99 |
+| Pennes | 8.73e-6 | 8.74e-6 | 1.98 |
+| Enthalpy / apparent capacity (L = 0) | 1.026e-4 | 1.030e-4 | 2.00 |
+| AFC (global and local limiters) | 1.026e-4 | 1.030e-4 | 2.00 |
+
+In the hyperbolic Stefan audit of a cold-wall probe, the band's latent-heat jump term
+(`−L × band area`) disappears. The audit residual falls from 67% of the enthalpy
+change in band mode to 3.8% in face mode. What remains is the apparent-capacity
+defect, plus the residual of the Picard steps that did not converge.
+
+The curvilinear and triangular solvers do not need the option. Their unknowns are
+grid nodes and mesh vertices, and the boundary unknowns lie on the boundary, so
+Dirichlet data are already imposed there.
 
 ## Discretization
 
@@ -168,7 +222,6 @@ Physical checks in `tests/test_boundary_conditions.py`:
   for the linear adjoint, and Dirichlet and flux for the fractional / enthalpy
   adjoints. Radiative adjoints are not implemented.
 - **Dirichlet on cell-centred solvers.** These impose it on the boundary-cell band by
-  default. `PolygonalHeatSolver` also offers `dirichlet_mode="face"` (section below).
-  It is not available with cell-averaged unknowns (`flux_discretization="quadratic"`),
-  where it would be first order. The transport, enthalpy and AFC solvers use the band
-  only.
+  default. Every one of them also offers `dirichlet_mode="face"` (section above). It is
+  not available with cell-averaged unknowns (`flux_discretization="quadratic"`), where it
+  would be first order. On skewed meshes its error constant is 2–3x the band's.

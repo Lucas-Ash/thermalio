@@ -1106,13 +1106,16 @@ class PolygonalHeatSolver:
         return {"B": B, "w": w, "cells": faces["cells"], "lengths": faces["lengths"],
                 "midpoints": faces["midpoints"], "normals": faces["normals"]}
 
+    def _face_dirichlet_values(self, t, fc):
+        """Dirichlet data ``g`` at the boundary-face midpoints at time ``t``."""
+        mid = fc["midpoints"]
+        data = self._evaluate_bc(mid[:, 0], mid[:, 1], t, normals=fc["normals"])
+        return np.broadcast_to(np.asarray(data, dtype=float), (fc["cells"].size,))
+
     def _face_dirichlet_rhs(self, t, fc):
         """Right-hand side of the face-Dirichlet closure at time ``t`` (same arithmetic as
         ``_assemble_boundary_system``, so results are unchanged)."""
-        mid = fc["midpoints"]
-        data = self._evaluate_bc(mid[:, 0], mid[:, 1], t, normals=fc["normals"])
-        g = np.broadcast_to(np.asarray(data, dtype=float), (fc["cells"].size,))
-        c = fc["w"] * g
+        c = fc["w"] * self._face_dirichlet_values(t, fc)
         return np.bincount(fc["cells"], weights=fc["lengths"] * c, minlength=self.M)
 
     def _boundary_factor(self, key, B, build, stats):

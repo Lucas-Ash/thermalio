@@ -129,6 +129,15 @@ source. Radiative runs re-assemble the closure for the predictor and the
 limited step. Tests: `tests/test_boundary_conditions.py` (relaxation stays in
 `[T_inf, max u0]`, second-order convergence for all types).
 
+### Update (2026-11): face Dirichlet in AFC
+
+`AFCMonotoneSolver(dirichlet_mode="face")` imposes Dirichlet data on the boundary
+faces through the diagonal closure `alpha_n (g - u_c) / d`, with no tangential
+correction. `A_L + B` is still an M-matrix, and the face data enter the global,
+envelope and local bounds. On a skewed mesh with the reconstructed flux,
+discontinuous face data and a hot block stay within `[0, 1]` for the global, local
+and source-envelope limiters (`tests/test_face_dirichlet_solvers.py`).
+
 ## Design sketch
 - Landed: `heat_solver/dmp.py`; `monotone` flag in `heat_solver/polygonal.py`
   (`_apply_monotone` applied to each assembled diffusion matrix).

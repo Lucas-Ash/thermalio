@@ -1,7 +1,8 @@
 """Consistent boundary-flux reconstruction for Dirichlet energy audits.
 
-Thermalio's cell-centred solvers impose Dirichlet data by replacing the
-equations of the boundary-cell band ``B`` with ``u_i = g_i``.  The heat that
+Thermalio's cell-centred solvers impose Dirichlet data by default by replacing
+the equations of the boundary-cell band ``B`` with ``u_i = g_i``
+(``dirichlet_mode="band"``).  The heat that
 enters or leaves the domain through ``partial Omega`` is therefore not a
 quantity the solver computes -- earlier Direction C audits *inferred* it from
 the enthalpy change, which makes the energy audit tautological.
@@ -26,6 +27,11 @@ so ``E_flux = sum_n dt * sum_B r^n`` closes the scheme's own balance to the
 nonlinear-solver tolerance.  Comparing it with the *enthalpy* change then
 measures what the scheme gets wrong (for apparent-capacity schemes: the
 latent-heat energy defect), which is the stronger audit Direction C asked for.
+
+With ``dirichlet_mode="face"`` every cell is an unknown and the boundary heat
+flow is the face closure flux ``b - B u`` the solver itself computes; the
+audits then use it directly (there is no band, so the "interior" balance is the
+whole-domain balance).
 
 Functions
 ---------
@@ -95,8 +101,13 @@ def hyperbolic_stefan_flux_audit(solver, model):
     us = [hist["u_start"]] + list(hist["u"])  # us[k] = u^{k-1}
     times = hist["t"]
     n_steps = len(hist["capacity"])
+    face = not solver._band_dirichlet
+    # Band mode: the boundary cells are clamped and their residual is the boundary
+    # flow.  Face mode: every cell is an unknown and the boundary flow is the face
+    # closure flux b - B u itself (computed by the solver, not reconstructed).
     interior = np.ones(solver.M, dtype=bool)
-    interior[bidx] = False
+    if not face:
+        interior[bidx] = False
     flux_per_step, source_per_step, capacity_work, band_flux_per_step = [], [], 0.0, []
     nonlinear_residual = 0.0
     capacity_work_interior = 0.0
@@ -109,14 +120,20 @@ def hyperbolic_stefan_flux_audit(solver, model):
         q = solver._source(times[n + 1])
         time_term = area * (tau * d2 + cap * d1)
         residual = time_term + A @ u_next - area * q
-        r_b = residual[bidx]
+        if face:
+            B, b = solver._boundary_system(times[n + 1])
+            inflow = b - B @ u_next  # closure flux into each boundary cell
+            residual = residual - inflow
+            r_b = inflow[bidx]
+        else:
+            r_b = residual[bidx]
         nonlinear_residual += dt * float(np.sum(residual[interior]))
         flux_per_step.append(float(np.sum(r_b)))
         per_cell_flux += dt * r_b
         source_per_step.append(float(np.sum(area * q)))
         capacity_work += dt * float(np.sum(area * cap * d1))
         capacity_work_interior += dt * float(np.sum((area * cap * d1)[interior]))
-        band_flux_per_step.append(band_interface_flux(A, u_next, bidx))
+        band_flux_per_step.append(float(np.sum(r_b)) if face else band_interface_flux(A, u_next, bidx))
     flux_energy = dt * float(np.sum(flux_per_step))
     source_energy = dt * float(np.sum(source_per_step))
     u_end, u_endm1, u_0, u_m1 = us[-1], us[-2], us[1], us[0]
@@ -194,16 +211,16 @@ def enthalpy_solver_flux_audit(solver):
         temp = solver.temperature(H[n + 1])
         K, b = solver._operator(times[n + 1], temperature=temp)
         residual = area * (gamma * H[n + 1] - p * H[n] - s * h_prev2 - q) + K @ temp - b
-        r_b = residual[bidx] if solver.bc_type == "dirichlet" else np.zeros(0)
+        r_b = residual[bidx] if solver._band_dirichlet else np.zeros(0)
         flux.append(k * float(np.sum(r_b)))
         if r_b.size:
             per_cell += k * r_b
         src.append(k * float(np.sum(area * q)))
-        if solver.bc_type == "dirichlet":
+        if solver._band_dirichlet:
             bnd.append(k * float(np.sum(b)))
         else:
-            # Natural boundaries: the boundary inflow is sum(b - B T) (Robin /
-            # radiative closures carry a temperature-dependent part in K); the
+            # Natural boundaries and face Dirichlet: the boundary inflow is sum(b - B T)
+            # (Robin / radiative / face-Dirichlet closures carry a part in K); the
             # conservative interior part of K sums to zero.
             bnd.append(k * float(np.sum(b) - np.sum(K @ temp)))
     delta_e = float(np.sum(area * (H[-1] - H[0])))

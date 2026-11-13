@@ -98,6 +98,7 @@ class AFCMonotoneSolver:
         max_iters=50,
         tol=1e-10,
         bc_type="dirichlet",
+        dirichlet_mode="band",
     ):
         from .boundary_conditions import normalize_bc_type
 
@@ -107,7 +108,13 @@ class AFCMonotoneSolver:
             bc_func=bc_func, source_func=source_func,
             flux_discretization=flux_discretization,
             nonorthogonal_correction=nonorthogonal_correction,
+            dirichlet_mode=dirichlet_mode,
         )
+        self.dirichlet_mode = self._base.dirichlet_mode
+        # band: boundary cells held at the data; face: data on the boundary faces
+        # through the (diagonal, non-negative) closure alpha_n (g - u_c) / d.
+        self._band_dirichlet = self._base._band_dirichlet
+        self._face_dirichlet = self.bc_type == "dirichlet" and not self._band_dirichlet
         self.dt = float(dt)
         self.M = self._base.M
         self.cell_centers = self._base.cell_centers
@@ -173,12 +180,12 @@ class AFCMonotoneSolver:
         return umin, umax
 
     def _ambient_range(self, t):
-        """Ambient temperatures of Robin (``value / beta``) or radiative (``T_inf``) boundaries.
+        """Ambient temperatures of Robin (``value / beta``), radiative (``T_inf``) or face-Dirichlet (``g``) boundaries.
 
         By the comparison principle these bound the solution together with the
         initial data, so they enter the global and envelope bounds.
         """
-        if self.bc_type not in ("robin", "radiative"):
+        if self.bc_type not in ("robin", "radiative") and not self._face_dirichlet:
             return None
         from .boundary_conditions import parse_radiative, parse_robin
 
@@ -187,7 +194,9 @@ class AFCMonotoneSolver:
         if mid.size == 0:
             return None
         data = self._base._evaluate_bc(mid[:, 0], mid[:, 1], t, normals=nrm)
-        if self.bc_type == "robin":
+        if self._face_dirichlet:  # face data play the role of the ambient temperature
+            amb = np.broadcast_to(np.asarray(data, dtype=float), (mid.shape[0],))
+        elif self.bc_type == "robin":
             beta, value = parse_robin(data, mid.shape[0])
             amb = value[beta > 0] / beta[beta > 0]
         else:
@@ -195,13 +204,26 @@ class AFCMonotoneSolver:
         return (float(np.min(amb)), float(np.max(amb))) if amb.size else None
 
     def _boundary(self, t, temperature=None):
-        """``(B, b)`` closure for non-Dirichlet boundaries (``B`` diagonal, non-negative)."""
-        if self.bc_type == "dirichlet":
+        """``(B, b)`` closure for all but band Dirichlet boundaries (``B`` diagonal, non-negative)."""
+        if self._band_dirichlet:
             return None, np.zeros(self.M)
+        if self._face_dirichlet:  # constant matrix, built once; only the data g(t) change
+            fc = self._face_data()
+            return fc["B"], self._base._face_dirichlet_rhs(t, fc)
         # Diagonal closure (no tangential correction) keeps A_L + B an M-matrix.
         B, b = self._base._assemble_boundary_system(
             t, temperature=temperature if self.bc_type == "radiative" else None, tangential=False)
         return B.tocsr(), b
+
+    def _face_data(self):
+        """Face-Dirichlet closure without tangential correction (diagonal ``B``), cached."""
+        if getattr(self, "_face_closure", None) is None:
+            base, faces = self._base, self._base.boundary_faces
+            B, _ = base._assemble_boundary_system(0.0, tangential=False)
+            _, w, _, _, _ = base._boundary_face_relations(0.0, tangential=False)
+            self._face_closure = {"B": B.tocsr(), "w": w, "cells": faces["cells"], "lengths": faces["lengths"],
+                                  "midpoints": faces["midpoints"], "normals": faces["normals"]}
+        return self._face_closure
 
     def _global_bounds(self, u0, t0, t_end):
         """Physical maximum-principle bounds [m, M] for the global limiter.
@@ -217,7 +239,7 @@ class AFCMonotoneSolver:
         lo = float(np.min(u0))
         hi = float(np.max(u0))
         for t in (t0, 0.5 * (t0 + t_end), t_end):
-            if self.bc_type == "dirichlet":
+            if self._band_dirichlet:
                 bc = np.broadcast_to(np.asarray(self._base.bc_func(cx, cy, t), dtype=float), (self.M,))
                 lo = min(lo, float(bc[self._boundary_idx].min()) if self._boundary_idx.size else lo)
                 hi = max(hi, float(bc[self._boundary_idx].max()) if self._boundary_idx.size else hi)
@@ -273,7 +295,7 @@ class AFCMonotoneSolver:
         u = np.array(u0, dtype=float)
         nsteps = max(int(round((t_end - t0) / self.dt)), 1)
         dt = (t_end - t0) / nsteps
-        dirichlet = self.bc_type == "dirichlet"
+        dirichlet = self._band_dirichlet  # face Dirichlet goes through the boundary closure
         bidx = self._boundary_idx
 
         # Smoothness tolerance from the solution scale (range of the initial data).
@@ -287,6 +309,8 @@ class AFCMonotoneSolver:
         constant_lhs = self.bc_type in ("dirichlet", "neumann", "flux")
         if constant_lhs:
             sys_L = (mass + dt * self.A_L).tocsr()
+            if self._face_dirichlet:  # constant closure matrix
+                sys_L = (sys_L + dt * self._boundary(t0)[0]).tocsr()
             if dirichlet:
                 _apply_dirichlet_rows_csr(sys_L, bidx)
             factor = factorized(sys_L.tocsc())
@@ -365,6 +389,12 @@ class AFCMonotoneSolver:
                 if dirichlet:
                     umin[bidx] = np.minimum(umin[bidx], bc[bidx])
                     umax[bidx] = np.maximum(umax[bidx], bc[bidx])
+                elif self._face_dirichlet:
+                    # A boundary cell's neighbourhood includes its boundary faces' data.
+                    g = self._base._face_dirichlet_values(t_next, self._face_data())
+                    cells = self._base.boundary_faces["cells"]
+                    np.minimum.at(umin, cells, g)
+                    np.maximum.at(umax, cells, g)
 
             self.bound_history.append((t_next, float(np.min(umin)), float(np.max(umax))))
             u_iter = u_low  # low-order predictor
